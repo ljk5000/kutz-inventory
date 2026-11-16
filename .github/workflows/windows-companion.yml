@@ -44,14 +44,99 @@ jobs:
           [IO.File]::WriteAllText("$PWD/export/windows/SHA256SUMS.txt", "$hash  KutzUI-Companion-Windows-x64.zip`n")
       - uses: actions/upload-artifact@v4
         with:
-          name: KutzUI-Companion-Windows-x64
+          name: Windows-Companion-build-unsigned
           path: |
             export/windows/KutzUI-Companion-Windows-x64.zip
             export/windows/SHA256SUMS.txt
           if-no-files-found: error
-  release:
-    if: startsWith(github.ref, 'refs/tags/companion-v')
+  sign:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/companion-v')
     needs: build
+    runs-on: windows-latest
+    environment: release-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require release signing configuration
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_SIGNING_CERTIFICATE_PROFILE_NAME }}
+        run: |
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT_NAME', 'AZURE_SIGNING_CERTIFICATE_PROFILE_NAME')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing release-signing environment variable: $name"
+            }
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          name: Windows-Companion-build-unsigned
+          path: unsigned
+      - name: Extract tested build
+        shell: pwsh
+        run: Expand-Archive -LiteralPath unsigned/KutzUI-Companion-Windows-x64.zip -DestinationPath signed
+      - name: Azure login with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign both executables after all binary modifications
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          files: |
+            ${{ github.workspace }}\signed\KutzUI-Companion-Windows-x64\KutzUICompanion.exe
+            ${{ github.workspace }}\signed\KutzUI-Companion-Windows-x64\KutzInventoryUploader.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+      - name: Verify signatures and timestamps before packaging
+        shell: pwsh
+        run: |
+          $sdk = "${env:ProgramFiles(x86)}/Windows Kits/10/bin"
+          $signtool = Get-ChildItem -LiteralPath $sdk -Directory |
+            Where-Object Name -Match '^10\.' |
+            Sort-Object { [version]$_.Name } -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64/signtool.exe' } |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+          if (!$signtool) { throw 'Windows SDK signtool.exe is required for verification.' }
+          foreach ($file in @('KutzUICompanion.exe', 'KutzInventoryUploader.exe')) {
+            $path = Join-Path "$PWD/signed/KutzUI-Companion-Windows-x64" $file
+            & $signtool verify /pa /all /v $path
+            if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $file" }
+            $signature = Get-AuthenticodeSignature -LiteralPath $path
+            if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate) {
+              throw "A valid timestamped Authenticode signature is required: $file"
+            }
+            Write-Host "$file publisher: $($signature.SignerCertificate.Subject)"
+          }
+      - name: Package signed release and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release | Out-Null
+          Compress-Archive -Path signed/KutzUI-Companion-Windows-x64 -DestinationPath release/KutzUI-Companion-Windows-x64.zip
+          $hash = (Get-FileHash release/KutzUI-Companion-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText("$PWD/release/SHA256SUMS.txt", "$hash  KutzUI-Companion-Windows-x64.zip`n")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KutzUI-Companion-Windows-x64-signed
+          path: |
+            release/KutzUI-Companion-Windows-x64.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/companion-v')
+    needs: sign
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,7 +146,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: KutzUI-Companion-Windows-x64
+          name: KutzUI-Companion-Windows-x64-signed
           path: release
       - name: Attest the portable ZIP for public releases
         if: ${{ !github.event.repository.private }}

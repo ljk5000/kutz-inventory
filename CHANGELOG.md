@@ -1,5 +1,9 @@
 # Release notes
 
+## Unreleased
+
+- Require timestamped Authenticode signatures on both Windows executables for future tagged releases, using Azure Artifact Signing and GitHub OIDC. Verify the signatures before recreating the ZIP/checksum and attesting/publishing the final artifact. PR/main CI artifacts and local builds remain unsigned; existing releases are unchanged.
+
 ## KutzInventory 1.15.1
 
 - Prepare the addon for public distribution with complete recording, command, export and privacy documentation.
