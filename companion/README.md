@@ -78,7 +78,7 @@ To uninstall:
 
 ## Verify the download
 
-The executables are **not Authenticode signed**. The worker's original Node signature is deliberately removed before injecting project code; neither executable is re-signed. SmartScreen may warn about the publisher. Do not disable Windows security policy for this app.
+The tagged release workflow Authenticode-signs **both executables** with Azure Artifact Signing after building and smoke-testing them. It verifies their signatures and timestamps before creating the published ZIP. Earlier releases may be unsigned; local source builds and PR/main CI artifacts are unsigned. The worker's original Node signature is removed before injecting project code, so a signed release identifies this project's verified publisher, not Node's publisher. SmartScreen can still warn. Do not disable Windows security policy for this app.
 
 Download the ZIP and `SHA256SUMS.txt` from the same release and compare the complete hash in PowerShell:
 
@@ -86,6 +86,19 @@ Download the ZIP and `SHA256SUMS.txt` from the same release and compare the comp
 Get-FileHash .\KutzUI-Companion-Windows-x64.zip -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
 ```
+
+After extracting, check both executable signatures in PowerShell:
+
+```powershell
+'KutzUICompanion.exe', 'KutzInventoryUploader.exe' | ForEach-Object {
+  $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path '.\KutzUI-Companion-Windows-x64' $_)
+  $signature | Format-List Path, Status, StatusMessage
+  $signature.SignerCertificate | Format-List Subject, Issuer
+  $signature.TimeStamperCertificate | Format-List Subject, Issuer
+}
+```
+
+For a signed release, require `Status: Valid` for **each** file, a timestamp certificate, and the expected publisher. An individual Artifact Signing certificate uses the publisher's verified legal name, which can differ from the GitHub username or app name. Check it against that release's signing-job log (the verification step prints the certificate subject). You can also use Windows Properties → Digital Signatures, or Windows SDK `signtool verify /pa /all /v <exe>`. A signature establishes publisher identity and integrity, not that the app is free of malware or vulnerabilities. A missing/invalid signature is not a verified signed download.
 
 This checks against the published checksum, not for malware. For a release with a GitHub provenance attestation:
 
@@ -113,7 +126,13 @@ Choose a fresh build output directory each time. `tools/windows/build.js`:
 - Compiles `Companion.cs`, `Companion.Tray.cs`, `CredentialStore.cs`, generated assembly version, manifest (`asInvoker`) and icon with Framework `csc.exe` and Windows Forms/Drawing/Web.Extensions.
 - Copies `KutzInventory/`, `WINDOWS.md`, project/Node/Lucide licenses and writes `build.json` with version, OS/architecture, Node version and CI commit (null outside CI unless `GITHUB_SHA` is set).
 
-[windows-companion.yml](../.github/workflows/windows-companion.yml) uses a Windows hosted runner and Node 22, installs locked build tools, runs behavior/package tests, builds, and smoke-tests the real executables against a loopback fake server without Node on their PATH. It zips the folder and emits `SHA256SUMS.txt`. Matching `companion-vX.Y.Z` tags publish the ZIP/checksum as a GitHub prerelease and, in a public repository, a provenance attestation. The tag must match `tools/windows/package.json`; update its lockfile too. No signing or SBOM step exists.
+[windows-companion.yml](../.github/workflows/windows-companion.yml) uses a Windows hosted runner and Node 22, installs locked build tools, runs behavior/package tests, builds, and smoke-tests the real executables against a loopback fake server without Node on their PATH. PR/main builds produce an explicitly unsigned CI artifact. On matching `companion-vX.Y.Z` tags, a separate Windows job uses the `release-signing` environment and GitHub OIDC to log in to Azure without a stored client secret. Azure Artifact Signing signs exactly the two executables using SHA256 and an RFC 3161 timestamp from `http://timestamp.acs.microsoft.com`. Windows SDK `signtool` and PowerShell verify both signatures and require timestamps; only then is the ZIP recreated and its `SHA256SUMS.txt` calculated. The release job consumes only that signed artifact, publishes a prerelease and, in a public repository, a provenance attestation for the final ZIP. Signing/configuration/verification failures stop publication. The tag must match `tools/windows/package.json`; update its lockfile too. There is no SBOM step.
+
+### Maintainer signing configuration
+
+Preconfigure the GitHub environment **`release-signing`** to allow only `companion-v*` tags. Set these environment variables: `AZURE_CLIENT_ID` (managed identity Client ID, not Object/Principal ID), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT_NAME` and `AZURE_SIGNING_CERTIFICATE_PROFILE_NAME`. Use a Public Trust certificate profile and its account's regional endpoint (East US: `https://eus.codesigning.azure.net/`). The managed identity needs the Artifact Signing Certificate Profile Signer role; its federated credential must match the repository's actual GitHub OIDC subject for environment `release-signing`, issuer `https://token.actions.githubusercontent.com`, and audience `api://AzureADTokenExchange`. Newly created repositories can use owner/repository IDs in that subject; copying a legacy name-only example can fail. See [Azure's signing action](https://github.com/Azure/artifact-signing-action) and [GitHub's OIDC subject reference](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims).
+
+These identifiers are configuration, not private keys. The signing job alone receives `id-token: write`; regular builds have read-only repository permissions. Azure holds the signing keys. This setup must pass a real tagged build before a particular release can be claimed to be signed; changing the workflow does not sign existing assets.
 
 The smoke test exercises tray/window lifecycle, credential roundtrip with a synthetic target, worker exit and standalone identity/export/upload/pause. Live game/server acceptance and startup preferences still require a manual test. Full offline checks use Node 22+; CI uses 22.
 

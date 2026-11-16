@@ -65,7 +65,7 @@ node --test companion/companion.test.js tools/package_release.test.js
 
 `package_release.js <fresh-directory>` creates the legacy PowerShell/Node source distribution: addon plus explicit worker/helper files, no exports/credentials/dependencies. It does **not** build the native executables. See [the Companion source guide](../companion/README.md#source-only-legacy-launcher).
 
-The native portable package is built by `tools/windows/build.js` on Windows x64 with Node 22, .NET Framework's compiler and Windows SDK. `tools/windows/smoke.js` checks the resulting executables using synthetic credentials and local HTTP. [Build inputs, checksum verification, unsigned status and provenance](../companion/README.md#build-from-source) are documented in the Companion guide.
+The native portable package is built by `tools/windows/build.js` on Windows x64 with Node 22, .NET Framework's compiler and Windows SDK. `tools/windows/smoke.js` checks the resulting executables using synthetic credentials and local HTTP. Tagged releases then require Azure Artifact Signing and signature/timestamp verification for both executables before ZIP/checksum creation and publication; PR/main artifacts and local builds stay unsigned. [Build inputs, signing configuration, verification and provenance](../companion/README.md#build-from-source) are documented in the Companion guide.
 
 For addon packaging, `build_addon_zips.sh` uses the BigWigs packager commit pinned in `.github/workflows/release-addons.yml`. It needs Bash, jq, zip/unzip and a normal clone (`.git` directory; the upstream packager does not support a worktree's `.git` file). Use a disposable clone for that packaging step if developing in a worktree; do not edit a shared main checkout.
 

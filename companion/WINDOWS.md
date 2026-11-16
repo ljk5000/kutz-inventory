@@ -58,12 +58,14 @@ To remove the addon, close the game and delete `Interface/AddOns/KutzInventory`.
 
 ## Download integrity and source builds
 
-Both executables are **unsigned**, without Authenticode publisher signatures. SmartScreen may warn; no security policy is disabled by this package. In PowerShell, compare the entire SHA256 with the matching ZIP's line in the release's checksum file before extraction:
+The tagged release workflow now requires Azure Artifact Signing for both executables before publication. Earlier releases, including the original 0.12.1 build, may be unsigned; local source builds are unsigned. Check the actual download. SmartScreen can still warn; no security policy is disabled by this package. In PowerShell, compare the entire SHA256 with the matching ZIP's line in the release's checksum file before extraction:
 
 ```powershell
 Get-FileHash .\KutzUI-Companion-Windows-x64.zip -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
 ```
+
+After extraction, use `Get-AuthenticodeSignature` on **both** `KutzUICompanion.exe` and `KutzInventoryUploader.exe`, or inspect Windows Properties → Digital Signatures. For a signed release, require `Status: Valid`, a timestamp certificate and the expected publisher (the release signing-job log prints its certificate subject). Individual certificates display the verified legal name, which can differ from the app name or GitHub username. The [full verification guide](https://github.com/ljk5000/kutz-inventory/blob/main/companion/README.md#verify-the-download) includes commands. Missing/invalid signatures are not verified signed downloads; signatures do not prove absence of vulnerabilities.
 
 For a release with a GitHub build provenance attestation:
 
@@ -73,7 +75,7 @@ gh attestation verify KutzUI-Companion-Windows-x64.zip -R ljk5000/kutz-inventory
 
 Check the reported repo, workflow and source commit/tag. The release workflow attests tagged ZIPs in a public repository. An unavailable or failed verification is not a verified download. Checksums establish integrity against the published value and attestations establish origin; neither proves absence of malware or vulnerabilities.
 
-Release builds come from the [GitHub Actions workflow](https://github.com/ljk5000/kutz-inventory/blob/main/.github/workflows/windows-companion.yml) on matching `companion-vX.Y.Z` tags. It installs Node 22 and locked esbuild/postject on Windows, runs tests, builds and smoke-tests both executables, creates this ZIP/`SHA256SUMS.txt` and publishes a prerelease. `tools/windows/build.js` bundles the local worker/exporter modules, creates a Node SEA blob, removes the copied Node executable's signature with Windows SDK `signtool` and injects the blob with postject. Framework `csc.exe` compiles the three C# sources, generated version, `asInvoker` manifest and icon. It copies the addon, documentation, project/runtime/icon notices and `build.json`. There is no signing or SBOM step. Runtime patch/hosted toolchain versions are not fully fixed; byte-identical rebuilds are not promised.
+Release builds come from the [GitHub Actions workflow](https://github.com/ljk5000/kutz-inventory/blob/main/.github/workflows/windows-companion.yml) on matching `companion-vX.Y.Z` tags. It installs Node 22 and locked esbuild/postject on Windows, runs tests, builds and smoke-tests both executables. A separate tag-only job logs into Azure using GitHub OIDC and the `release-signing` environment, signs both executables with SHA256 and an RFC 3161 timestamp, and verifies the signatures/timestamps. Only then does it create the release ZIP/`SHA256SUMS.txt`; publication depends on that job succeeding. PR/main CI artifacts stay unsigned. `tools/windows/build.js` bundles the local worker/exporter modules, creates a Node SEA blob, removes the copied Node executable's signature with Windows SDK `signtool` and injects the blob with postject. Framework `csc.exe` compiles the three C# sources, generated version, `asInvoker` manifest and icon. It copies the addon, documentation, project/runtime/icon notices and `build.json`. Signing occurs after these modifications and uses the configured Artifact Signing regional endpoint and Microsoft's timestamp service (`http://timestamp.acs.microsoft.com`). Those are build-time contacts, not Companion runtime requests. There is no SBOM step. Runtime patch/hosted toolchain versions are not fully fixed; byte-identical rebuilds are not promised.
 
 To inspect/build your release tag on Windows x64, use Node 22, .NET Framework `csc.exe`, Windows SDK `signtool.exe` and the Node distribution's adjacent `LICENSE`. From the source root:
 
