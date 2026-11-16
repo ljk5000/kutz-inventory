@@ -2,9 +2,9 @@
 
 This is the uploader called KutzUploader on wow.cr0m.com. The portable package targets Windows 10/11 x64, includes its Node runtime, and uses Windows .NET Framework for the settings/tray UI. No separate Node/npm install or administrator access is needed. Addon and bundle versions are independent: `build.json` identifies the app build; `AddOns/KutzInventory/KutzInventory.toc` identifies the included addon.
 
-## Companion 0.12.1 · KutzInventory 1.15.1
+## Companion 0.12.2 · KutzInventory 1.15.1
 
-This public release bundles KutzInventory 1.15.1, with the existing applied Legacy Tree recording and guild-name loading protection. It refreshes installation, privacy and verification documentation and uses synthetic example identities. Companion 0.12.1 redacts bearer keys echoed in server errors before displaying or storing the error detail. The public release workflow produces ZIP provenance attestations; the executables remain unsigned.
+This release bundles KutzInventory 1.15.1 and adds mandatory timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
 
 ## Install and connect
 
