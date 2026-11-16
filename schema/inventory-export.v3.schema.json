@@ -1,0 +1,1946 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/inventory-export.v3.schema.json",
+  "title": "KutzInventory export 3.x",
+  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "exportedAt",
+    "uiHealth",
+    "prices",
+    "characters",
+    "warband",
+    "guildBanks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^3\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of this format. A reader that knows 3.0 can read any 3.x."
+    },
+    "exportedAt": {
+      "$ref": "#/$defs/isoTime"
+    },
+    "uiHealth": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/uiHealth"
+        }
+      ]
+    },
+    "prices": {
+      "type": "object",
+      "description": "Every item a vendor sells or buys that the characters have seen, keyed by item ID. Vendor observations only.",
+      "propertyNames": {
+        "pattern": "^[0-9]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/price"
+      }
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/character"
+      }
+    },
+    "warband": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "money",
+            "updated",
+            "updatedBy",
+            "containers"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "money": {
+              "$ref": "#/$defs/copperOrNull"
+            },
+            "updated": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "updatedBy": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Character key that last saw the warband bank."
+            },
+            "containers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/container"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "guildBanks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "money",
+          "updated",
+          "tabs"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Guild-Realm"
+          },
+          "money": {
+            "$ref": "#/$defs/copperOrNull"
+          },
+          "updated": {
+            "$ref": "#/$defs/isoTimeOrNull"
+          },
+          "tabs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "allOf": [
+                {
+                  "$ref": "#/$defs/container"
+                }
+              ],
+              "properties": {
+                "tab": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tab"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "raids": {
+      "type": "array",
+      "description": "Since 3.1.0 (absent before). The cr0m raids tracked in game with /kinv raid <string> that recorded at least one event, oldest scheduled start first. Account-wide: every character of the uploaded file(s) recorded into these. The addon does not verify the signature; receiving servers must verify authorization independently.",
+      "items": {
+        "$ref": "#/$defs/raid"
+      }
+    },
+    "observations": {
+      "$ref": "#/$defs/observations"
+    }
+  },
+  "$defs": {
+    "isoTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "isoTimeOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "copper": {
+      "type": "number",
+      "minimum": 0
+    },
+    "copperOrNull": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "numberOrNull": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "stringOrNull": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "open": {
+      "type": "object",
+      "description": "Open: copied from the game, keys may change between client builds."
+    },
+    "item": {
+      "type": "object",
+      "description": "One item stack. id is required; the rest is copied from the game (open).",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "link": {
+          "type": "string"
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ilvl": {
+          "type": "number"
+        },
+        "icon": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "bound": {
+          "type": "boolean"
+        },
+        "classID": {
+          "type": "integer"
+        },
+        "subClassID": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "subType": {
+          "type": "string"
+        },
+        "equipLoc": {
+          "type": "string"
+        }
+      }
+    },
+    "container": {
+      "type": "object",
+      "required": [
+        "location",
+        "bag",
+        "name",
+        "size",
+        "used",
+        "bagLink",
+        "updated",
+        "items"
+      ],
+      "properties": {
+        "location": {
+          "enum": [
+            "bags",
+            "bank",
+            "warband",
+            "guild"
+          ]
+        },
+        "bag": {
+          "type": "integer",
+          "description": "Game bag ID (-1 keyring, 0-5 bags, 6-14 bank tabs, 15-23 warband tabs, guild tab number)."
+        },
+        "name": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bagLink": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "updated": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ],
+          "description": "Raw from the addon for bags/bank (usually null); ISO time for guild tabs."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/$defs/item"
+              }
+            ],
+            "required": [
+              "slot"
+            ],
+            "properties": {
+              "slot": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "price": {
+      "type": "object",
+      "required": [
+        "vendorBuy",
+        "vendor",
+        "vendorSell"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "vendorBuy": {
+          "$ref": "#/$defs/copperOrNull",
+          "description": "What the cheapest vendor seen charges per item."
+        },
+        "vendor": {
+          "$ref": "#/$defs/stringOrNull",
+          "description": "That vendor's name."
+        },
+        "vendorSell": {
+          "$ref": "#/$defs/copperOrNull",
+          "description": "What a vendor pays you per item (the game's sell price)."
+        }
+      }
+    },
+    "character": {
+      "type": "object",
+      "required": [
+        "key",
+        "money",
+        "xp",
+        "xpMax",
+        "restedXP",
+        "itemLevel",
+        "itemLevelEquipped",
+        "lastSeen",
+        "location",
+        "updated",
+        "containers",
+        "equipped",
+        "professions",
+        "currencies",
+        "skills",
+        "spells",
+        "recipes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[^-]+-.+$",
+          "description": "Stable character id, unique per export. An existing Name-Realm key stays with its GUID (or the first login for a legacy entry without a GUID). A different GUID uses Name-Surname-Realm, or Name-<guid tail>-Realm without a surname; further collisions append the GUID and, if needed, a number before the realm. Treat this as opaque; never reconstruct it from name and realm."
+        },
+        "name": {
+          "type": "string"
+        },
+        "surname": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Forever surname. Absent when the character has none."
+        },
+        "realm": {
+          "type": "string"
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "class": {
+          "type": "string"
+        },
+        "classFile": {
+          "type": "string",
+          "pattern": "^[A-Z]+$"
+        },
+        "race": {
+          "type": "string"
+        },
+        "faction": {
+          "type": "string"
+        },
+        "sex": {
+          "type": "integer"
+        },
+        "guild": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "guid": {
+          "type": "string",
+          "pattern": "^Player-[0-9]+-[0-9A-F]+$",
+          "description": "Stable game GUID. Personal identifier: do not show publicly."
+        },
+        "money": {
+          "$ref": "#/$defs/copperOrNull"
+        },
+        "xp": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "xpMax": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "restedXP": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "itemLevel": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "itemLevelEquipped": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "lastSeen": {
+          "$ref": "#/$defs/isoTimeOrNull"
+        },
+        "recording": {
+          "type": "object",
+          "description": "Optional. What the last save captured (written by exporters that record logout checkpoints).",
+          "properties": {
+            "savedAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "checkpointAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "pending": {
+              "type": "array"
+            },
+            "failed": {
+              "type": "array"
+            },
+            "deferredStats": {
+              "type": "boolean"
+            }
+          }
+        },
+        "location": {
+          "description": "Last good location. Exact coordinates: treat as private.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "zone"
+              ],
+              "properties": {
+                "zone": {
+                  "type": "string"
+                },
+                "subzone": {
+                  "type": "string"
+                },
+                "mapID": {
+                  "type": "integer"
+                },
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "instance": {
+                  "enum": [
+                    "dungeon",
+                    "raid"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "trainers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array"
+          }
+        },
+        "updated": {
+          "type": "object",
+          "description": "Section name -> when it was last read. 3.x leaves out the sections it no longer exports (sheet, stats, talents, reputation, statistics, pvp).",
+          "additionalProperties": {
+            "$ref": "#/$defs/isoTimeOrNull"
+          },
+          "propertyNames": {
+            "not": {
+              "enum": [
+                "sheet",
+                "stats",
+                "talents",
+                "reputation",
+                "statistics",
+                "pvp"
+              ]
+            }
+          }
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/container"
+          }
+        },
+        "equipped": {
+          "type": "array",
+          "description": "What the character wears, as of the last save: enough to show gear between Battle.net refreshes (the API has the rest as of logout). Closed: name, quality, stats and durability come from the API or the item catalog.",
+          "items": {
+            "type": "object",
+            "required": [
+              "slotId",
+              "id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "slotId": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The game's inventory slot (GetInventorySlotInfo): 1 head ... 16 main hand, 17 off hand, 18 ranged."
+              },
+              "id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "link": {
+                "type": "string",
+                "description": "The item link as the game gives it (enchant and suffix IDs are inside)."
+              }
+            }
+          }
+        },
+        "professions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "currencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "spells": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "recipes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "profession",
+              "professionID",
+              "skill",
+              "max",
+              "updated",
+              "recipes"
+            ],
+            "properties": {
+              "profession": {
+                "type": "string"
+              },
+              "professionID": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "skill": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "max": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "updated": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "recipes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "recipeID",
+                    "reagents"
+                  ],
+                  "properties": {
+                    "recipeID": {
+                      "type": "integer"
+                    },
+                    "reagents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "itemID": {
+                            "type": "integer"
+                          },
+                          "quantity": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "unlearned": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "recipeID"
+                  ],
+                  "properties": {
+                    "recipeID": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "crafted": {
+          "$ref": "#/$defs/crafted"
+        },
+        "hearth": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Since 3.5.0: where the Hearthstone is set, the inn's town or district as the game names it (GetBindLocation), recorded by KutzInventory 1.11.0 or later. Absent until the game has said. Treat as private, like location."
+        },
+        "legacyTree": {
+          "$ref": "#/$defs/legacyTree"
+        }
+      }
+    },
+    "uiHealth": {
+      "type": "object",
+      "required": [
+        "updatedAt",
+        "game",
+        "session",
+        "findings",
+        "errors",
+        "blocked",
+        "memoryGrowth",
+        "history"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "updatedAt": {
+          "$ref": "#/$defs/isoTimeOrNull"
+        },
+        "game": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "startedAt",
+            "endedAt",
+            "minutes",
+            "fps",
+            "errors",
+            "errorsOmitted",
+            "blocked",
+            "hitches",
+            "hitchesInCombat",
+            "worstMs",
+            "addonsLoaded",
+            "cpuProfiling"
+          ],
+          "properties": {
+            "startedAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "endedAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "minutes": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "fps": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "errors": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "errorsOmitted": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "blocked": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "hitches": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "hitchesInCombat": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "worstMs": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "addonsLoaded": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "cpuProfiling": {
+              "type": "boolean"
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rank",
+              "tag",
+              "score",
+              "addon",
+              "text"
+            ],
+            "properties": {
+              "rank": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "tag": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "score": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "text": {
+                "$ref": "#/$defs/stringOrNull"
+              }
+            }
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "addon",
+              "count",
+              "message",
+              "throughBlizzard",
+              "firstAt",
+              "lastAt",
+              "inCombat",
+              "stack"
+            ],
+            "properties": {
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "count": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "message": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "throughBlizzard": {
+                "type": "boolean"
+              },
+              "firstAt": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "lastAt": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "inCombat": {
+                "type": "boolean"
+              },
+              "stack": {
+                "$ref": "#/$defs/stringOrNull"
+              }
+            }
+          }
+        },
+        "blocked": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "addon",
+              "kind",
+              "fn",
+              "count"
+            ],
+            "properties": {
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "kind": {
+                "enum": [
+                  "blocked",
+                  "forbidden",
+                  null
+                ]
+              },
+              "fn": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "count": {
+                "$ref": "#/$defs/numberOrNull"
+              }
+            }
+          }
+        },
+        "memoryGrowth": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "addon",
+              "kbPerHour",
+              "kb"
+            ],
+            "properties": {
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "kbPerHour": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "kb": {
+                "$ref": "#/$defs/numberOrNull"
+              }
+            }
+          }
+        },
+        "history": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startedAt",
+              "minutes",
+              "fps",
+              "errors",
+              "errorAddons",
+              "blocked",
+              "hitches",
+              "worstMs",
+              "cpuTop"
+            ],
+            "properties": {
+              "startedAt": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "minutes": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "fps": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "errors": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "errorAddons": {
+                "type": "string"
+              },
+              "blocked": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "hitches": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "worstMs": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "cpuTop": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "crafted": {
+      "type": "object",
+      "description": "Since 3.4.0: the items this character created, counted at each of its own \"You create\" lines in the loot chat (profession crafts and things like conjured food alike), so an item made and then sold, mailed, used or disenchanted before the next save still counts. Always on from KutzInventory 1.10.0; crafts before `since` are unknown. Absent when nothing has been counted.",
+      "required": [
+        "since",
+        "total",
+        "items",
+        "days"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/isoTimeOrNull",
+          "description": "When counting began on this character (the first craft seen by KutzInventory 1.10.0 or later)."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Items created since `since`. Not capped by `items` or `days`."
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 5000,
+          "description": "Per item, sorted by itemId. If there are more than 5000, the most recently made are kept.",
+          "items": {
+            "type": "object",
+            "required": [
+              "itemId",
+              "name",
+              "count",
+              "crafts",
+              "lastAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "itemId": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^|\\u0000-\\u001f]+$",
+                "description": "The item's name from its link, in the client's language."
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "Items made (a craft that makes 5 adds 5)."
+              },
+              "crafts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "How many times it was made (\"You create\" lines)."
+              },
+              "lastAt": {
+                "$ref": "#/$defs/isoTimeOrNull",
+                "description": "When it was last made."
+              }
+            }
+          }
+        },
+        "days": {
+          "type": "array",
+          "maxItems": 120,
+          "description": "Items made per day, sorted by date: the newest 120 days on which something was made. The date is the player's local date.",
+          "items": {
+            "type": "object",
+            "required": [
+              "date",
+              "items"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+              },
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5000,
+                "description": "Sorted by itemId.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "itemId",
+                    "count"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "itemId": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "raid": {
+      "type": "object",
+      "required": [
+        "string",
+        "events"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "string": {
+          "type": "string",
+          "pattern": "^KR1\\.[A-Z2-9]{6}\\.[0-9]{1,10}\\.[0-9]{1,12}\\.[A-Z0-9]{12}$",
+          "description": "The raid's string exactly as cr0m issued it: KR1.<CODE>.<instanceId>.<startUnix>.<sig>. CODE is the 6-character join code, instanceId 0 when unknown, startUnix the scheduled start in UTC seconds, sig cr0m's 12-character signature (the addon can't check it)."
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4000,
+          "items": {
+            "$ref": "#/$defs/raidEvent"
+          },
+          "description": "In time order. The addon records at most 2000 per raid; two saved files tracking the same raid are merged."
+        }
+      }
+    },
+    "raidEvent": {
+      "description": "One thing the addon saw while the raid was active: from 2 h before its start to 8 h after, in a party or raid group, inside an instance. t is when (UTC). Optional fields are left out when the client did not say.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Entered the instance (also after leaving it and coming back).",
+          "required": [
+            "t",
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "$ref": "#/$defs/isoTime"
+            },
+            "kind": {
+              "const": "start"
+            },
+            "instanceId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The instance ID the client reports (GetInstanceInfo), which may differ from the string's (journal vs map IDs)."
+            },
+            "instanceName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "The instance's name, in the client's language."
+            },
+            "instanceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "GetInstanceInfo's type: raid, party, scenario, ..."
+            },
+            "difficultyId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "GetInstanceInfo's difficulty ID."
+            },
+            "by": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "The recording character's stable characters[].key."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Left the instance (or the raid's window ended, or the group broke up). t is when the loading screen out started.",
+          "required": [
+            "t",
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "$ref": "#/$defs/isoTime"
+            },
+            "kind": {
+              "const": "end"
+            },
+            "instanceId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The instance it was in."
+            },
+            "instanceName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "Its name."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "ENCOUNTER_START: a boss pull.",
+          "required": [
+            "t",
+            "kind",
+            "encounterId"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "$ref": "#/$defs/isoTime"
+            },
+            "kind": {
+              "const": "encounter_start"
+            },
+            "encounterId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The encounter's ID."
+            },
+            "encounterName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "Its name, in the client's language."
+            },
+            "difficultyId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Difficulty ID."
+            },
+            "groupSize": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Group size the encounter was scaled to."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "ENCOUNTER_END: a kill (success) or a wipe.",
+          "required": [
+            "t",
+            "kind",
+            "encounterId",
+            "success"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "$ref": "#/$defs/isoTime"
+            },
+            "kind": {
+              "const": "encounter_end"
+            },
+            "encounterId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The encounter's ID."
+            },
+            "encounterName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "Its name, in the client's language."
+            },
+            "difficultyId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Difficulty ID."
+            },
+            "groupSize": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Group size."
+            },
+            "success": {
+              "type": "boolean",
+              "description": "true = killed."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "A loot line (CHAT_MSG_LOOT) for anyone in the group, including bonus rolls.",
+          "required": [
+            "t",
+            "kind",
+            "itemId",
+            "looter"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "$ref": "#/$defs/isoTime"
+            },
+            "kind": {
+              "const": "loot"
+            },
+            "itemId": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The item's ID."
+            },
+            "itemLink": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000,
+              "description": "The item link as the client printed it."
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many."
+            },
+            "looter": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "The recording character's stable characters[].key for its own loot; other group members use Name-Realm, else the name as the loot line wrote it."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "The group's members, at each start and after each encounter_end.",
+          "required": [
+            "t",
+            "kind",
+            "members"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "t": {
+              "$ref": "#/$defs/isoTime"
+            },
+            "kind": {
+              "const": "roster"
+            },
+            "members": {
+              "type": "array",
+              "maxItems": 40,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "description": "Each member, sorted: the recording character's stable characters[].key, other members as Name-Realm."
+            }
+          }
+        }
+      ]
+    },
+    "observations": {
+      "type": "object",
+      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Never gold (no coin loot, quest money or player money), chat, guild or anything about other players. Contains character identity and location history; consumers must apply their own access controls. Readers must ignore event types and fields they do not know.",
+      "required": [
+        "v",
+        "addon",
+        "events"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "description": "The observations section's own version."
+        },
+        "addon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "The KutzInventory version that recorded it (\"unknown\" when the saved file did not say)."
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5000,
+          "description": "Oldest first. At most 5000 and about 2 MB of JSON; the addon keeps 30 days.",
+          "items": {
+            "$ref": "#/$defs/observationEvent"
+          }
+        }
+      }
+    },
+    "observationWhere": {
+      "type": "object",
+      "description": "Where it happened. Fields the client did not give are left out.",
+      "additionalProperties": false,
+      "properties": {
+        "map": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "The map / instance ID: GetInstanceInfo() instanceID."
+        },
+        "uiMap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "C_Map.GetBestMapForUnit(\"player\")."
+        },
+        "itype": {
+          "type": "string",
+          "pattern": "^[a-z]{1,20}$",
+          "description": "Inside an instance only: GetInstanceInfo() instanceType (party, raid, scenario, pvp, arena, ...)."
+        },
+        "difficulty": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Inside an instance only: GetInstanceInfo() difficultyID."
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Outside instances only: map position 0-1, 4 decimal places."
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Outside instances only: map position 0-1, 4 decimal places."
+        }
+      }
+    },
+    "observationWho": {
+      "type": "object",
+      "description": "The recording character's level, class ID and faction, because drops and vendors depend on them, and (since 3.3.0) its own name and surname so cr0m can credit the character that found something. Never anyone else's name, and no realm, guild or GUID.",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "class": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Class ID (UnitClass third return)."
+        },
+        "faction": {
+          "enum": [
+            "Alliance",
+            "Horde",
+            "Neutral"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[^|\\n\\r\\t]{1,40}$",
+          "description": "Since 3.3.0: the recording character's own given name (UnitName(\"player\")). Never another player's."
+        },
+        "surname": {
+          "type": "string",
+          "pattern": "^[^|\\n\\r\\t]{1,40}$",
+          "description": "Since 3.3.0: the recording character's own surname (Forever's GetUnitName adds it), when it has one."
+        }
+      }
+    },
+    "observationLink": {
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^\\|cff[0-9a-f]{6}\\|Hitem:[0-9]{1,10}\\|h\\[[^\\]|]{1,120}\\]\\|h\\|r$",
+      "description": "Since 3.3.0: the item's link cut down to its quality colour, id and name, e.g. |cffa335ee|Hitem:19019|h[Thunderfury, Blessed Blade]|h|r. The id is the item's own. Lets cr0m name an item no database has yet. The rest of the game's link (the player's level, spec, enchants) is never kept."
+    },
+    "observationEvent": {
+      "description": "One recorded event. type picks the shape.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "A loot window was opened: one event per loot source in it. Every window counts as an open (a coins-only corpse has items []), so drops / opens is a rate. The same corpse or node opened twice is one event; skinning a corpse is a separate open of kind skin. Coins and currencies are never recorded.",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "src",
+            "where",
+            "who",
+            "items"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "where": {
+              "$ref": "#/$defs/observationWhere"
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
+            },
+            "type": {
+              "const": "loot"
+            },
+            "src": {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "mob",
+                    "boss",
+                    "chest",
+                    "fishing",
+                    "herb",
+                    "mine",
+                    "skin",
+                    "container",
+                    "quest",
+                    "vendor",
+                    "other"
+                  ],
+                  "description": "chest = any game object that isn't a herb or ore node; container = an item opened from the bags (src.item); quest = a quest reward container."
+                },
+                "npc": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "The creature's NPC ID, from its GUID."
+                },
+                "object": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "The game object's ID, from its GUID."
+                },
+                "item": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "kind container: the opened item's ID."
+                },
+                "guid": {
+                  "type": "string",
+                  "pattern": "^(Creature|Vehicle|GameObject)-[0-9]+-[0-9]+-[0-9]+-[0-9]+-[0-9]+-[0-9A-Fa-f]+$",
+                  "description": "Creatures and objects only, never a player, a player's pet or an item. Consumers may use it to deduplicate a kill across reports; server handling is outside this schema."
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "The creature's level when a unit showed it (the same NPC at two levels is two sources)."
+                },
+                "via": {
+                  "enum": [
+                    "slot",
+                    "target",
+                    "roll"
+                  ],
+                  "description": "How the source was known: slot = GetLootSourceInfo, target = the dead target when the window opened (no GetLootSourceInfo). roll (since 3.7.0) = not a loot window but the corpse's group-loot roll list (Need / Greed), recorded also when another player opened the corpse: it holds only the items at or above threshold, never coins or anything below it, so it is a partial open. Items a loot window of the same character showed are not repeated in it. Without a guid the corpse was not known (kind other)."
+                },
+                "encounter": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "Since 3.7.0: the DungeonEncounter id of a boss killed while recording (ENCOUNTER_END), on that boss's loot."
+                },
+                "threshold": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7,
+                  "description": "Since 3.7.0, via roll only: the group's loot threshold quality (0 poor ... 4 epic) when the list was rolled; the list is every item of that quality or better."
+                }
+              }
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 2000,
+              "description": "The items in the window from this source (empty: nothing but coins, or nothing).",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "n"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "Item ID."
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "Stack count."
+                  },
+                  "link": {
+                    "$ref": "#/$defs/observationLink"
+                  },
+                  "won": {
+                    "const": true,
+                    "description": "Since 3.7.0: the recording character won this item by roll (its own \"You won\" loot line). Absent otherwise; who else won is never recorded."
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "A quest was accepted or turned in. rewards only on turnin; never the money or XP. text (since 3.6.0) is the quest's own words.",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "act",
+            "quest",
+            "where",
+            "who"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "where": {
+              "$ref": "#/$defs/observationWhere"
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
+            },
+            "type": {
+              "const": "quest"
+            },
+            "act": {
+              "enum": [
+                "accept",
+                "turnin"
+              ]
+            },
+            "quest": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "Quest ID."
+            },
+            "npc": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The giver (accept) or ender (turnin), when it is a creature."
+            },
+            "object": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The giver or ender, when it is a game object."
+            },
+            "rewards": {
+              "type": "object",
+              "required": [
+                "items",
+                "choices"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "maxItems": 2000,
+                  "description": "The item rewards everyone gets.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "n"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
+                        "description": "Item ID."
+                      },
+                      "n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
+                        "description": "Stack count."
+                      },
+                      "link": {
+                        "$ref": "#/$defs/observationLink"
+                      }
+                    }
+                  }
+                },
+                "choices": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "description": "The choice rewards' item IDs."
+                },
+                "chose": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "The picked choice reward's item ID."
+                }
+              }
+            },
+            "text": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "description": "Since 3.6.0: the quest's text as the game showed it to the recording character, with that character's own name put back to $N. On accept: title, details, objectives. On turnin: title, progress, completion. Recorded once per quest and act while that event is kept, so most repeats carry none. Game text, nothing about the player.",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "The quest's name (GetTitleText)."
+                },
+                "details": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000,
+                  "description": "The description in the window that offers the quest (GetQuestText)."
+                },
+                "objectives": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000,
+                  "description": "The objectives summary under it (GetObjectiveText)."
+                },
+                "progress": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000,
+                  "description": "What the ender says before the quest is complete (GetProgressText)."
+                },
+                "completion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000,
+                  "description": "What the ender says in the reward window (GetRewardText)."
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "A vendor window was opened: what was for sale at that moment (not proof of the vendor's full or future stock).",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "npc",
+            "where",
+            "who",
+            "items"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "where": {
+              "$ref": "#/$defs/observationWhere"
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
+            },
+            "type": {
+              "const": "vendor"
+            },
+            "npc": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The vendor's NPC ID."
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "n",
+                  "price",
+                  "limited"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "Item ID."
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "How many come per purchase."
+                  },
+                  "link": {
+                    "$ref": "#/$defs/observationLink"
+                  },
+                  "price": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483647,
+                    "description": "Copper per n, as the vendor shows it (0 when it costs only items or currencies)."
+                  },
+                  "cost": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "description": "Item or currency costs per purchase.",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "item",
+                            "n"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "item": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 2147483647
+                            },
+                            "n": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 2147483647
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "currency",
+                            "n"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "currency": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 2147483647
+                            },
+                            "n": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 2147483647
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "limited": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2147483647
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The vendor's limited stock, or null when unlimited."
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "legacyTree": {
+      "type": "object",
+      "description": "Current character Legacy trait ranks and choice entries as applied (changes staged before Apply Changes are not recorded), read without loading Blizzard_LegacySystem. Optional until all three trees are available.",
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "trees",
+        "choices"
+      ],
+      "properties": {
+        "currency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "spent",
+            "max"
+          ],
+          "properties": {
+            "available": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "spent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            }
+          }
+        },
+        "trees": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[0-9]+$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "spentInTree",
+              "nodes"
+            ],
+            "properties": {
+              "spentInTree": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              "nodes": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[0-9]+$"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            }
+          }
+        },
+        "choices": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[0-9]+$"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      }
+    }
+  }
+}

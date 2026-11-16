@@ -1,0 +1,4 @@
+Read 1 file(s): 2 character(s), 8 item stacks.
+Wrote <dir>/inventory.json
+Prices: 3 items with vendor prices, 0 with AH data (/kinv ah at the auction house adds more).
+UI health: no monitor snapshot yet (open /kutz mon, or /reload with the Addon monitor module on).

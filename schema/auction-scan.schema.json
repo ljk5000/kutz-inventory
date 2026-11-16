@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/auction-scan.schema.json",
+  "title": "KutzInventory auction scan",
+  "description": "One auction house's prices from one scan, written by tools/inventory_export.js (auction-scans.json holds an array of these) and sent by the Companion to POST /api/wow/auctions. It names no character, GUID or account. Prices are unit prices in copper; times are ISO-8601 UTC. An item missing from `items` is unknown unless scope is all and the scan is complete; `p: []` means it was searched and none were listed.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "region",
+    "realm",
+    "house",
+    "startedAt",
+    "scannedAt",
+    "complete",
+    "houseSource",
+    "queued",
+    "answered",
+    "addon",
+    "items"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+      "description": "A reader that knows 1.0 can read any 1.x."
+    },
+    "region": {
+      "enum": [
+        "us",
+        "eu",
+        "kr",
+        "tw",
+        "cn"
+      ],
+      "description": "From GetCurrentRegion(); \"us\" when the game did not say."
+    },
+    "realm": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exactly as GetRealmName() returns it (case-sensitive), e.g. \"Example Realm\"."
+    },
+    "house": {
+      "enum": [
+        "alliance",
+        "horde",
+        "neutral"
+      ]
+    },
+    "houseSource": {
+      "enum": [
+        "npc",
+        "zone",
+        "player"
+      ],
+      "description": "How `house` was decided: the auctioneer's own faction, a neutral town (Booty Bay, Gadgetzan, Everlook), or only the scanning character's faction (low confidence)."
+    },
+    "startedAt": {
+      "$ref": "#/$defs/isoTime"
+    },
+    "scannedAt": {
+      "$ref": "#/$defs/isoTime",
+      "description": "When the scan finished. A newer scannedAt for the same house replaces the older document."
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "True only when every queued item answered (and the scan was not stopped)."
+    },
+    "method": {
+      "enum": [
+        "full",
+        "search"
+      ],
+      "description": "full: the whole-AH download (ReplicateItems). search: one search per item. Left out when unknown: prices recorded before KutzInventory 1.3.0 and moved to this house (those documents also have houseSource \"player\" and leave out empty readings)."
+    },
+    "queued": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of item IDs the scan meant to read: every listed item in a whole-house scan, or crafting materials/products minus unlimited vendor stock in a search."
+    },
+    "answered": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Items that got an answer (listed or none listed)."
+    },
+    "addon": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "KutzInventory"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "items": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[1-9][0-9]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "scope": {
+      "enum": [
+        "all",
+        "crafting"
+      ],
+      "description": "all: the whole-AH download, every item (/kinv ah). Only when complete is true, an item missing from `items` was not listed at scannedAt and a reader may clear its older price. Incomplete scans leave absent items unknown. crafting: only the uploader's crafting items; a missing item is unknown. Absent (1.0.x documents): treat as crafting."
+    }
+  },
+  "$defs": {
+    "isoTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "p",
+        "q",
+        "n",
+        "t"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "supply": {
+          "type": "object",
+          "required": ["lots", "complete"],
+          "additionalProperties": false,
+          "properties": {
+            "complete": { "type": "boolean" },
+            "lots": {
+              "type": "array",
+              "maxItems": 50000,
+              "items": {
+                "type": "array", "minItems": 4, "maxItems": 4,
+                "prefixItems": [
+                  { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                  { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+                  { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+                  { "type": "string", "maxLength": 512, "pattern": "^(?:|unknown|item:[0-9:-]+)$" }
+                ]
+              }
+            }
+          },
+          "description": "1.2: current buyout stacks [exact stack copper, units per stack, identical stack count, item variant]. Empty variant is fungible; gear keeps its item string or unknown. Complete means every eligible buyout was read; no sellers or history."
+        },
+        "p": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Up to the 3 lowest unit prices in copper, cheapest first (positive integers). Empty: searched and none listed. Always the same length as q."
+        },
+        "q": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "The quantity at each of those prices, same order and length as p."
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Result rows seen: listings for a full download, price rows for a search. A rough depth signal, not a count of auctions."
+        },
+        "t": {
+          "$ref": "#/$defs/isoTime",
+          "description": "When this item was read. Receivers should validate timestamps against their own clock and acceptance policy."
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The item's class ID (C_Item.GetItemInfoInstant), which the game's AH categories are built from. Optional."
+        },
+        "s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The item's subclass ID within c. Optional."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[^|\u0000-\u001f]+$",
+          "description": "The item's name as the game showed it in the whole-AH download (plain text). Optional; never a seller's name."
+        },
+        "e": {
+          "type": "string",
+          "pattern": "^INVTYPE_[A-Z0-9_]+$",
+          "description": "For gear: the item's equip slot token from C_Item.GetItemInfoInstant (e.g. INVTYPE_HEAD, INVTYPE_CHEST), which the game's AH uses to split Armor by slot. Optional; absent for items that are not worn."
+        }
+      }
+    }
+  }
+}

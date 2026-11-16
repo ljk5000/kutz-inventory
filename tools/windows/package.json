@@ -1,0 +1,12 @@
+{
+  "name": "kutz-companion-windows-build",
+  "private": true,
+  "version": "0.12.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "postject": "1.0.0-alpha.6"
+  }
+}

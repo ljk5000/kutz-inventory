@@ -1,0 +1,1214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/inventory-export.v1.schema.json",
+  "title": "KutzInventory export, version 1.x (superseded by 2.0.0)",
+  "description": "The JSON that tools/inventory_export.js writes (export/inventory.json) and that the Companion uploads to cr0m. Version 1.x. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 1.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "exportedAt",
+    "uiHealth",
+    "prices",
+    "characters",
+    "warband",
+    "guildBanks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of this format. A reader that knows 1.0 can read any 1.x."
+    },
+    "exportedAt": {
+      "$ref": "#/$defs/isoTime"
+    },
+    "uiHealth": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/uiHealth"
+        }
+      ]
+    },
+    "prices": {
+      "type": "object",
+      "description": "Every item a recipe uses or makes, keyed by item ID.",
+      "propertyNames": {
+        "pattern": "^[0-9]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/price"
+      }
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/character"
+      }
+    },
+    "warband": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "money",
+            "updated",
+            "updatedBy",
+            "containers"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "money": {
+              "$ref": "#/$defs/copperOrNull"
+            },
+            "updated": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "updatedBy": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Character key that last saw the warband bank."
+            },
+            "containers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/container"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "guildBanks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "money",
+          "updated",
+          "tabs"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Guild-Realm"
+          },
+          "money": {
+            "$ref": "#/$defs/copperOrNull"
+          },
+          "updated": {
+            "$ref": "#/$defs/isoTimeOrNull"
+          },
+          "tabs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "allOf": [
+                {
+                  "$ref": "#/$defs/container"
+                }
+              ],
+              "properties": {
+                "tab": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tab"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "isoTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "isoTimeOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "copper": {
+      "type": "number",
+      "minimum": 0
+    },
+    "copperOrNull": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "signedCopperOrNull": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "May be negative (a loss)."
+    },
+    "numberOrNull": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "stringOrNull": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "open": {
+      "type": "object",
+      "description": "Open: copied from the game, keys may change between client builds."
+    },
+    "item": {
+      "type": "object",
+      "description": "One item stack. id is required; the rest is copied from the game (open).",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "link": {
+          "type": "string"
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ilvl": {
+          "type": "number"
+        },
+        "icon": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "bound": {
+          "type": "boolean"
+        },
+        "classID": {
+          "type": "integer"
+        },
+        "subClassID": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "subType": {
+          "type": "string"
+        },
+        "equipLoc": {
+          "type": "string"
+        }
+      }
+    },
+    "container": {
+      "type": "object",
+      "required": [
+        "location",
+        "bag",
+        "name",
+        "size",
+        "used",
+        "bagLink",
+        "updated",
+        "items"
+      ],
+      "properties": {
+        "location": {
+          "enum": [
+            "bags",
+            "bank",
+            "warband",
+            "guild"
+          ]
+        },
+        "bag": {
+          "type": "integer",
+          "description": "Game bag ID (-1 keyring, 0-5 bags, 6-14 bank tabs, 15-23 warband tabs, guild tab number)."
+        },
+        "name": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bagLink": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "updated": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ],
+          "description": "Raw from the addon for bags/bank (usually null); ISO time for guild tabs."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/$defs/item"
+              }
+            ],
+            "required": [
+              "slot"
+            ],
+            "properties": {
+              "slot": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "price": {
+      "type": "object",
+      "required": [
+        "vendorBuy",
+        "vendor",
+        "vendorSell",
+        "ah",
+        "buy",
+        "buyFrom"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "vendorBuy": {
+          "$ref": "#/$defs/copperOrNull"
+        },
+        "vendor": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "vendorSell": {
+          "$ref": "#/$defs/copperOrNull"
+        },
+        "ah": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "lowest",
+                "quantities",
+                "listings",
+                "scanned",
+                "avg3"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "lowest": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/copper"
+                  },
+                  "maxItems": 3
+                },
+                "quantities": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "listings": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "scanned": {
+                  "$ref": "#/$defs/isoTimeOrNull"
+                },
+                "avg3": {
+                  "$ref": "#/$defs/copperOrNull"
+                }
+              }
+            }
+          ]
+        },
+        "buy": {
+          "$ref": "#/$defs/copperOrNull"
+        },
+        "buyFrom": {
+          "enum": [
+            "vendor",
+            "ah",
+            null
+          ]
+        }
+      }
+    },
+    "character": {
+      "type": "object",
+      "required": [
+        "key",
+        "money",
+        "xp",
+        "xpMax",
+        "restedXP",
+        "itemLevel",
+        "itemLevelEquipped",
+        "lastSeen",
+        "location",
+        "updated",
+        "containers",
+        "equipped",
+        "stats",
+        "sheet",
+        "talents",
+        "professions",
+        "currencies",
+        "skills",
+        "spells",
+        "reputation",
+        "statistics",
+        "achievementPoints",
+        "pvp",
+        "recipes",
+        "crafting"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[^-]+-.+$",
+          "description": "Name-Realm. Unique per export."
+        },
+        "name": {
+          "type": "string"
+        },
+        "surname": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Forever surname. Absent when the character has none."
+        },
+        "realm": {
+          "type": "string"
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "class": {
+          "type": "string"
+        },
+        "classFile": {
+          "type": "string",
+          "pattern": "^[A-Z]+$"
+        },
+        "race": {
+          "type": "string"
+        },
+        "faction": {
+          "type": "string"
+        },
+        "sex": {
+          "type": "integer"
+        },
+        "spec": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "guild": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "guid": {
+          "type": "string",
+          "pattern": "^Player-[0-9]+-[0-9A-F]+$",
+          "description": "Stable game GUID. Personal identifier: do not show publicly."
+        },
+        "money": {
+          "$ref": "#/$defs/copperOrNull"
+        },
+        "xp": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "xpMax": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "restedXP": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "itemLevel": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "itemLevelEquipped": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "lastSeen": {
+          "$ref": "#/$defs/isoTimeOrNull"
+        },
+        "recording": {
+          "type": "object",
+          "description": "Optional. What the last save captured (written by exporters that record logout checkpoints).",
+          "properties": {
+            "savedAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "checkpointAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "pending": {
+              "type": "array"
+            },
+            "failed": {
+              "type": "array"
+            },
+            "deferredStats": {
+              "type": "boolean"
+            }
+          }
+        },
+        "location": {
+          "description": "Last good location. Exact coordinates: treat as private.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "zone"
+              ],
+              "properties": {
+                "zone": {
+                  "type": "string"
+                },
+                "subzone": {
+                  "type": "string"
+                },
+                "mapID": {
+                  "type": "integer"
+                },
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "instance": {
+                  "enum": [
+                    "dungeon",
+                    "raid"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "trainers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array"
+          }
+        },
+        "updated": {
+          "type": "object",
+          "description": "Section name -> when it was last read.",
+          "additionalProperties": {
+            "$ref": "#/$defs/isoTimeOrNull"
+          }
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/container"
+          }
+        },
+        "equipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/$defs/item"
+              }
+            ],
+            "required": [
+              "slotId"
+            ],
+            "properties": {
+              "slotId": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "slot": {
+                "type": "string"
+              },
+              "durability": {
+                "type": "number"
+              },
+              "durabilityMax": {
+                "type": "number"
+              },
+              "stats": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "stats": {
+          "$ref": "#/$defs/open"
+        },
+        "sheet": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/open"
+            }
+          ]
+        },
+        "talents": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/open"
+            }
+          ]
+        },
+        "professions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "currencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "spells": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "reputation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "statistics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/open"
+          }
+        },
+        "achievementPoints": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "pvp": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/open"
+            }
+          ]
+        },
+        "recipes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "profession",
+              "professionID",
+              "skill",
+              "max",
+              "updated",
+              "recipes"
+            ],
+            "properties": {
+              "profession": {
+                "type": "string"
+              },
+              "professionID": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "skill": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "max": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "updated": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "recipes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "recipeID",
+                    "reagents"
+                  ],
+                  "properties": {
+                    "recipeID": {
+                      "type": "integer"
+                    },
+                    "reagents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "itemID": {
+                            "type": "integer"
+                          },
+                          "quantity": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "unlearned": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "recipeID"
+                  ],
+                  "properties": {
+                    "recipeID": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "crafting": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/craftingProfession"
+          }
+        }
+      }
+    },
+    "craftingProfession": {
+      "type": "object",
+      "required": [
+        "profession",
+        "skill",
+        "max",
+        "recipes",
+        "levelling"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "profession": {
+          "type": "string"
+        },
+        "skill": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "max": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "recipes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "recipeID",
+              "name",
+              "learned",
+              "difficulty",
+              "skillUps",
+              "outputItemID",
+              "outputName",
+              "makes",
+              "materialCost",
+              "materialsPriced",
+              "materials",
+              "vendorSellValue",
+              "vendorProfit",
+              "ahValue",
+              "ahProfit"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "recipeID": {
+                "type": "integer"
+              },
+              "name": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "learned": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "difficulty": {
+                "enum": [
+                  "orange",
+                  "yellow",
+                  "green",
+                  "gray",
+                  null
+                ]
+              },
+              "skillUps": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "outputItemID": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "outputName": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "makes": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "materialCost": {
+                "$ref": "#/$defs/copperOrNull"
+              },
+              "materialsPriced": {
+                "type": "boolean"
+              },
+              "materials": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "itemID",
+                    "name",
+                    "quantity",
+                    "unitPrice",
+                    "from",
+                    "total"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "itemID": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "$ref": "#/$defs/stringOrNull"
+                    },
+                    "quantity": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "unitPrice": {
+                      "$ref": "#/$defs/copperOrNull"
+                    },
+                    "from": {
+                      "enum": [
+                        "vendor",
+                        "ah",
+                        null
+                      ]
+                    },
+                    "total": {
+                      "$ref": "#/$defs/copperOrNull"
+                    }
+                  }
+                }
+              },
+              "vendorSellValue": {
+                "$ref": "#/$defs/copperOrNull"
+              },
+              "vendorProfit": {
+                "$ref": "#/$defs/signedCopperOrNull"
+              },
+              "ahValue": {
+                "$ref": "#/$defs/copperOrNull"
+              },
+              "ahProfit": {
+                "$ref": "#/$defs/signedCopperOrNull"
+              }
+            }
+          }
+        },
+        "levelling": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "recipeID",
+              "name",
+              "difficulty",
+              "materialCost",
+              "netCostPerCraft"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "recipeID": {
+                "type": "integer"
+              },
+              "name": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "difficulty": {
+                "enum": [
+                  "orange",
+                  "yellow",
+                  "green"
+                ]
+              },
+              "materialCost": {
+                "$ref": "#/$defs/copper"
+              },
+              "netCostPerCraft": {
+                "type": "number",
+                "description": "May be negative (the craft makes money)."
+              }
+            }
+          }
+        }
+      }
+    },
+    "uiHealth": {
+      "type": "object",
+      "required": [
+        "updatedAt",
+        "game",
+        "session",
+        "findings",
+        "errors",
+        "blocked",
+        "memoryGrowth",
+        "history"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "updatedAt": {
+          "$ref": "#/$defs/isoTimeOrNull"
+        },
+        "game": {
+          "$ref": "#/$defs/stringOrNull"
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "startedAt",
+            "endedAt",
+            "minutes",
+            "fps",
+            "errors",
+            "errorsOmitted",
+            "blocked",
+            "hitches",
+            "hitchesInCombat",
+            "worstMs",
+            "addonsLoaded",
+            "cpuProfiling"
+          ],
+          "properties": {
+            "startedAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "endedAt": {
+              "$ref": "#/$defs/isoTimeOrNull"
+            },
+            "minutes": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "fps": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "errors": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "errorsOmitted": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "blocked": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "hitches": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "hitchesInCombat": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "worstMs": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "addonsLoaded": {
+              "$ref": "#/$defs/numberOrNull"
+            },
+            "cpuProfiling": {
+              "type": "boolean"
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rank",
+              "tag",
+              "score",
+              "addon",
+              "text"
+            ],
+            "properties": {
+              "rank": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "tag": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "score": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "text": {
+                "$ref": "#/$defs/stringOrNull"
+              }
+            }
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "addon",
+              "count",
+              "message",
+              "throughBlizzard",
+              "firstAt",
+              "lastAt",
+              "inCombat",
+              "stack"
+            ],
+            "properties": {
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "count": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "message": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "throughBlizzard": {
+                "type": "boolean"
+              },
+              "firstAt": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "lastAt": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "inCombat": {
+                "type": "boolean"
+              },
+              "stack": {
+                "$ref": "#/$defs/stringOrNull"
+              }
+            }
+          }
+        },
+        "blocked": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "addon",
+              "kind",
+              "fn",
+              "count"
+            ],
+            "properties": {
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "kind": {
+                "enum": [
+                  "blocked",
+                  "forbidden",
+                  null
+                ]
+              },
+              "fn": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "count": {
+                "$ref": "#/$defs/numberOrNull"
+              }
+            }
+          }
+        },
+        "memoryGrowth": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "addon",
+              "kbPerHour",
+              "kb"
+            ],
+            "properties": {
+              "addon": {
+                "$ref": "#/$defs/stringOrNull"
+              },
+              "kbPerHour": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "kb": {
+                "$ref": "#/$defs/numberOrNull"
+              }
+            }
+          }
+        },
+        "history": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startedAt",
+              "minutes",
+              "fps",
+              "errors",
+              "errorAddons",
+              "blocked",
+              "hitches",
+              "worstMs",
+              "cpuTop"
+            ],
+            "properties": {
+              "startedAt": {
+                "$ref": "#/$defs/isoTimeOrNull"
+              },
+              "minutes": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "fps": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "errors": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "errorAddons": {
+                "type": "string"
+              },
+              "blocked": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "hitches": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "worstMs": {
+                "$ref": "#/$defs/numberOrNull"
+              },
+              "cpuTop": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+Read 1 file(s): 1 character(s), 1 item stacks.
+Wrote <dir>/inventory.json
+Prices: 2 items with vendor prices, 3 with AH data (/kinv ah at the auction house adds more).
+AH scan of Realm (horde): 2 items, partial, 2023-11-14T22:16:40.000Z.
+Wrote <dir>/auction-scans.json
+
+Tester - Tailoring 10/75
+  level with: Brown Linen Vest (orange)  net 0g 0s 7c per craft
+UI health: 1 finding(s), 2 error(s), 1 blocked, as of 2023-11-14T22:13:20.000Z.

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "region": "us",
+  "realm": "Example Realm",
+  "house": "alliance",
+  "startedAt": "2025-11-11T11:59:55.000Z",
+  "scannedAt": "2025-11-11T12:00:10.000Z",
+  "complete": false,
+  "method": "search",
+  "houseSource": "npc",
+  "queued": 4,
+  "answered": 3,
+  "addon": {
+    "name": "KutzInventory",
+    "version": "1.3.0"
+  },
+  "items": {
+    "2318": {
+      "p": [
+        55
+      ],
+      "q": [
+        3
+      ],
+      "n": 1,
+      "t": "2025-11-11T12:00:02.000Z"
+    },
+    "2589": {
+      "p": [
+        18,
+        19,
+        20
+      ],
+      "q": [
+        40,
+        12,
+        200
+      ],
+      "n": 7,
+      "t": "2025-11-11T12:00:00.000Z"
+    },
+    "2996": {
+      "p": [],
+      "q": [],
+      "n": 0,
+      "t": "2025-11-11T12:00:01.000Z"
+    }
+  }
+}

@@ -1,0 +1,172 @@
+{
+ "schemaVersion": "3.8.0",
+ "exportedAt": "<exportedAt>",
+ "uiHealth": {
+  "updatedAt": "2023-11-14T22:13:20.000Z",
+  "game": "1.60.1",
+  "session": {
+   "startedAt": "2023-11-14T22:13:20.000Z",
+   "endedAt": "2023-11-14T22:23:20.000Z",
+   "minutes": 10,
+   "fps": 60,
+   "errors": 2,
+   "errorsOmitted": 0,
+   "blocked": 1,
+   "hitches": 0,
+   "hitchesInCombat": 0,
+   "worstMs": 0,
+   "addonsLoaded": 3,
+   "cpuProfiling": false
+  },
+  "findings": [
+   {
+    "rank": 1,
+    "tag": "BLOCKED",
+    "score": 801,
+    "addon": "Foo",
+    "text": "Foo: 1 blocked"
+   }
+  ],
+  "errors": [
+   {
+    "addon": "Foo",
+    "count": 2,
+    "message": "boom",
+    "throughBlizzard": false,
+    "firstAt": "2023-11-14T22:13:20.000Z",
+    "lastAt": "2023-11-14T22:21:40.000Z",
+    "inCombat": true,
+    "stack": "Foo.lua:1"
+   }
+  ],
+  "blocked": [
+   {
+    "addon": "Foo",
+    "kind": "blocked",
+    "fn": "TargetUnit",
+    "count": 1
+   }
+  ],
+  "memoryGrowth": [
+   {
+    "addon": "Foo",
+    "kbPerHour": 800,
+    "kb": 12000
+   }
+  ],
+  "history": [
+   {
+    "startedAt": "2023-07-22T04:26:40.000Z",
+    "minutes": 30,
+    "fps": 80,
+    "errors": 0,
+    "errorAddons": "",
+    "blocked": 0,
+    "hitches": 1,
+    "worstMs": 110,
+    "cpuTop": ""
+   }
+  ]
+ },
+ "prices": {
+  "2568": {
+   "vendorBuy": null,
+   "vendor": null,
+   "vendorSell": 20
+  },
+  "2996": {
+   "vendorBuy": 40,
+   "vendor": "Someone",
+   "vendorSell": null
+  }
+ },
+ "characters": [
+  {
+   "key": "Tester-Realm",
+   "name": "Tester",
+   "realm": "Realm",
+   "level": 12,
+   "class": "Warrior",
+   "classFile": "WARRIOR",
+   "race": "Human",
+   "faction": "Alliance",
+   "sex": 2,
+   "guid": "Player-1-00ABCDEF",
+   "money": 12345,
+   "xp": 10,
+   "xpMax": 100,
+   "restedXP": null,
+   "itemLevel": null,
+   "itemLevelEquipped": null,
+   "lastSeen": "2023-11-14T22:13:20.000Z",
+   "location": {
+    "zone": "Elwynn Forest",
+    "subzone": "Goldshire",
+    "mapID": 1429,
+    "x": 42.1,
+    "y": 65.3
+   },
+   "updated": {
+    "bags": "2023-11-14T22:13:20.000Z"
+   },
+   "containers": [
+    {
+     "location": "bags",
+     "bag": 0,
+     "name": "Backpack",
+     "size": 16,
+     "used": 1,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2589,
+       "count": 5,
+       "name": "Linen Cloth",
+       "quality": 1
+      }
+     ]
+    }
+   ],
+   "equipped": [
+    {
+     "slotId": 16,
+     "id": 25
+    }
+   ],
+   "professions": [],
+   "currencies": [],
+   "skills": [],
+   "spells": [],
+   "recipes": [
+    {
+     "profession": "Tailoring",
+     "professionID": 197,
+     "skill": 10,
+     "max": 75,
+     "updated": "2023-11-14T22:13:20.000Z",
+     "recipes": [
+      {
+       "recipeID": 2385,
+       "name": "Brown Linen Vest",
+       "difficulty": 0,
+       "outputItemID": 2568,
+       "makesMin": 1,
+       "reagents": [
+        {
+         "itemID": 2996,
+         "name": "Bolt of Linen Cloth",
+         "quantity": 1
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "warband": null,
+ "guildBanks": [],
+ "raids": []
+}

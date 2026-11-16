@@ -1,0 +1,23 @@
+# Other people's addons saved for reference - not mine to republish
+References/
+
+# offline test tooling dependencies (npm ci in tools/). The lockfile is committed so CI installs the pinned versions.
+node_modules/
+
+# screenshots and scratch files
+*.png
+*.jpg
+*.log
+*.tmp
+
+# ...but keep the example screenshots in docs/
+!docs/screenshots/*.png
+!docs/screenshots/*.jpg
+!companion/Assets/retriever.png
+
+# KutzInventory exports (your own character data)
+export/
+*.pending.json
+
+# the taskbar shortcut holds this PC's paths
+*.lnk

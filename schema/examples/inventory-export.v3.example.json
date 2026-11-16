@@ -1,0 +1,721 @@
+{
+ "schemaVersion": "3.8.0",
+ "exportedAt": "2025-11-12T00:01:00.000Z",
+ "uiHealth": null,
+ "prices": {
+  "2320": {
+   "vendorBuy": 10,
+   "vendor": "Some Trader",
+   "vendorSell": null
+  },
+  "2568": {
+   "vendorBuy": null,
+   "vendor": null,
+   "vendorSell": 18
+  },
+  "2589": {
+   "vendorBuy": null,
+   "vendor": null,
+   "vendorSell": 13
+  }
+ },
+ "characters": [
+  {
+   "key": "Examplemage-Example Realm",
+   "name": "Examplemage",
+   "surname": "Examplesurname",
+   "realm": "Example Realm",
+   "level": 24,
+   "class": "Mage",
+   "classFile": "MAGE",
+   "race": "Gnome",
+   "faction": "Alliance",
+   "sex": 3,
+   "guild": "Example Guild",
+   "guid": "Player-4395-0A1B2C3D",
+   "money": 418275,
+   "xp": 6120,
+   "xpMax": 13900,
+   "restedXP": 2400,
+   "itemLevel": 21.4375,
+   "itemLevelEquipped": 21.0625,
+   "lastSeen": "2025-11-12T00:00:00.000Z",
+   "location": {
+    "zone": "Wetlands",
+    "subzone": "Menethil Harbor",
+    "mapID": 1437,
+    "x": 10.8,
+    "y": 59.6
+   },
+   "trainers": {
+    "Tailoring": [
+     {
+      "name": "Red Linen Robe",
+      "skillReq": 40,
+      "cost": 200,
+      "reqLevel": 8,
+      "status": "used"
+     }
+    ]
+   },
+   "updated": {
+    "bags": "2025-11-12T00:00:00.000Z",
+    "bank": "2025-11-11T00:00:00.000Z",
+    "equipped": "2025-11-12T00:00:00.000Z",
+    "money": "2025-11-12T00:00:00.000Z",
+    "location": "2025-11-12T00:00:00.000Z",
+    "professions": "2025-11-11T23:50:00.000Z",
+    "currencies": "2025-11-11T23:50:00.000Z",
+    "skills": "2025-11-11T23:50:00.000Z",
+    "spells": "2025-11-11T23:50:00.000Z",
+    "recipes": "2025-11-11T22:26:40.000Z",
+    "trainers": "2025-11-10T18:40:00.000Z"
+   },
+   "containers": [
+    {
+     "location": "bags",
+     "bag": 0,
+     "name": "Backpack",
+     "size": 16,
+     "used": 3,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2589,
+       "count": 14,
+       "name": "Linen Cloth",
+       "quality": 1,
+       "icon": 132889,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      },
+      {
+       "slot": 2,
+       "id": 4306,
+       "count": 6,
+       "name": "Silk Cloth",
+       "quality": 1,
+       "icon": 132905,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      },
+      {
+       "slot": 3,
+       "id": 2455,
+       "count": 4,
+       "name": "Minor Mana Potion",
+       "quality": 1,
+       "icon": 134851,
+       "classID": 0,
+       "subClassID": 1,
+       "type": "Consumable",
+       "subType": "Potion"
+      }
+     ]
+    },
+    {
+     "location": "bags",
+     "bag": 1,
+     "name": "Linen Bag",
+     "size": 6,
+     "used": 1,
+     "bagLink": "|cffffffff|Hitem:4238::::::::24:::::::|h[Linen Bag]|h|r",
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2996,
+       "count": 3,
+       "name": "Bolt of Linen Cloth",
+       "quality": 1,
+       "icon": 132890,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      }
+     ]
+    },
+    {
+     "location": "bank",
+     "bag": -1,
+     "name": "Bank",
+     "size": 24,
+     "used": 1,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2592,
+       "count": 20,
+       "name": "Wool Cloth",
+       "quality": 1,
+       "icon": 132911,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      }
+     ]
+    }
+   ],
+   "equipped": [
+    {
+     "slotId": 1,
+     "id": 4321,
+     "link": "|cff1eff00|Hitem:4321::::::::24:::::::|h[Embroidered Hood]|h|r"
+    },
+    {
+     "slotId": 5,
+     "id": 6242,
+     "link": "|cff1eff00|Hitem:6242:41:::::::24:::::::|h[Blue Linen Robe]|h|r"
+    },
+    {
+     "slotId": 16,
+     "id": 5240,
+     "link": "|cff1eff00|Hitem:5240::::::::24:::::::|h[Torchlight Wand]|h|r"
+    }
+   ],
+   "legacyTree": {
+    "currency": {
+     "available": 12,
+     "spent": 4,
+     "max": 16
+    },
+    "trees": {
+     "1187": {
+      "spentInTree": 3,
+      "nodes": {
+       "100": 2,
+       "101": 1
+      }
+     },
+     "1188": {
+      "spentInTree": 1,
+      "nodes": {
+       "102": 1
+      }
+     },
+     "1189": {
+      "spentInTree": 0,
+      "nodes": {}
+     }
+    },
+    "choices": {
+     "101": 201
+    }
+   },
+   "professions": [
+    {
+     "name": "Tailoring",
+     "skillLine": 197,
+     "skill": 112,
+     "max": 150,
+     "icon": 136249,
+     "kind": "primary"
+    },
+    {
+     "name": "Enchanting",
+     "skillLine": 333,
+     "skill": 95,
+     "max": 150,
+     "icon": 136244,
+     "kind": "primary"
+    },
+    {
+     "name": "Cooking",
+     "skillLine": 185,
+     "skill": 40,
+     "max": 75,
+     "icon": 133971,
+     "kind": "secondary"
+    }
+   ],
+   "currencies": [
+    {
+     "name": "Honor Points",
+     "currencyID": 1901,
+     "quantity": 0,
+     "icon": 1455894
+    }
+   ],
+   "skills": [
+    {
+     "name": "Staves",
+     "category": "Weapon Skills",
+     "rank": 101,
+     "max": 120,
+     "skillID": 136
+    },
+    {
+     "name": "Wands",
+     "category": "Weapon Skills",
+     "rank": 110,
+     "max": 120,
+     "skillID": 228
+    },
+    {
+     "name": "Common",
+     "category": "Languages",
+     "rank": 300,
+     "max": 300,
+     "skillID": 98
+    }
+   ],
+   "spells": [
+    {
+     "name": "Fireball",
+     "spellID": 8400,
+     "rank": 5
+    },
+    {
+     "name": "Arcane Intellect",
+     "spellID": 1460,
+     "rank": 2
+    }
+   ],
+   "recipes": [
+    {
+     "profession": "Tailoring",
+     "professionID": 197,
+     "skill": 112,
+     "max": 150,
+     "updated": "2025-11-11T22:26:40.000Z",
+     "recipes": [
+      {
+       "recipeID": 2385,
+       "name": "Brown Linen Vest",
+       "difficulty": 3,
+       "outputItemID": 2568,
+       "makesMin": 1,
+       "makesMax": 1,
+       "reagents": [
+        {
+         "itemID": 2996,
+         "name": "Bolt of Linen Cloth",
+         "quantity": 1
+        },
+        {
+         "itemID": 2320,
+         "name": "Coarse Thread",
+         "quantity": 1
+        }
+       ]
+      }
+     ],
+     "unlearned": [
+      {
+       "recipeID": 3914,
+       "name": "Brown Linen Pants",
+       "outputItemID": 4343,
+       "source": "trainer"
+      }
+     ]
+    }
+   ],
+   "hearth": "Stormwind City"
+  },
+  {
+   "key": "Examplewarrior-Example Realm",
+   "name": "Examplewarrior",
+   "surname": "Examplefamily",
+   "realm": "Example Realm",
+   "level": 8,
+   "class": "Warrior",
+   "classFile": "WARRIOR",
+   "race": "Human",
+   "faction": "Alliance",
+   "sex": 3,
+   "guid": "Player-4395-0A1B2C3E",
+   "money": 1530,
+   "xp": 1100,
+   "xpMax": 2900,
+   "restedXP": 0,
+   "itemLevel": 6.5,
+   "itemLevelEquipped": 6.5,
+   "lastSeen": "2025-11-10T00:00:00.000Z",
+   "location": {
+    "zone": "Elwynn Forest",
+    "subzone": "Goldshire",
+    "mapID": 1429,
+    "x": 42.1,
+    "y": 65.3
+   },
+   "updated": {
+    "bags": "2025-11-10T00:00:00.000Z",
+    "equipped": "2025-11-10T00:00:00.000Z"
+   },
+   "containers": [
+    {
+     "location": "bags",
+     "bag": 0,
+     "name": "Backpack",
+     "size": 16,
+     "used": 1,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2589,
+       "count": 3,
+       "name": "Linen Cloth",
+       "quality": 1,
+       "icon": 132889,
+       "classID": 7,
+       "subClassID": 5
+      }
+     ]
+    }
+   ],
+   "equipped": [
+    {
+     "slotId": 16,
+     "id": 25,
+     "link": "|cffffffff|Hitem:25::::::::8:::::::|h[Worn Shortsword]|h|r"
+    }
+   ],
+   "professions": [],
+   "currencies": [],
+   "skills": [],
+   "spells": [],
+   "recipes": []
+  }
+ ],
+ "warband": {
+  "money": 50000,
+  "updated": "2025-11-12T00:00:00.000Z",
+  "updatedBy": "Examplemage-Example Realm",
+  "containers": [
+   {
+    "location": "warband",
+    "bag": 13,
+    "name": "Warband Bank Tab 1",
+    "size": 98,
+    "used": 1,
+    "bagLink": null,
+    "updated": null,
+    "items": [
+     {
+      "slot": 1,
+      "id": 2592,
+      "count": 40,
+      "name": "Wool Cloth",
+      "quality": 1,
+      "icon": 132911
+     }
+    ]
+   }
+  ]
+ },
+ "guildBanks": [
+  {
+   "key": "Example Guild-Example Realm",
+   "money": 1250000,
+   "updated": "2025-11-11T00:00:00.000Z",
+   "tabs": [
+    {
+     "location": "guild",
+     "bag": 1,
+     "name": "Mats",
+     "size": 98,
+     "used": 1,
+     "bagLink": null,
+     "updated": "2025-11-11T00:00:00.000Z",
+     "items": [
+      {
+       "slot": 1,
+       "id": 4306,
+       "count": 60,
+       "name": "Silk Cloth",
+       "quality": 1,
+       "icon": 132905
+      }
+     ],
+     "tab": 1
+    }
+   ]
+  }
+ ],
+ "raids": [
+  {
+   "string": "KR1.QX7K2M.409.1762891200.MZXW6YTBOI4A",
+   "events": [
+    {
+     "t": "2025-11-11T19:45:00.000Z",
+     "kind": "start",
+     "instanceId": 409,
+     "instanceName": "Molten Core",
+     "instanceType": "raid",
+     "difficultyId": 9,
+     "by": "Examplemage-Example Realm"
+    },
+    {
+     "t": "2025-11-11T19:45:00.000Z",
+     "kind": "roster",
+     "members": [
+      "Examplemage-Example Realm",
+      "Exampleraider-Example Realm",
+      "Examplehealer-Example Realm"
+     ]
+    },
+    {
+     "t": "2025-11-11T20:05:00.000Z",
+     "kind": "encounter_start",
+     "encounterId": 663,
+     "encounterName": "Lucifron",
+     "difficultyId": 9,
+     "groupSize": 40
+    },
+    {
+     "t": "2025-11-11T20:07:00.000Z",
+     "kind": "encounter_end",
+     "encounterId": 663,
+     "encounterName": "Lucifron",
+     "difficultyId": 9,
+     "groupSize": 40,
+     "success": true
+    },
+    {
+     "t": "2025-11-11T20:07:00.000Z",
+     "kind": "roster",
+     "members": [
+      "Examplemage-Example Realm",
+      "Exampleraider-Example Realm",
+      "Examplehealer-Example Realm"
+     ]
+    },
+    {
+     "t": "2025-11-11T20:08:00.000Z",
+     "kind": "loot",
+     "itemId": 16800,
+     "itemLink": "|cffa335ee|Hitem:16800::::::::60:::::|h[Arcanist Boots]|h|r",
+     "count": 1,
+     "looter": "Exampleraider-Example Realm"
+    },
+    {
+     "t": "2025-11-11T20:08:20.000Z",
+     "kind": "loot",
+     "itemId": 17011,
+     "itemLink": "|cff1eff00|Hitem:17011::::::::60:::::|h[Lava Core]|h|r",
+     "count": 2,
+     "looter": "Examplemage-Example Realm"
+    },
+    {
+     "t": "2025-11-11T22:00:00.000Z",
+     "kind": "end",
+     "instanceId": 409,
+     "instanceName": "Molten Core"
+    }
+   ]
+  }
+ ],
+ "observations": {
+  "v": 1,
+  "addon": "1.8.0",
+  "events": [
+   {
+    "id": "k1f9c2-000017",
+    "t": 1762905600,
+    "b": "1.60.1.70888",
+    "type": "loot",
+    "src": {
+     "kind": "boss",
+     "npc": 11502,
+     "guid": "Creature-0-4170-409-1234-11502-000012ABCD",
+     "via": "slot"
+    },
+    "where": {
+     "map": 409,
+     "uiMap": 232,
+     "itype": "raid",
+     "difficulty": 9
+    },
+    "who": {
+     "level": 60,
+     "class": 4,
+     "faction": "Alliance",
+     "name": "Exampleobserver",
+     "surname": "Examplefamily"
+    },
+    "items": [
+     {
+      "id": 17076,
+      "n": 1,
+      "link": "|cffff8000|Hitem:17076|h[Bonereaver's Edge]|h|r"
+     },
+     {
+      "id": 18264,
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "k1f9c2-000018",
+    "t": 1762905650,
+    "b": "1.60.1.70888",
+    "type": "loot",
+    "src": {
+     "kind": "mob",
+     "npc": 2958,
+     "guid": "Creature-0-4170-0-1234-2958-000012ABCE",
+     "level": 14,
+     "via": "target"
+    },
+    "where": {
+     "map": 0,
+     "uiMap": 1429,
+     "x": 0.4123,
+     "y": 0.6543
+    },
+    "who": {
+     "level": 60,
+     "class": 4,
+     "faction": "Alliance"
+    },
+    "items": []
+   },
+   {
+    "id": "k1f9c2-000019",
+    "t": 1762905660,
+    "b": "1.60.1.70888",
+    "type": "loot",
+    "src": {
+     "kind": "skin",
+     "npc": 2958,
+     "guid": "Creature-0-4170-0-1234-2958-000012ABCE",
+     "level": 14,
+     "via": "slot"
+    },
+    "where": {
+     "map": 0,
+     "uiMap": 1429,
+     "x": 0.4123,
+     "y": 0.6543
+    },
+    "who": {
+     "level": 60,
+     "class": 4,
+     "faction": "Alliance"
+    },
+    "items": [
+     {
+      "id": 2318,
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "k1f9c2-000020",
+    "t": 1762905680,
+    "b": "1.60.1.70888",
+    "type": "quest",
+    "act": "accept",
+    "quest": 7787,
+    "npc": 11811,
+    "where": {
+     "map": 1,
+     "uiMap": 1449,
+     "x": 0.5012,
+     "y": 0.3301
+    },
+    "who": {
+     "level": 60,
+     "class": 4,
+     "faction": "Alliance"
+    },
+    "text": {
+     "title": "A Made-up Errand",
+     "details": "You look capable, $N.\n\nTake this crate to the far camp.",
+     "objectives": "Carry the crate to the far camp."
+    }
+   },
+   {
+    "id": "k1f9c2-000021",
+    "t": 1762905700,
+    "b": "1.60.1.70888",
+    "type": "quest",
+    "act": "turnin",
+    "quest": 7787,
+    "npc": 11811,
+    "where": {
+     "map": 1,
+     "uiMap": 1449,
+     "x": 0.5012,
+     "y": 0.3301
+    },
+    "who": {
+     "level": 60,
+     "class": 4,
+     "faction": "Alliance"
+    },
+    "text": {
+     "title": "A Made-up Errand",
+     "progress": "Is the crate here, $N?",
+     "completion": "The camp thanks you, $N."
+    },
+    "rewards": {
+     "items": [
+      {
+       "id": 19019,
+       "n": 1
+      }
+     ],
+     "choices": [
+      19018,
+      19019
+     ],
+     "chose": 19019
+    }
+   },
+   {
+    "id": "k1f9c2-000022",
+    "t": 1762905800,
+    "b": "1.60.1.70888",
+    "type": "vendor",
+    "npc": 12944,
+    "where": {
+     "map": 0,
+     "uiMap": 1428,
+     "x": 0.0912,
+     "y": 0.2287
+    },
+    "who": {
+     "level": 60,
+     "class": 4,
+     "faction": "Alliance",
+     "name": "Exampleobserver",
+     "surname": "Examplefamily"
+    },
+    "items": [
+     {
+      "id": 19326,
+      "n": 1,
+      "link": "|cffa335ee|Hitem:19326|h[Made-up Cloak]|h|r",
+      "price": 0,
+      "cost": [
+       {
+        "item": 17010,
+        "n": 1
+       }
+      ],
+      "limited": null
+     },
+     {
+      "id": 4470,
+      "n": 1,
+      "price": 38,
+      "limited": 5
+     }
+    ]
+   }
+  ]
+ }
+}

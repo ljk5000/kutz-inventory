@@ -1,0 +1,26 @@
+# Offline checks. Release tags: tools/tag_release.js (see the README).
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+      - name: Install tool dependencies
+        working-directory: tools
+        run: npm ci
+      - name: Addon, exporter, schema and companion checks
+        working-directory: tools
+        run: node check_all.js ../KutzInventory

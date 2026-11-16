@@ -1,0 +1,75 @@
+name: Windows Companion
+
+on:
+  push:
+    branches: [main]
+    tags: ['companion-v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: A companion-v tag must match the version in tools/windows/package.json
+        if: startsWith(github.ref, 'refs/tags/companion-v')
+        shell: pwsh
+        run: |
+          $version = (Get-Content tools/windows/package.json -Raw | ConvertFrom-Json).version
+          if ("companion-v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match tools/windows/package.json version $version. Bump it first."
+          }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/windows/package-lock.json
+      - name: Install locked build tools
+        run: npm ci --prefix tools/windows
+      - name: Check companion behavior
+        run: node --test companion/companion.test.js tools/package_release.test.js
+      - name: Build standalone Windows application
+        run: node tools/windows/build.js export/windows
+      - name: Test tray lifecycle, worker shutdown, Credential Manager, and standalone uploads
+        run: node tools/windows/smoke.js export/windows/KutzUI-Companion-Windows-x64/KutzInventoryUploader.exe export/windows/KutzUI-Companion-Windows-x64/KutzUICompanion.exe
+      - name: Package and checksum
+        shell: pwsh
+        run: |
+          Compress-Archive -Path export/windows/KutzUI-Companion-Windows-x64 -DestinationPath export/windows/KutzUI-Companion-Windows-x64.zip
+          $hash = (Get-FileHash export/windows/KutzUI-Companion-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          # LF line ending, so `sha256sum -c SHA256SUMS.txt` checks it without a warning
+          [IO.File]::WriteAllText("$PWD/export/windows/SHA256SUMS.txt", "$hash  KutzUI-Companion-Windows-x64.zip`n")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KutzUI-Companion-Windows-x64
+          path: |
+            export/windows/KutzUI-Companion-Windows-x64.zip
+            export/windows/SHA256SUMS.txt
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/companion-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: KutzUI-Companion-Windows-x64
+          path: release
+      - name: Attest the portable ZIP for public releases
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/KutzUI-Companion-Windows-x64.zip
+      - name: Publish portable download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/KutzUI-Companion-Windows-x64.zip release/SHA256SUMS.txt --verify-tag --prerelease --title "KutzUI Companion for Windows" --notes-file companion/WINDOWS.md

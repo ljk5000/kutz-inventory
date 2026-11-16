@@ -1,0 +1,5 @@
+* text=auto
+*.ttf binary
+*.tga binary
+*.png binary
+tools/fixtures/cli-golden/** -text

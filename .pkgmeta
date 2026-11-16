@@ -1,0 +1,29 @@
+# BigWigs packager: the KutzInventory download (the addon only).
+# KutzInventory runs without KutzUI (it only reads KutzUIDB.monitor.findings when KutzUI_Monitor
+# is there). The Companion is a separate download (companion-v* tags).
+# Built by .github/workflows/release-addons.yml on a vX.Y.Z tag.
+package-as: KutzInventory
+
+move-folders:
+  KutzInventory/KutzInventory: KutzInventory
+
+ignore:
+  - KutzUI
+  - KutzUI_Options
+  - KutzUI_Monitor
+  - companion
+  - tools
+  - schema
+  - docs
+  - export
+  - References
+  - LICENSES
+  - REUSE.toml
+  - THIRD-PARTY-NOTICES.md
+  - README.md
+  - CHANGELOG.md
+  - CONTRIBUTING.md
+  - SECURITY.md
+  - LICENSE
+
+enable-nolib-creation: no

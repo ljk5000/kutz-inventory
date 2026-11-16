@@ -1,0 +1,14 @@
+# Who wrote what, and under which licence, by path (REUSE 3.3, https://reuse.software). Check with: reuse lint
+version = 1
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 ljk5000"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["companion/Assets/retriever.png", "companion/Assets/Companion.ico", "companion/Assets/Lucide-LICENSE.txt"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 ljk5000", "2026 Lucide Icons and Contributors"]
+SPDX-License-Identifier = "MIT AND ISC"

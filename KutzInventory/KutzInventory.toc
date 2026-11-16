@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: cr0m Inventory
+## Notes: Records every character's bags, bank, warband and guild bank, gear, character sheet, talents, skills, recipes, trainers, reputation, location, where the Hearthstone is set and gold, plus vendor and auction house prices (/kinv ah), the cr0m raids you track (/kinv raid), the items each character crafts (counted as they are made), default-on drop (also group-loot roll lists, with the boss and what you won), quest (with the quest text) and vendor recording for cr0m's item database (/kinv track), and copies KutzUI's addon-monitor findings for export with tools/inventory_export.js.
+## X-Category: cr0m
+## Author: ljk5000
+## Version: 1.15.1
+## OptionalDeps: KutzUI_Monitor
+## SavedVariables: KutzInventoryDB, KutzInventoryObsDB
+
+KutzInventory.lua
+Prices.lua
+Raids.lua
+Observations.lua
+Crafts.lua

@@ -1,0 +1,629 @@
+{
+ "schemaVersion": "2.1.0",
+ "exportedAt": "<exportedAt>",
+ "uiHealth": null,
+ "prices": {
+  "2320": {
+   "vendorBuy": 10,
+   "vendor": "Some Trader",
+   "vendorSell": null
+  },
+  "2568": {
+   "vendorBuy": null,
+   "vendor": null,
+   "vendorSell": 18
+  },
+  "2589": {
+   "vendorBuy": null,
+   "vendor": null,
+   "vendorSell": 13
+  }
+ },
+ "characters": [
+  {
+   "key": "Examplemage-Example Realm",
+   "name": "Examplemage",
+   "surname": "Examplesurname",
+   "realm": "Example Realm",
+   "level": 24,
+   "class": "Mage",
+   "classFile": "MAGE",
+   "race": "Gnome",
+   "faction": "Alliance",
+   "sex": 3,
+   "spec": "Fire",
+   "role": "DAMAGER",
+   "guild": "Example Guild",
+   "guid": "Player-4395-0A1B2C3D",
+   "money": 418275,
+   "xp": 6120,
+   "xpMax": 13900,
+   "restedXP": 2400,
+   "itemLevel": 21.4375,
+   "itemLevelEquipped": 21.0625,
+   "lastSeen": "2025-11-12T00:00:00.000Z",
+   "location": {
+    "zone": "Wetlands",
+    "subzone": "Menethil Harbor",
+    "mapID": 1437,
+    "x": 10.8,
+    "y": 59.6
+   },
+   "trainers": {
+    "Tailoring": [
+     {
+      "name": "Red Linen Robe",
+      "skillReq": 40,
+      "cost": 200,
+      "reqLevel": 8,
+      "status": "used"
+     }
+    ]
+   },
+   "updated": {
+    "bags": "2025-11-12T00:00:00.000Z",
+    "bank": "2025-11-11T00:00:00.000Z",
+    "equipped": "2025-11-12T00:00:00.000Z",
+    "stats": "2025-11-11T23:58:20.000Z",
+    "sheet": "2025-11-11T23:58:20.000Z",
+    "talents": "2025-11-11T23:56:40.000Z",
+    "reputation": "2025-11-11T23:55:00.000Z",
+    "statistics": "2025-11-11T23:53:20.000Z",
+    "pvp": "2025-11-11T23:51:40.000Z",
+    "money": "2025-11-12T00:00:00.000Z",
+    "location": "2025-11-12T00:00:00.000Z",
+    "professions": "2025-11-11T23:50:00.000Z",
+    "currencies": "2025-11-11T23:50:00.000Z",
+    "skills": "2025-11-11T23:50:00.000Z",
+    "spells": "2025-11-11T23:50:00.000Z",
+    "recipes": "2025-11-11T22:26:40.000Z",
+    "trainers": "2025-11-10T18:40:00.000Z"
+   },
+   "containers": [
+    {
+     "location": "bags",
+     "bag": 0,
+     "name": "Backpack",
+     "size": 16,
+     "used": 3,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2589,
+       "count": 14,
+       "name": "Linen Cloth",
+       "quality": 1,
+       "icon": 132889,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      },
+      {
+       "slot": 2,
+       "id": 4306,
+       "count": 6,
+       "name": "Silk Cloth",
+       "quality": 1,
+       "icon": 132905,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      },
+      {
+       "slot": 3,
+       "id": 2455,
+       "count": 4,
+       "name": "Minor Mana Potion",
+       "quality": 1,
+       "icon": 134851,
+       "classID": 0,
+       "subClassID": 1,
+       "type": "Consumable",
+       "subType": "Potion"
+      }
+     ]
+    },
+    {
+     "location": "bags",
+     "bag": 1,
+     "name": "Linen Bag",
+     "size": 6,
+     "used": 1,
+     "bagLink": "|cffffffff|Hitem:4238::::::::24:::::::|h[Linen Bag]|h|r",
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2996,
+       "count": 3,
+       "name": "Bolt of Linen Cloth",
+       "quality": 1,
+       "icon": 132890,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      }
+     ]
+    },
+    {
+     "location": "bank",
+     "bag": -1,
+     "name": "Bank",
+     "size": 24,
+     "used": 1,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2592,
+       "count": 20,
+       "name": "Wool Cloth",
+       "quality": 1,
+       "icon": 132911,
+       "classID": 7,
+       "subClassID": 5,
+       "type": "Tradeskill",
+       "subType": "Cloth"
+      }
+     ]
+    }
+   ],
+   "equipped": [
+    {
+     "slotId": 1,
+     "id": 4321,
+     "name": "Embroidered Hood",
+     "slot": "HeadSlot",
+     "quality": 2,
+     "ilvl": 23,
+     "icon": 132539,
+     "equipLoc": "INVTYPE_HEAD",
+     "link": "|cff1eff00|Hitem:4321::::::::24:::::::|h[Embroidered Hood]|h|r",
+     "durability": 30,
+     "durabilityMax": 35,
+     "stats": {
+      "ITEM_MOD_INTELLECT_SHORT": 4,
+      "RESISTANCE0_NAME": 18
+     }
+    },
+    {
+     "slotId": 5,
+     "id": 6242,
+     "name": "Blue Linen Robe",
+     "slot": "ChestSlot",
+     "quality": 2,
+     "ilvl": 19,
+     "icon": 132662,
+     "equipLoc": "INVTYPE_ROBE",
+     "link": "|cff1eff00|Hitem:6242:41:::::::24:::::::|h[Blue Linen Robe]|h|r",
+     "durability": 60,
+     "durabilityMax": 70,
+     "stats": {
+      "ITEM_MOD_INTELLECT_SHORT": 3,
+      "ITEM_MOD_SPIRIT_SHORT": 2,
+      "RESISTANCE0_NAME": 24
+     }
+    },
+    {
+     "slotId": 16,
+     "id": 5240,
+     "name": "Torchlight Wand",
+     "slot": "MainHandSlot",
+     "quality": 2,
+     "ilvl": 22,
+     "icon": 135139,
+     "equipLoc": "INVTYPE_RANGEDRIGHT",
+     "link": "|cff1eff00|Hitem:5240::::::::24:::::::|h[Torchlight Wand]|h|r"
+    }
+   ],
+   "stats": {
+    "strength": 18,
+    "strengthBase": 18,
+    "agility": 21,
+    "agilityBase": 21,
+    "stamina": 40,
+    "staminaBase": 35,
+    "intellect": 71,
+    "intellectBase": 63,
+    "spirit": 62,
+    "spiritBase": 58,
+    "armor": 96,
+    "health": 512,
+    "power": 1033,
+    "critMelee": 5.1,
+    "critRanged": 5.1,
+    "critSpell": 6.2,
+    "ratings": {}
+   },
+   "sheet": {
+    "general": {
+     "health": 512,
+     "power": 1033,
+     "powerType": "MANA",
+     "moveSpeed": 100
+    },
+    "primary": {
+     "intellect": {
+      "base": 63,
+      "total": 71,
+      "bonus": 8,
+      "penalty": 0
+     }
+    },
+    "defense": {
+     "armor": {
+      "base": 54,
+      "total": 96,
+      "bonus": 42
+     }
+    },
+    "resistances": {
+     "fire": {
+      "base": 0,
+      "total": 5,
+      "bonus": 5,
+      "penalty": 0
+     }
+    }
+   },
+   "talents": {
+    "system": "tabs",
+    "tabs": [
+     {
+      "tab": 1,
+      "name": "Arcane",
+      "spent": 0
+     },
+     {
+      "tab": 2,
+      "name": "Fire",
+      "spent": 15
+     },
+     {
+      "tab": 3,
+      "name": "Frost",
+      "spent": 0
+     }
+    ],
+    "taken": [
+     {
+      "name": "Improved Fireball",
+      "spellID": 11069,
+      "rank": 5,
+      "maxRank": 5,
+      "tab": 2,
+      "tier": 1,
+      "column": 2
+     },
+     {
+      "name": "Ignite",
+      "spellID": 11119,
+      "rank": 5,
+      "maxRank": 5,
+      "tab": 2,
+      "tier": 2,
+      "column": 3
+     }
+    ],
+    "trees": [],
+    "pvp": []
+   },
+   "legacyTree": {
+    "currency": {
+     "available": 12,
+     "spent": 4,
+     "max": 16
+    },
+    "trees": {
+     "1187": {
+      "spentInTree": 3,
+      "nodes": {
+       "100": 2,
+       "101": 1
+      }
+     },
+     "1188": {
+      "spentInTree": 1,
+      "nodes": {
+       "102": 1
+      }
+     },
+     "1189": {
+      "spentInTree": 0,
+      "nodes": {}
+     }
+    },
+    "choices": {
+     "101": 201
+    }
+   },
+   "professions": [
+    {
+     "name": "Tailoring",
+     "skillLine": 197,
+     "skill": 112,
+     "max": 150,
+     "icon": 136249,
+     "kind": "primary"
+    },
+    {
+     "name": "Enchanting",
+     "skillLine": 333,
+     "skill": 95,
+     "max": 150,
+     "icon": 136244,
+     "kind": "primary"
+    },
+    {
+     "name": "Cooking",
+     "skillLine": 185,
+     "skill": 40,
+     "max": 75,
+     "icon": 133971,
+     "kind": "secondary"
+    }
+   ],
+   "currencies": [
+    {
+     "name": "Honor Points",
+     "currencyID": 1901,
+     "quantity": 0,
+     "icon": 1455894
+    }
+   ],
+   "skills": [
+    {
+     "name": "Staves",
+     "category": "Weapon Skills",
+     "rank": 101,
+     "max": 120,
+     "skillID": 136
+    },
+    {
+     "name": "Wands",
+     "category": "Weapon Skills",
+     "rank": 110,
+     "max": 120,
+     "skillID": 228
+    },
+    {
+     "name": "Common",
+     "category": "Languages",
+     "rank": 300,
+     "max": 300,
+     "skillID": 98
+    }
+   ],
+   "spells": [
+    {
+     "name": "Fireball",
+     "spellID": 8400,
+     "rank": 5
+    },
+    {
+     "name": "Arcane Intellect",
+     "spellID": 1460,
+     "rank": 2
+    }
+   ],
+   "reputation": [
+    {
+     "factionID": 72,
+     "name": "Stormwind",
+     "group": "Alliance",
+     "reaction": 5,
+     "standing": "Friendly",
+     "value": 4100,
+     "min": 3000,
+     "max": 9000
+    }
+   ],
+   "statistics": [
+    {
+     "id": 60,
+     "name": "Total deaths",
+     "category": "Deaths",
+     "value": 7
+    }
+   ],
+   "achievementPoints": 0,
+   "pvp": {
+    "honorableKills": 12,
+    "dishonorableKills": 0,
+    "highestRank": 0,
+    "rated": []
+   },
+   "recipes": [
+    {
+     "profession": "Tailoring",
+     "professionID": 197,
+     "skill": 112,
+     "max": 150,
+     "updated": "2025-11-11T22:26:40.000Z",
+     "recipes": [
+      {
+       "recipeID": 2385,
+       "name": "Brown Linen Vest",
+       "difficulty": 3,
+       "outputItemID": 2568,
+       "makesMin": 1,
+       "makesMax": 1,
+       "reagents": [
+        {
+         "itemID": 2996,
+         "name": "Bolt of Linen Cloth",
+         "quantity": 1
+        },
+        {
+         "itemID": 2320,
+         "name": "Coarse Thread",
+         "quantity": 1
+        }
+       ]
+      }
+     ],
+     "unlearned": [
+      {
+       "recipeID": 3914,
+       "name": "Brown Linen Pants",
+       "outputItemID": 4343,
+       "source": "trainer"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "Examplewarrior-Example Realm",
+   "name": "Examplewarrior",
+   "surname": "Examplefamily",
+   "realm": "Example Realm",
+   "level": 8,
+   "class": "Warrior",
+   "classFile": "WARRIOR",
+   "race": "Human",
+   "faction": "Alliance",
+   "sex": 3,
+   "guid": "Player-4395-0A1B2C3E",
+   "money": 1530,
+   "xp": 1100,
+   "xpMax": 2900,
+   "restedXP": 0,
+   "itemLevel": 6.5,
+   "itemLevelEquipped": 6.5,
+   "lastSeen": "2025-11-10T00:00:00.000Z",
+   "location": {
+    "zone": "Elwynn Forest",
+    "subzone": "Goldshire",
+    "mapID": 1429,
+    "x": 42.1,
+    "y": 65.3
+   },
+   "updated": {
+    "bags": "2025-11-10T00:00:00.000Z",
+    "equipped": "2025-11-10T00:00:00.000Z",
+    "stats": "2025-11-09T23:58:20.000Z"
+   },
+   "containers": [
+    {
+     "location": "bags",
+     "bag": 0,
+     "name": "Backpack",
+     "size": 16,
+     "used": 1,
+     "bagLink": null,
+     "updated": null,
+     "items": [
+      {
+       "slot": 1,
+       "id": 2589,
+       "count": 3,
+       "name": "Linen Cloth",
+       "quality": 1,
+       "icon": 132889,
+       "classID": 7,
+       "subClassID": 5
+      }
+     ]
+    }
+   ],
+   "equipped": [
+    {
+     "slotId": 16,
+     "id": 25,
+     "name": "Worn Shortsword",
+     "slot": "MainHandSlot",
+     "quality": 1,
+     "ilvl": 2,
+     "icon": 135274,
+     "link": "|cffffffff|Hitem:25::::::::8:::::::|h[Worn Shortsword]|h|r",
+     "stats": {
+      "ITEM_MOD_STRENGTH_SHORT": 1
+     }
+    }
+   ],
+   "stats": {
+    "strength": 23,
+    "strengthBase": 23,
+    "stamina": 22,
+    "staminaBase": 22,
+    "health": 158,
+    "power": 100,
+    "armor": 40,
+    "ratings": {}
+   },
+   "sheet": null,
+   "talents": null,
+   "professions": [],
+   "currencies": [],
+   "skills": [],
+   "spells": [],
+   "reputation": [],
+   "statistics": [],
+   "achievementPoints": null,
+   "pvp": null,
+   "recipes": []
+  }
+ ],
+ "warband": {
+  "money": 50000,
+  "updated": "2025-11-12T00:00:00.000Z",
+  "updatedBy": "Examplemage-Example Realm",
+  "containers": [
+   {
+    "location": "warband",
+    "bag": 13,
+    "name": "Warband Bank Tab 1",
+    "size": 98,
+    "used": 1,
+    "bagLink": null,
+    "updated": null,
+    "items": [
+     {
+      "slot": 1,
+      "id": 2592,
+      "count": 40,
+      "name": "Wool Cloth",
+      "quality": 1,
+      "icon": 132911
+     }
+    ]
+   }
+  ]
+ },
+ "guildBanks": [
+  {
+   "key": "Example Guild-Example Realm",
+   "money": 1250000,
+   "updated": "2025-11-11T00:00:00.000Z",
+   "tabs": [
+    {
+     "location": "guild",
+     "bag": 1,
+     "name": "Mats",
+     "size": 98,
+     "used": 1,
+     "bagLink": null,
+     "updated": "2025-11-11T00:00:00.000Z",
+     "items": [
+      {
+       "slot": 1,
+       "id": 4306,
+       "count": 60,
+       "name": "Silk Cloth",
+       "quality": 1,
+       "icon": 132905
+      }
+     ],
+     "tab": 1
+    }
+   ]
+  }
+ ]
+}
