@@ -794,6 +794,30 @@ KutzInventoryObsDB = {
 			["group"] = 5,
 			["freq"] = "daily",
 			["timed"] = true,
+			["obj"] = {
+				{
+					["t"] = "item",
+					["n"] = 1,
+					["text"] = "Carry the crate to the far camp.",
+				}, -- [1]
+				{
+					["t"] = "monster",
+					["n"] = 4,
+					["text"] = "Clear the road of raiders.",
+				}, -- [2]
+			},
+			["poi"] = {
+				{
+					["map"] = 1449,
+					["x"] = 50.12,
+					["y"] = 33.01,
+				}, -- [1]
+				{
+					["map"] = 1449,
+					["x"] = 42.19,
+					["y"] = 67.84,
+				}, -- [2]
+			},
 			["text"] = {
 				["title"] = "A Made-up Errand",
 				["details"] = "You look capable, $N.\n\nTake this crate to the far camp.",

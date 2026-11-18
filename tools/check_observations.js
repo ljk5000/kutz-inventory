@@ -252,6 +252,8 @@ do
   h.G.InboxFrame, h.G.C_GossipInfo, h.s.legacy = nil, nil, string.rep("a", 3999) .. "é"
   h.event("GOSSIP_SHOW")
   assert(#h.events()[3].text == 3999, "legacy fallback and correct UTF-8 cut")
+  h.s.legacy = "Player-" .. string.char(1) .. "1-0123"
+  h.event("GOSSIP_SHOW")   -- stripping a control must not let a GUID through
   h.G.GetGossipText = nil
   h.event("GOSSIP_SHOW")
   assert(#h.events() == 3, "missing APIs")
@@ -281,9 +283,8 @@ do
       issecretvalue = function(v) return v == secret end,
       C_Container = { UseContainerItem = function() end, GetContainerItemInfo = function(bag, slot)
         assert(bag == 0 and slot == 1, "only safe hook arguments")
-        return { itemID = 54000 }
+        return { itemID = 54000, itemName = "Example Journal", isReadable = true }
       end },
-      C_Item = { GetItemNameByID = function(id) if id == 54000 then return "Example Journal" end end },
     }
     local h = fresh(opts)
     local s = h.s
@@ -318,10 +319,12 @@ do
   h.hooks.UseContainerItem(0, 1)
   h.open()
   assert(h.events()[3].item == 54000 and not h.events()[3].object, "a matching recent bag use")
+  h.event("ITEM_TEXT_CLOSED")
   h.hooks.UseContainerItem(0, 1)
   h.s.clock = h.s.clock + 2
   h.open()
   assert(h.events()[4].item == nil and h.events()[4].object == nil, "a stale bag use leaves a title-only event")
+  h.event("ITEM_TEXT_CLOSED")
   h.hooks.UseContainerItem(0, 1)
   h.s.units.npc, h.s.page = { guid = NODE }, 2
   h.open()
@@ -354,6 +357,12 @@ do
   never(function(n) n.s.page = secret; n.open() end)
   never(function(n) n.event("ITEM_TEXT_BEGIN"); n.event("ITEM_TEXT_CLOSED"); n.event("ITEM_TEXT_READY") end)
   never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.title = "Different Text"; n.event("ITEM_TEXT_READY") end)
+  local unreadable = library()
+  unreadable.G.C_Container.GetContainerItemInfo = function()
+    return { itemID = 54000, itemName = "Example Journal", isReadable = secret }
+  end
+  unreadable.hooks.UseContainerItem(0, 1); unreadable.open()
+  assert(unreadable.events()[1] and not unreadable.events()[1].item, "bag attribution needs a plain readable flag")
   local full = library({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
   full.open()
   assert(full.s.bodies == 0 and not full.db().textSeen, "half cap skips reading")
@@ -447,6 +456,121 @@ do
   full.line(say, "Look out!", nil, MOB)
   assert(full.s.lookup == 0 and not full.db().textSeen, "half cap skips lines")
   print("OK   creature lines, safe player-name normalization, all event kinds, cheap repeats and privacy exclusions")
+end
+
+-- Quest objectives and map markers amend one accept, without storing character progress.
+do
+  local secret = {}
+  local function errands(opts)
+    opts = opts or {}
+    opts.globals = { issecretvalue = function(v) return v == secret end }
+    local h = fresh(opts)
+    local s = h.s
+    s.combat, s.objReads, s.poiReads, s.waypointReads = false, 0, 0, 0
+    h.G.InCombatLockdown = function() return s.combat end
+    h.G.C_QuestLog = {
+      GetQuestObjectives = function(id)
+        assert(id == 7787, "objectives for the accepted quest only")
+        s.objReads = s.objReads + 1
+        return s.objectives
+      end,
+      GetQuestsOnMap = function(map)
+        assert(map == 1429 and s.combat == false, "map API only on the acceptance map and out of combat")
+        s.poiReads = s.poiReads + 1
+        return s.points
+      end,
+      GetNextWaypointForMap = function(id, map)
+        assert(id == 7787 and map == 1429 and s.combat == false, "waypoint is for this quest and map only")
+        s.waypointReads = s.waypointReads + 1
+        if s.waypoint then return s.waypoint[1], s.waypoint[2] end
+      end,
+    }
+    return h
+  end
+  local h = errands()
+  local row = setmetatable({ type = "monster", numRequired = 10, text = " 7/10 Slay northern raiders, Tester." },
+    { __index = function(_, k) error("unexpected objective field " .. k) end })
+  h.s.objectives = {
+    row, { type = "item", numRequired = 4, text = "Tools recovered: 2/4" },
+    { type = "event", numRequired = 0, text = "34.2% - Fill the jar." },
+    { type = "progressbar", numRequired = 100, text = "Fill the flask: 6,4%" },
+    { type = "item", numRequired = 1, text = "Recovered 2/4 before nightfall" },
+    { type = secret, numRequired = 1, text = "Hidden type" }, secret,
+    { type = "object", numRequired = secret, text = "Hidden count" },
+    { type = "item", numRequired = 1, text = secret },
+    { type = "object", numRequired = 1, text = string.rep("a", 399) .. "é" },
+  }
+  for i = 1, 13 do h.s.objectives[#h.s.objectives + 1] = { type = "reputation", numRequired = i, text = "Earn trust." } end
+  h.s.points = { secret, { questID = secret, x = 0.5, y = 0.5 }, { questID = 7788, x = 0.5, y = 0.5 },
+    { questID = 7787, mapID = secret, x = 0.5, y = 0.5 }, { questID = 7787, mapID = 1430, x = 0.5, y = 0.5 },
+    { questID = 7787, x = 0, y = 0 }, { questID = 7787, x = secret, y = 0.5 },
+    { questID = 7787, isQuestStart = true, x = 0.5, y = 0.5 },
+    { questID = 7787, isQuestStart = secret, x = 0.5, y = 0.5 },
+    { questID = 7787, x = -1, y = 0.5 }, { questID = 7787, x = 0.412345, y = 0.654321 },
+    { questID = 7787, x = 0.41234, y = 0.65432 } }
+  for i = 1, 9 do h.s.points[#h.s.points + 1] = { questID = 7787, x = i / 10, y = 1 } end
+  h.event("QUEST_ACCEPTED", 5, secret)
+  assert(#h.events() == 0, "an older event with a secret quest id cannot use its log index as an id")
+  h.event("QUEST_ACCEPTED", 7787)
+  local e = h.events()[1]
+  assert(e and #e.obj == 12 and #e.poi == 8 and e.act == "accept", h.db().lastError)
+  assert(e.obj[1].text == "Slay northern raiders, $N." and e.obj[1].n == 10 and e.obj[1].t == "monster"
+    and e.obj[2].text == "Tools recovered" and e.obj[3].text == "Fill the jar." and e.obj[3].n == 0
+    and e.obj[4].text == "Fill the flask" and #e.obj[5].text == 399 and e.obj[12].n == 7, dump(e.obj))
+  assert(e.poi[1].map == 1429 and e.poi[1].x == 41.23 and e.poi[1].y == 65.43 and e.poi[2].x == 10
+    and e.poi[8].x == 70 and e.poi[8].y == 100 and h.s.waypointReads == 0, dump(e.poi))
+  h.event("QUEST_LOG_UPDATE"); h.drain()
+  assert(h.s.objReads == 1 and h.s.poiReads == 1, "already present fields are never refreshed")
+  h.event("QUEST_TURNED_IN", 7787)
+  assert(not h.events()[2].obj and not h.events()[2].poi, "accept only")
+
+  local late = errands()
+  late.s.objectives, late.s.points, late.s.combat = secret, secret, secret
+  late.event("QUEST_ACCEPTED", 7787)
+  local saved = late.events()[1]
+  assert(saved and not saved.obj and not saved.poi and late.s.poiReads == 0, "secret list or combat status")
+  late.s.objectives = { { type = "event", numRequired = 1, text = "Wait for dawn." } }
+  late.event("QUEST_DATA_LOAD_RESULT", secret, true)
+  late.event("QUEST_DATA_LOAD_RESULT", 7787, secret)
+  late.event("QUEST_DATA_LOAD_RESULT", 7788, true)
+  assert(not saved.obj and late.s.objReads == 1, "only a plain success for this quest can retry")
+  late.event("QUEST_DATA_LOAD_RESULT", 7787, true)
+  assert(saved.obj and not saved.poi and #late.events() == 1 and late.events()[1] == saved, "late objective amends in place")
+  late.s.combat, late.s.waypoint = false, { 0.12119, 0.9 }
+  late.s.uiMap = 1430
+  late.event("PLAYER_REGEN_ENABLED")
+  assert(not saved.poi and late.s.poiReads == 0, "no map read after moving zones")
+  late.s.uiMap = 1429
+  late.event("QUEST_POI_UPDATE")
+  assert(#saved.poi == 1 and saved.poi[1].x == 12.12 and late.s.waypointReads == 1, "waypoint fallback")
+  late.drain()
+  assert(late.s.objReads == 2 and late.s.poiReads == 1 and #late.events() == 1 and not late.db().lastError, "one write per field")
+
+  local function missing(setup, update, mayHaveObj)
+    local x = errands()
+    setup(x)
+    x.event("QUEST_ACCEPTED", 7787)
+    if update then update(x) end
+    x.drain()
+    local accept = x.events()[1]
+    assert(accept and (mayHaveObj or not accept.obj) and not accept.poi and not x.db().lastError, "missing data safely omitted")
+  end
+  missing(function(x) x.G.C_QuestLog = nil end)
+  missing(function(x) x.G.InCombatLockdown = nil end)
+  missing(function(x) x.s.combat = true; x.s.waypoint = { 0.1, 0.1 } end)
+  missing(function(x) x.s.waypoint = { 0.1, 0.1 }; x.G.C_QuestLog.ReadyForTurnIn = function() return true end end)
+  local function ready(x)
+    x.s.waypoint = { 0.1, 0.1 }; x.s.objectives = { { type = "event", numRequired = 1, text = "Wait for dawn." } }
+    x.event("QUEST_LOG_UPDATE")
+  end
+  missing(function() end, function(x) x.s.now = x.s.now + 11; ready(x) end)
+  missing(function() end, function(x) x.event("QUEST_REMOVED", 7787); ready(x) end)
+  missing(function() end, function(x) x.cmd("track drops off"); x.cmd("track drops on"); ready(x) end)
+  local full = errands({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  full.s.objectives, full.s.waypoint = { row }, { 0.1, 0.1 }
+  full.event("QUEST_ACCEPTED", 7787)
+  assert(full.s.objReads == 0 and not full.events()[2].obj and full.events()[2].poi, "half cap gates objective prose only")
+  print("OK   objective definitions and places, independent late data, caps, secrets, no progress counts")
 end
 
 -- 1) on by default for a new install only: a first load makes the table and records without any command; a table

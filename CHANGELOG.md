@@ -8,7 +8,9 @@
 
 - Record game-authored NPC speech and emotes when the client supplies a creature GUID and the speaker and player names can be checked. Known player names become $N. Ambiguous lines are skipped.
 
-Inventory export 3.12.0 (default) adds `gossip`, `read` and `line` observations. The observations section stays `v: 1`.
+- Include quest objective type, required amount and text on acceptance, along with any quest map markers the client supplies safely for that zone. Player progress counts are excluded.
+
+Inventory export 3.12.0 (default) adds `gossip`, `read` and `line` observations and optional `obj` and `poi` on quest accepts. The observations section stays `v: 1`.
 
 ## KutzInventory 1.18.0
 

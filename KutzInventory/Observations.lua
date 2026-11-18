@@ -34,6 +34,8 @@
 --           under the level cap with XP not turned off) and rep = { { f = factionID, d = change } }: the standings read at
 --           QUEST_COMPLETE and again 1 s after the turn-in, only the changes (never a standing), at most 6, none when
 --           loot, combat or another reward window or turn-in came in between.
+--           1.19.0 also records quest objective definitions (up to 12, with no progress counts) and up to 8 quest POIs
+--           on the acceptance map, when the client supplies them safely.
 --   vendor  npc, rx, filtered, items = { { id, n, link, price (copper per n, as shown), cost = { { item|currency, n } }, limited } }
 --           read under the merchant window's "all" item filter, put back at once; filtered = true when it could not be
 --           switched (the list then misses the items the class filter hides). The same stock and rx once an hour.
@@ -217,9 +219,9 @@ local function Where()
     if type(itype) == "string" and itype ~= "" and itype ~= "none" then
         w.itype, w.difficulty = itype, Int(difficulty)
     elseif w.uiMap and M.GetPlayerMapPosition then  -- coordinates only outside instances
-        local pos = Try(M.GetPlayerMapPosition, w.uiMap, "player")
-        if type(pos) == "table" and type(pos.GetXY) == "function" then
-            local x, y = Try(pos.GetXY, pos)
+        local pos = Plain(Try(M.GetPlayerMapPosition, w.uiMap, "player"))
+        if type(pos) == "table" then
+            local x, y = Try(Plain(pos.GetXY), pos)
             x, y = Num(x), Num(y)
             if x and y and (x > 0 or y > 0) and x <= 1 and y <= 1 then w.x, w.y = Round4(x), Round4(y) end
         end
@@ -645,12 +647,8 @@ local progress = nil                            -- { quest, text } from the "do 
 local hookedReward, haveTurnedInEvent = false, false
 -- the extras (1.18.0), filled in further down: facts from the quest log on accept; the reward window's XP and the
 -- reputation a turn-in changed. rep: the watch { quest, before = { [factionID] = standing }, at, turned, spoiled, e }
-local qx = { REP_MAX = 6, REP_D = 100000, STALE = 300, WAIT = 1, FACTIONS = 1000, GUILD = 1168, rep = nil }
-
-local function QuestId(...)                     -- QUEST_ACCEPTED is (index, questId) in older clients, (questId) in newer
-    local a, b = Plain((...)), Plain((select(2, ...)))
-    return Int(b, 1) or Int(a, 1)
-end
+local qx = { REP_MAX = 6, REP_D = 100000, STALE = 300, WAIT = 1, FACTIONS = 1000, GUILD = 1168, rep = nil,
+             OBJECTIVES = 12, POIS = 8, DATA_WAIT = 10, waiting = {} }
 
 -- The quest window's words. The game writes the character's name into them; it goes back to "$N", so the text is the
 -- quest's and not about the player. Cut to the field's limit on a whole UTF-8 character.
@@ -693,6 +691,10 @@ end
 function gameText.PlainText(s)
     s = Plain(s)
     if type(s) == "string" and not s:find("|", 1, true) and not s:find("%a+%-%d+%-%d+") then return s end
+end
+
+function gameText.Prose(s, max, names)
+    return gameText.PlainText(Prose(gameText.PlainText(s), max, names))
 end
 
 function gameText.OwnNames()
@@ -766,7 +768,7 @@ function gameText.Gossip(kind)
     else
         s = Try(GetGreetingText)
     end
-    local text = Prose(gameText.PlainText(s), TEXT_MAX.gossip, names)
+    local text = gameText.Prose(s, TEXT_MAX.gossip, names)
     if not text then return end
     local key = what .. ":" .. id .. ":" .. gameText.Checksum(text)
     gameText.Record("gossip", key, { [what] = id, text = text, kind = kind })
@@ -781,7 +783,7 @@ function gameText.BookMaterial()
     local got, raw = pcall(ItemTextGetMaterial)
     if not got or Secret(raw) then return nil, false end
     if raw == nil or raw == "" then return nil, true end
-    local material = Label(gameText.PlainText(raw), 40)
+    local material = gameText.PlainText(Label(gameText.PlainText(raw), 40))
     if not material then return nil, false end
     local lower = material:lower()
     if lower:find("mail", 1, true) or lower:find("letter", 1, true) or lower:find("stationery", 1, true) then
@@ -820,13 +822,13 @@ function gameText.BookPage()
     local page = gameText.Id(Try(ItemTextGetPage))
     if not page then return end
     local names = gameText.OwnNames()
-    local title = names and Label(Prose(rawTitle, 200, names), 200)
+    local title = names and Label(gameText.Prose(rawTitle, 200, names), 200)
     if not title then return end
     local subject = book.object and ("o:" .. book.object) or book.item and ("i:" .. book.item)
         or ("t:" .. gameText.Checksum(title))
     local key = subject .. ":" .. page
     if gameText.Index("read").seen[key] then return end
-    local text = Prose(gameText.PlainText(Try(ItemTextGetText)), TEXT_MAX.read, names)
+    local text = gameText.Prose(Try(ItemTextGetText), TEXT_MAX.read, names)
     if not text then return end
     local ok, more = pcall(ItemTextHasNextPage)
     local last = ok and not Secret(more) and (more == false or more == nil)
@@ -836,14 +838,19 @@ end
 
 -- Keep a candidate only from a secure post-hook, using the item ID and a cached item name. A
 -- synchronous BEGIN before this post-hook, a stale use or a different title can still record by title.
-function gameText.BookUse(id)
+function gameText.BookUse(id, info)
     gameText.bookUse = nil
     local d = DB()
-    if not (d and d.on and d.agreed and id and gameText.Room()) or gameText.InMail() then return end
-    local getName = C_Item and C_Item.GetItemNameByID or GetItemInfo
-    local title = gameText.PlainText(Try(getName, id))
+    if not (d and d.on and d.agreed and id and not gameText.book and gameText.Room()) or gameText.InMail() then return end
+    if Plain(info.isReadable) ~= true then return end
+    local title = gameText.PlainText(info.itemName)
     local clock = Num(Try(GetTime))
     if Label(title, 200) and clock then gameText.bookUse = { id = id, title = title, at = clock } end
+end
+
+local function QuestId(...)                     -- QUEST_ACCEPTED is (index, questId) in older clients, (questId) in newer
+    if select("#", ...) >= 2 then return gameText.Id((select(2, ...))) end
+    return gameText.Id((...))
 end
 
 local function QuestText(fields)                -- { title = GetTitleText, ... } -> { title = "...", ... } or nil
@@ -1773,7 +1780,7 @@ function line.Record(kind, text, recipient, guid)
     text = gameText.PlainText(text)
     if not text then return end
     local names = line.Names(recipient)
-    text = names and Prose(text, 8000, names, true)
+    text = names and gameText.PlainText(Prose(text, 8000, names, true))
     if not text or line.HasUnknownName(text) then return end
 
     text = Cut(text, TEXT_MAX.line)
@@ -1796,12 +1803,13 @@ function qx.Amend(e, fields)                    -- add fields to an event alread
     local d = DB()
     if not (d and d.on and d.agreed) then return end
     local list = d.events
-    for i = #list, math.max(1, #list - 200), -1 do
+    for i = #list, 1, -1 do
         if list[i] == e then
             local was = Size(e)
             for k, v in pairs(fields) do e[k] = v end
             bytes = bytes + Size(e) - was
-            return
+            if bytes > MAX_BYTES then Prune(d, true) end
+            return true
         end
     end
 end
@@ -1813,8 +1821,10 @@ function qx.Facts(quest, out)
     local L = C_QuestLog
     if not (L and type(L.GetLogIndexForQuestID) == "function" and type(L.GetInfo) == "function") then return true end
     local i = Int((Try(L.GetLogIndexForQuestID, quest)), 1)
-    local info = i and Try(L.GetInfo, i)
-    if type(info) ~= "table" or Plain(info.isHeader) == true or Int(info.questID, 1) ~= quest then return false end
+    local info = i and Plain(Try(L.GetInfo, i))
+    if type(info) ~= "table" or Int(info.questID, 1) ~= quest then return false end
+    local header = info.isHeader
+    if Secret(header) or header == true then return false end
     local lv, group, freq, F = Int(info.level, 1), Int(info.suggestedGroup, 2), Int(info.frequency), Enum and Enum.QuestFrequency
     if lv and lv <= 255 then out.lv = lv end
     if group and group <= 40 then out.group = group end
@@ -1823,6 +1833,98 @@ function qx.Facts(quest, out)
     end
     if Int((Try(L.GetTimeAllowed, quest)), 1) then out.timed = true end
     return true
+end
+
+-- Objectives supply their own required amount and wording. The UI can put progress at the front
+-- or the end, so remove both forms. A counter still inside the wording makes the row unsuitable.
+function qx.Objectives(get, quest)
+    local names = gameText.OwnNames()
+    if not names then return nil end
+    local list = Plain(Try(get, quest))
+    if type(list) ~= "table" then return nil end
+    local rows = {}
+    for _, v in ipairs(list) do
+        local r = Plain(v)
+        if type(r) == "table" then
+            local kind, n = Plain(r.type), Int(r.numRequired)
+            local text = gameText.PlainText(r.text)
+            if type(kind) == "string" and #kind <= 40 and kind:match("^[a-z][a-z0-9_%-]*$")
+                and n and n <= 2147483647 and text then
+                local fraction, percent = "%d+%s*/%s*%d+", "%d+[.,]?%d*%s*%%"
+                text = text:gsub("^%s*" .. fraction .. "%s*[:%-]?%s*", "")
+                           :gsub("%s*[:%-]?%s*" .. fraction .. "%s*$", "")
+                           :gsub("^%s*" .. percent .. "%s*[:%-]?%s*", "")
+                           :gsub("%s*[:%-]?%s*" .. percent .. "%s*$", "")
+                if not text:find(fraction) and not text:find(percent) then
+                    text = gameText.Prose(text, 400, names)
+                    if text and not text:find(fraction) and not text:find(percent) then
+                        rows[#rows + 1] = { t = kind, n = n, text = text }
+                    end
+                end
+            end
+        end
+        if #rows >= qx.OBJECTIVES then break end
+    end
+    return #rows > 0 and rows or nil
+end
+
+function qx.Poi(L, map, quest)
+    if Plain(Try(InCombatLockdown)) ~= false or not C_Map
+        or gameText.Id(Try(C_Map.GetBestMapForUnit, "player")) ~= map then return nil end
+    if type(L.ReadyForTurnIn) == "function" and not False(L.ReadyForTurnIn, quest) then return nil end
+    local rows, seen = {}, {}
+    local function add(x, y)
+        x, y = Num(x), Num(y)
+        if not (x and y and x >= 0 and y >= 0 and x <= 1 and y <= 1 and (x > 0 or y > 0)) then return end
+        local cx, cy = math.floor(x * 10000 + 0.5), math.floor(y * 10000 + 0.5)
+        local key = cx * 10001 + cy
+        if seen[key] or key == 0 then return end
+        seen[key] = true
+        rows[#rows + 1] = { map = map, x = cx / 100, y = cy / 100 }
+    end
+    local list = Plain(Try(L.GetQuestsOnMap, map))
+    if type(list) == "table" then
+        for _, v in ipairs(list) do
+            local r = Plain(v)
+            if type(r) == "table" and gameText.Id(r.questID) == quest then
+                local otherMap, start = r.mapID, r.isQuestStart
+                if not Secret(otherMap) and (otherMap == nil or gameText.Id(otherMap) == map)
+                    and not Secret(start) and (start == nil or start == false) then
+                    add(r.x, r.y)
+                end
+            end
+            if #rows >= qx.POIS then break end
+        end
+    end
+    if #rows == 0 then add(Try(L.GetNextWaypointForMap, quest, map)) end
+    return #rows > 0 and rows or nil
+end
+
+-- Fill each missing field from the first usable read. A late read still belongs to this accept,
+-- and carries only facts for the same quest; a late POI also needs the same player UI map.
+function qx.AcceptData(e)
+    local L, map = C_QuestLog, gameText.Id(e.where.uiMap)
+    if type(L) ~= "table" then return false end
+    local wantPoi = map and not e.poi and (type(L.GetQuestsOnMap) == "function" or type(L.GetNextWaypointForMap) == "function")
+    local wantObj = not e.obj and type(L.GetQuestObjectives) == "function" and gameText.Room()
+    if not wantObj and not wantPoi then return false end
+    local fields = {}
+    if wantPoi then fields.poi = qx.Poi(L, map, e.quest) end
+    if wantObj then
+        fields.obj = qx.Objectives(L.GetQuestObjectives, e.quest)
+        if fields.obj and not gameText.Room(Size(fields) - 2) then fields.obj = nil end
+    end
+    if next(fields) and not qx.Amend(e, fields) then return false end
+    return (wantObj and not e.obj) or (wantPoi and not e.poi)
+end
+
+function qx.Retry(quest)
+    local e = qx.waiting[quest]
+    if e and (time() - e.t > qx.DATA_WAIT or not qx.AcceptData(e)) then qx.waiting[quest] = nil end
+end
+
+function qx.RetryPending()
+    for quest in pairs(qx.waiting) do qx.Retry(quest) end
 end
 
 -- The XP the reward window shows (GetRewardXP), only while this character can gain XP: its level and the cap known and
@@ -2027,6 +2129,22 @@ function handlers.QUEST_ACCEPTED(...)
     if ok and not found then                    -- not in the log yet: once more a second later, added to the saved event
         qx.Later(function() local f = {}; if qx.Facts(quest, f) and next(f) then qx.Amend(e, f) end end)
     end
+    qx.waiting[quest] = nil
+    if qx.AcceptData(e) then
+        qx.waiting[quest] = e
+        qx.Later(function() if qx.waiting[quest] == e then qx.Retry(quest) end end)
+    end
+end
+function handlers.QUEST_DATA_LOAD_RESULT(quest, success)
+    quest = gameText.Id(quest)
+    if quest and Plain(success) == true then qx.Retry(quest) end
+end
+handlers.QUEST_LOG_UPDATE = qx.RetryPending
+handlers.QUEST_POI_UPDATE = qx.RetryPending
+handlers.PLAYER_REGEN_ENABLED = qx.RetryPending
+function handlers.QUEST_REMOVED(quest)
+    quest = gameText.Id(quest)
+    if quest then qx.waiting[quest] = nil end
 end
 function handlers.QUEST_PROGRESS()
     progress = { quest = Int(Try(GetQuestID), 1), text = Prose(Try(GetProgressText), TEXT_MAX.progress) }
@@ -2049,7 +2167,10 @@ function handlers.QUEST_COMPLETE()
 end
 function handlers.QUEST_TURNED_IN(questId)        -- (questId, xp, money): the money is never read, nor GetRewardMoney
     questId = Int(questId, 1)
-    if questId then TurnedIn(questId) end
+    if questId then
+        qx.waiting[questId] = nil
+        TurnedIn(questId)
+    end
 end
 -- what could move a reputation besides the turn-in being watched
 function handlers.PLAYER_REGEN_DISABLED() qx.Spoil() end
@@ -2100,7 +2221,8 @@ function handlers.HEARTHSTONE_BOUND() Sighting("npc", true, { "inn" }) end
 
 local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
-                    "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
+                    "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN", "QUEST_REMOVED",
+                    "QUEST_DATA_LOAD_RESULT", "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "PLAYER_REGEN_ENABLED",
                     "GOSSIP_SHOW", "QUEST_GREETING", "MAIL_SHOW", "MAIL_CLOSED",
                     "ITEM_TEXT_BEGIN", "ITEM_TEXT_READY", "ITEM_TEXT_CLOSED",
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
@@ -2123,7 +2245,7 @@ local function Enable()
             local info = type(bag) == "number" and slot and Plain(Try(C_Container.GetContainerItemInfo, bag, slot))
             local id = type(info) == "table" and gameText.Id(info.itemID)
             if id then lastUsedItem.id, lastUsedItem.at = id, Now() end
-            pcall(gameText.BookUse, id)
+            pcall(gameText.BookUse, id, info)
         end)
     end
     if not taxi.hooked and type(hooksecurefunc) == "function" and type(TakeTaxiNode) == "function" then
@@ -2139,6 +2261,7 @@ local function Disable()
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
     taxi.Reset()
     gameText.mail, gameText.book, gameText.bookUse = false, nil, nil
+    qx.waiting = {}
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
 end
 

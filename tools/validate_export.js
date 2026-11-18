@@ -23,7 +23,7 @@ const FILES = {
 const compiled = {};
 function validator(kind) {
   if (!compiled[kind]) {
-    const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
+    const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true, multipleOfPrecision: 8 });
     addFormats(ajv);
     compiled[kind] = ajv.compile(JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, FILES[kind]), "utf8")));
   }

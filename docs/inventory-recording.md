@@ -39,6 +39,10 @@ Game-authored book and object pages follow the same text gate and saved dedup ru
 
 NPC speech and emotes are game text from an identified, uncontrolled creature. The recorder replaces known player names with `$N` and skips ambiguous text or speakers. Other players' metadata, player chat and mail are excluded.
 
+Quest accepts can include the quest log's objective types, required amounts and wording, with the recording character's name replaced with `$N`. Progress counters and completion status are excluded. The current zone's game quest markers are read out of combat through read-only APIs and omitted when unusable. Missing data can fill the same accept event shortly after it is saved.
+
+The synthetic examples add 469 Lua bytes per gossip, 584 per read page, 443 per line and 419 per quest accept with two objectives and two points. Their compact export sizes are 299, 390, 273 and 201 bytes respectively. The addon's cap estimates for those examples are 302, 394, 276 and 207 bytes. As a size illustration, a long city session with 50 unique recordable lines, 20 gossip texts, five pages and five such quest accepts adds about 39 KB to SavedVariables, including dedup keys and excluding the preexisting fields of the five accepts. Repeats add no data while their keys are kept. At capacity, the three FIFO indexes take up to about 280 KB of Lua using the example serializer. The live file size varies with text lengths, serializer overhead and other activity; the half-cap gate is measured against the approximate saved-event size.
+
 `Raids.lua` records only manually tracked raid strings within their active window while grouped/instanced. It includes group rosters and system loot messages, with other players' names. `Prices.lua` records vendor prices and manual AH scans independently of the observation switch. No module sends HTTP requests; desktop upload is separate.
 
 ## Hearth, Legacy Trees and identity

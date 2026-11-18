@@ -39,7 +39,7 @@ const SCHEMA_VERSION = "2.1.0";
 // seconds a flight from one node to another took); npcs entries may carry svc, the services an NPC was seen to offer;
 // quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin, reputation changes
 // only) (KutzInventory 1.18.0). observations.v stays 1.
-// 3.12.0: game text observations (KutzInventory 1.19.0). observations.v stays 1.
+// 3.12.0: game text observations and quest objective and map data (KutzInventory 1.19.0). observations.v stays 1.
 const SCHEMA_VERSION_3 = "3.12.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
@@ -502,6 +502,34 @@ function obsQuestFacts(e) {
                 freq: OBS_QUEST_FREQ.includes(e.freq) ? e.freq : undefined, timed: e.timed === true ? true : undefined,
                 startItem: obsInt(e.startItem, 1) });
 }
+const OBS_OBJECTIVE_TYPE = /^[a-z][a-z0-9_-]{0,39}$/;
+const OBS_PROGRESS = /\d+\s*\/\s*\d+|\d+[.,]?\d*\s*%/;
+function obsQuestObjectives(list) {
+  const out = [];
+  for (const row of asList(list)) {
+    if (!row || typeof row !== "object") continue;
+    const t = obsText(row.t, OBS_OBJECTIVE_TYPE), n = obsInt(row.n), text = obsProse(row.text, 400);
+    if (t && n !== undefined && text && !OBS_PROGRESS.test(text)) out.push({ t, n, text });
+    if (out.length === 12) break;
+  }
+  return out.length ? out : undefined;
+}
+const obsPercent = (v) => (typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v * 100) / 100 : undefined);
+function obsQuestPoi(list, map) {
+  if (!obsInt(map, 1)) return undefined;
+  const out = [], seen = new Set();
+  for (const row of asList(list)) {
+    if (!row || typeof row !== "object" || row.map !== map) continue;
+    const x = obsPercent(row.x), y = obsPercent(row.y);
+    if (x === undefined || y === undefined || (x === 0 && y === 0)) continue;
+    const key = x + ":" + y;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ map, x, y });
+    if (out.length === 8) break;
+  }
+  return out.length ? out : undefined;
+}
 function obsQuestRep(list) {
   if (!Array.isArray(list) && !(list && typeof list === "object")) return undefined;
   const rows = asList(list);
@@ -560,7 +588,9 @@ function observationEvent(e) {
     if ((e.act !== "accept" && e.act !== "turnin") || obsInt(e.quest, 1) === undefined) return null;
     const giver = obsInt(e.npc, 1) !== undefined ? { npc: e.npc } : obsInt(e.object, 1) !== undefined ? { object: e.object } : {};
     const out = { ...base, act: e.act, quest: e.quest, ...giver, ...place() };
-    if (e.act === "accept") Object.assign(out, obsQuestFacts(e));
+    if (e.act === "accept") {
+      Object.assign(out, obsQuestFacts(e), pick({ obj: obsQuestObjectives(e.obj), poi: obsQuestPoi(e.poi, out.where.uiMap) }));
+    }
     const text = obsQuestText(e.text, e.act);
     if (text) out.text = text;
     if (e.act === "turnin" && e.rewards && typeof e.rewards === "object") {

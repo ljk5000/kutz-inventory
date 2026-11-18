@@ -78,7 +78,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `where`: instance/map ID, UI map, instance type/difficulty inside an instance, otherwise `x`/`y` from 0–1 rounded to four places.
 - `who`: recording character's level, numeric class, faction, and optional **name/surname** (3.3.0). No realm or player GUID in this block.
 - `loot`: `src` with kind (mob/boss/chest/fishing/herb/mine/skin/container/other, plus schema-compatible future kinds), NPC/object/item ID, creature/object GUID when known, level and attribution method; `items: [{ id, n, link?, won? }]`. Coins-only windows have empty items. Known reopened corpses are deduplicated, with skinning separate.
-- `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money. From 3.11.0, accept may carry the quest's level, group size, daily/weekly, time limit and starting item, and turn-in the XP and the reputation changes ([below](#quest-extras-3110)).
+- `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money. From 3.11.0, accept may carry the quest's level, group size, daily/weekly, time limit and starting item, and turn-in the XP and the reputation changes ([below](#quest-extras-3110)). From 3.12.0, accept may also carry `obj` and `poi` ([below](#quest-objectives-and-places-3120)).
 - `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session. From 3.9.0, optional `rx` and `filtered` (below).
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
@@ -132,7 +132,7 @@ KutzInventory 1.19.0 records these events with the usual `id`, `t`, `b?`, `where
   npc:     integer 1-2147483647   creature or vehicle ID from UnitGUID("npc"), exactly one of npc or object
   object:  integer 1-2147483647   game object ID from UnitGUID("npc"), exactly one of npc or object
   kind:    "gossip" | "greeting"  the window that supplied the text
-  text:    prose 1-4000           normalized game text, line breaks allowed; no markup, GUID shapes or other control characters
+  text:    prose 1-4000           normalized game text, line breaks allowed; no pipe markup, GUID shapes or other control characters
 }
 ```
 
@@ -142,8 +142,8 @@ The recorder trims prose, removes control characters other than line feeds, and 
 
 ```text
 { id, t, b?, type: "read", where, who,
-  item?:     integer 1-2147483647   cached bag item ID from a secure UseContainerItem post-hook within 1 second before
-                                    the open, with matching title and no "npc" GUID
+  item?:     integer 1-2147483647   bag item ID from a secure UseContainerItem post-hook within 1 second before the open,
+                                    from a slot flagged readable, with matching item name and no "npc" GUID
   object?:   integer 1-2147483647   game object ID from UnitGUID("npc") on open
   title:     label 1-200           ItemTextGetItem(), required even when a source ID is known
   page:      integer 1-2147483647   ItemTextGetPage(), first page is 1
@@ -166,7 +166,7 @@ At most one source ID is present. When provenance is ambiguous or unavailable, a
 }
 ```
 
-Speaker GUIDs and recipient metadata are never saved. Player chat and player or pet speakers are excluded. The exporter drops events with invalid required fields. Location uses the usual `where` precision.
+Speaker GUIDs and recipient metadata are never saved. Player chat and player or pet speakers are excluded. The unknown-name check relies on the game's capitalization of substituted names. Ambiguous lowercased words cannot be identified as names from the body alone. The exporter drops events with invalid required fields. Location uses the usual `where` precision.
 
 ### Flight masters and flights (3.11.0)
 
@@ -228,6 +228,27 @@ From 3.11.0 (KutzInventory 1.18.0) quest events may carry a few more facts; `obs
 `d` is what this character received, not the quest's listed reward: it includes the character's reputation bonuses, and `rep` includes any spill-over to other factions, so the same quest can differ between characters.
 
 **Never recorded:** quest money (`GetRewardMoney` is never called and the money argument of `QUEST_TURNED_IN` is never read), the player's money, and any standing, reputation level or renown level: `d` is a change, so a reader cannot tell from it where the character stands. Measured as compact JSON with a named `who`: the five accept fields add about 65 bytes to an accept (`lv` alone about 8), `xp` about 10 bytes to a turn-in and each `rep` entry about 20 (xp with two changes about 50; six changes about 120).
+
+### Quest objectives and places (3.12.0)
+
+These optional fields are on the existing `type: "quest", act: "accept"` event only. They are read on `QUEST_ACCEPTED`. Each missing field can be filled once on the same retained event from the first usable read within 10 seconds, on a quest-data, quest-log, quest-POI or combat-end update or a one-second fallback. Each field is independent. Abandoning or turning in the quest, or switching tracking off, cancels its pending read.
+
+```text
+obj?: [ 1-12 of {                first valid rows in C_QuestLog.GetQuestObjectives(quest) order
+  t:    string 1-40              objective type as supplied, matching [a-z][a-z0-9_-]{0,39}
+  n:    integer 0-2147483647     numRequired
+  text: prose 1-400             objective wording, with progress counters stripped and player name replaced with $N
+} ]
+poi?: [ 1-8 of {                 first distinct usable quest points in API order, on the accept event's where.uiMap
+  map:  integer 1-2147483647     UI map ID
+  x:    number 0-100             horizontal map percent, rounded to two decimal places
+  y:    number 0-100             vertical map percent, rounded to two decimal places
+} ]
+```
+
+`obj` is recorded only if it fits under the half-cap gate. Text retains line breaks and excludes pipe markup, GUID shapes and other control characters. The recorder strips leading or trailing ASCII fraction/percent counters and refuses text with a remaining such counter. It caps prose in UTF-8 bytes. Only the required amount is kept. `numFulfilled` and `finished` are never read. The exporter drops invalid rows, retains the first 12 valid rows, and omits an empty `obj`.
+
+`poi` comes from `C_QuestLog.GetQuestsOnMap(uiMapID)` rows for this quest and map, skipping offer markers. When no usable row exists, `C_QuestLog.GetNextWaypointForMap(quest, uiMapID)` can supply one point. Reads require a plain out-of-combat state and the player's map to still be the acceptance map; a quest flagged ready to turn in is skipped when the client supplies that check. There is no UI or map state change. Secret, missing, out-of-range and zero-origin points are omitted. Points are deduplicated after rounding. The exporter also enforces the acceptance map, deduplicates and caps the array, and omits an empty `poi`. These are game quest markers and can represent an objective area or waypoint. They contain no player progress counts. A missing `obj` or `poi` means the recorder had no usable reading.
 
 ### NPC summary (3.10.0)
 

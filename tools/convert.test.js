@@ -318,6 +318,53 @@ test("observations 3.12.0: line events retain safe fields only and reject malfor
                      { text: "x".repeat(2001) }]) assert.equal(obs(bad), null);
 });
 
+test("observations 3.12.0: the schema rejects invalid game text events", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([LUA]).inventory;
+  const withEvent = (event) => ({ ...doc, observations: { v: 1, addon: "1.19.0", events: [event] } });
+  for (const kind of ["gossip", "read", "line"]) {
+    const event = doc.observations.events.find((e) => e.type === kind);
+    assert.deepEqual(validateExport(withEvent(event)), []);
+    const bad = kind === "gossip" ? [{ npc: undefined }, { object: 1 }, { kind: "option" }]
+      : kind === "read" ? [{ item: 1 }, { material: "Mail" }, { creator: "Examplewriter" }, { last: false }]
+      : [{ text: "é" }, { kind: "party" }, { guid: "discard" }];
+    for (const patch of [...bad, { text: "Player-1-26" }, { text: "|" }]) {
+      assert.ok(validateExport(withEvent({ ...event, ...patch })).length, "schema rejected invalid " + kind);
+    }
+  }
+});
+
+test("observations 3.12.0: quest accept data is bounded, progress-free and tied to its map", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([LUA]).inventory;
+  const event = { id: "abc123-1", t: 100, type: "quest", act: "accept", quest: 7787, where: { uiMap: 1449 } };
+  const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]).events[0];
+  const valid = { t: "progressbar", n: 0, text: "Fill the jar." };
+  const point = { map: 1449, x: 65.43, y: 50.12 };
+  const data = obs({
+    obj: [null, { ...valid, text: "0/4 Fill the jar." }, { ...valid, text: "Fill 5/9 jars." },
+      { ...valid, text: "Fill the jar: 45%" }, { ...valid, n: -1 }, { ...valid, t: "NOT_A_TYPE" },
+      { ...valid, text: "x".repeat(401) }, { ...valid, numFulfilled: 8, finished: true },
+      ...Array.from({ length: 14 }, (_, i) => ({ ...valid, n: i + 1 }))],
+    poi: [null, { ...point, map: 1 }, { ...point, y: -1 }, { ...point, x: 0, y: 0 },
+      { ...point, x: 65.431, source: "discard" }, point,
+      ...Array.from({ length: 9 }, (_, i) => ({ ...point, x: i + 1 }))],
+  });
+  assert.deepEqual(data.obj[0], valid);
+  assert.equal(data.obj.length, 12);
+  assert.deepEqual(data.poi[0], point);
+  assert.equal(data.poi.length, 8);
+  assert.equal(data.poi[7].x, 7);
+  const turnin = obs({ act: "turnin", obj: data.obj, poi: data.poi });
+  assert.ok(!("obj" in turnin) && !("poi" in turnin));
+  assert.deepEqual(validateExport({ ...doc, observations: { v: 1, addon: "1.19.0", events: [data] } }), []);
+  for (const bad of [{ obj: [] }, { obj: [{ ...valid, numFulfilled: 2 }] }, { obj: [{ ...valid, text: "2/4 Fill the jar" }] },
+                     { poi: [{ ...point, x: 65.431 }] }, { poi: [point, point] }, { poi: [{ ...point, x: 0, y: 0 }] },
+                     { act: "turnin" }]) {
+    assert.ok(validateExport({ ...doc, observations: { v: 1, addon: "1.19.0", events: [{ ...data, ...bad }] } }).length);
+  }
+});
+
 test("observations 3.11.0: taxi and flight events keep only the documented fields; a doubtful list is dropped whole", () => {
   const G = "Creature-0-4170-0-1234-352-000012AB10";
   const WHERE = `where = { map = 0, uiMap = 1429, x = 0.4123, y = 0.6543 }`;
