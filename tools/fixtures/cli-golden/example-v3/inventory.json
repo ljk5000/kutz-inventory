@@ -628,10 +628,14 @@
      "y": 0.3301
     },
     "who": {
-     "level": 60,
+     "level": 58,
      "class": 4,
      "faction": "Alliance"
     },
+    "lv": 58,
+    "group": 5,
+    "freq": "daily",
+    "timed": true,
     "text": {
      "title": "A Made-up Errand",
      "details": "You look capable, $N.\n\nTake this crate to the far camp.",
@@ -653,7 +657,7 @@
      "y": 0.3301
     },
     "who": {
-     "level": 60,
+     "level": 58,
      "class": 4,
      "faction": "Alliance"
     },
@@ -674,7 +678,18 @@
       19019
      ],
      "chose": 19019
-    }
+    },
+    "xp": 6600,
+    "rep": [
+     {
+      "f": 47,
+      "d": 62
+     },
+     {
+      "f": 72,
+      "d": 250
+     }
+    ]
    },
    {
     "id": "k1f9c2-000022",

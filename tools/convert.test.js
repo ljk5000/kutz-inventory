@@ -342,6 +342,68 @@ test("observations 3.11.0: one 40-node taxi event is about 1.6 KB, a flight even
   assert.ok(flight > 120 && flight < 220, "one flight event: " + flight + " bytes");
 });
 
+test("observations 3.11.0: quest extras on the right act only; each fact checked alone; rep all or nothing, never money", () => {
+  const doc = convert.convertSavedVariables([obsFile(`{
+    { id = "qacc-1", t = 100, type = "quest", act = "accept", quest = 5, npc = 9, ${WHO}, lv = 58, group = 5, freq = "daily", timed = true,
+      startItem = 19016, xp = 10, rep = { { f = 72, d = 250 } }, money = 300, standing = 9000 },
+    { id = "qacc-2", t = 101, type = "quest", act = "accept", quest = 6, ${WHO}, lv = 256, group = 1, freq = "monthly", timed = 1, startItem = 0 },
+    { id = "qacc-3", t = 102, type = "quest", act = "accept", quest = 7, ${WHO}, lv = 0, group = 41, freq = "Daily", timed = false, startItem = -4 },
+    { id = "qacc-4", t = 103, type = "quest", act = "accept", quest = 8, ${WHO}, lv = 255, group = 40, freq = "weekly", startItem = 2.5 },
+    { id = "qtur-1", t = 200, type = "quest", act = "turnin", quest = 5, ${WHO}, lv = 58, group = 5, freq = "daily", timed = true, startItem = 9,
+      xp = 6600, money = 123456, rewards = { items = {}, choices = {} },
+      rep = { { f = 87, d = -25 }, { f = 72, d = 250, standing = 9250 }, { f = 1834, d = 100000 } } },
+    { id = "qtur-2", t = 201, type = "quest", act = "turnin", quest = 5, ${WHO}, xp = 0, rep = {} },
+    { id = "qtur-3", t = 202, type = "quest", act = "turnin", quest = 5, ${WHO}, xp = 12.5, rep = { { f = 72, d = 0 } } },
+    { id = "qtur-4", t = 203, type = "quest", act = "turnin", quest = 5, ${WHO}, xp = -3, rep = { { f = 72, d = 100001 } } },
+    { id = "qtur-5", t = 204, type = "quest", act = "turnin", quest = 5, ${WHO}, rep = { { f = 72, d = 5 }, { f = 72, d = 6 } } },
+    { id = "qtur-6", t = 205, type = "quest", act = "turnin", quest = 5, ${WHO}, rep = { { f = 72, d = 5 }, { f = 0, d = 6 } } },
+    { id = "qtur-7", t = 206, type = "quest", act = "turnin", quest = 5, ${WHO}, rep = { { f = 72, d = 5 }, "x" } },
+    { id = "qtur-8", t = 207, type = "quest", act = "turnin", quest = 5, ${WHO}, rep = { { f = 72, d = 5.5 } } },
+    { id = "qtur-9", t = 208, type = "quest", act = "turnin", quest = 5, ${WHO}, rep = { { f = 72 } } },
+    { id = "qtur-10", t = 209, type = "quest", act = "turnin", quest = 5, ${WHO}, rep = "72:5" },
+    { id = "qtur-11", t = 210, type = "quest", act = "turnin", quest = 5, ${WHO},
+      rep = { { f = 1, d = 1 }, { f = 2, d = 1 }, { f = 3, d = 1 }, { f = 4, d = 1 }, { f = 5, d = 1 }, { f = 6, d = 1 } } },
+    { id = "qtur-12", t = 211, type = "quest", act = "turnin", quest = 5, ${WHO},
+      rep = { { f = 1, d = 1 }, { f = 2, d = 1 }, { f = 3, d = 1 }, { f = 4, d = 1 }, { f = 5, d = 1 }, { f = 6, d = 1 }, { f = 7, d = 1 } } },
+  }`)]).inventory;
+  const obs = doc.observations;
+  const by = Object.fromEntries(obs.events.map((e) => [e.id, e]));
+  const WHO_OUT = { level: 60, class: 4, faction: "Alliance" };
+  assert.deepEqual(by["qacc-1"], { id: "qacc-1", t: 100, type: "quest", act: "accept", quest: 5, npc: 9, where: {}, who: WHO_OUT,
+    lv: 58, group: 5, freq: "daily", timed: true, startItem: 19016 }, "accept: the facts, never xp, rep, money or a standing");
+  for (const id of ["qacc-2", "qacc-3"]) {
+    for (const k of ["lv", "group", "freq", "timed", "startItem"]) assert.ok(!(k in by[id]), id + " " + k);
+  }
+  assert.deepEqual([by["qacc-4"].lv, by["qacc-4"].group, by["qacc-4"].freq, "startItem" in by["qacc-4"]], [255, 40, "weekly", false]);
+  assert.deepEqual(by["qtur-1"], { id: "qtur-1", t: 200, type: "quest", act: "turnin", quest: 5, where: {}, who: WHO_OUT,
+    rewards: { items: [], choices: [] }, xp: 6600, rep: [{ f: 72, d: 250 }, { f: 87, d: -25 }, { f: 1834, d: 100000 }] },
+    "turnin: xp and the changes sorted by faction; never the accept facts, money or a standing");
+  for (const id of ["qtur-2", "qtur-3", "qtur-4", "qtur-5", "qtur-6", "qtur-7", "qtur-8", "qtur-9", "qtur-10", "qtur-12"]) {
+    assert.ok(!("rep" in by[id]), id + " rep: " + JSON.stringify(by[id].rep));
+    assert.ok(!("xp" in by[id]), id + " xp");
+  }
+  assert.equal(by["qtur-11"].rep.length, 6, "six changes are kept");
+  assert.ok(!/money|standing|123456|9250|9000/.test(JSON.stringify(obs)), "never money or a standing");
+  const { validateExport } = require("./validate_export");
+  assert.deepEqual(validateExport(doc), [], "the schema takes them");
+});
+
+// What the extras add to one quest event, as exported: an accept with level, group, daily, timed and start item; a turn-in
+// with XP and two reputation changes
+test("observations 3.11.0: the quest extras add about 65 bytes to an accept and 50 to a turn-in", () => {
+  const who = `who = { level = 30, class = 4, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" }`;
+  const where = `where = { map = 0, uiMap = 1429, x = 0.4123, y = 0.6543 }`;
+  const ev = (extra) => `{ id = "k1f9c2-000130", t = 1762906100, b = "1.60.1.70888", type = "quest", act = "accept", quest = 7787,
+    npc = 11811, ${where}, ${who}${extra} }`;
+  const turn = (extra) => `{ id = "k1f9c2-000131", t = 1762906400, b = "1.60.1.70888", type = "quest", act = "turnin", quest = 7787,
+    npc = 11811, ${where}, ${who}, rewards = { items = { { id = 19019, n = 1 } }, choices = {} }${extra} }`;
+  const size = (lua) => Buffer.byteLength(JSON.stringify(convert.convertSavedVariables([obsFile(`{ ${lua} }`)]).inventory.observations.events[0]));
+  const accept = size(ev(`, lv = 58, group = 5, freq = "daily", timed = true, startItem = 19016`)) - size(ev(""));
+  const turnin = size(turn(`, xp = 6600, rep = { { f = 72, d = 250 }, { f = 47, d = 62 } }`)) - size(turn(""));
+  assert.ok(accept > 60 && accept < 90, "accept extras: " + accept + " bytes");
+  assert.ok(turnin > 45 && turnin < 75, "turn-in extras: " + turnin + " bytes");
+});
+
 test("observations: absent when the module is missing, off with nothing recorded, or has only broken events", () => {
   assert.ok(!("observations" in convert.convertSavedVariables(["KutzInventoryDB = { chars = {} }"]).inventory));
   assert.ok(!("observations" in convert.convertSavedVariables([obsFile("{}")]).inventory));
@@ -371,8 +433,8 @@ test("observations: only known fields with the right types; never money, players
     where: { map: 0, uiMap: 1429, x: 0.1235 }, who: { level: 60, class: 4, faction: "Alliance" }, items: [{ id: 2589, n: 1 }] });
   assert.deepEqual(mismatched.src, { kind: "mob", npc: 7 }, "a GUID that disagrees with the id is dropped");
   assert.deepEqual(quest, { id: "abcd-4", t: 103, type: "quest", act: "turnin", quest: 5, npc: 9, where: {},
-    who: { level: 60, class: 4, faction: "Alliance", name: "Tester" }, rewards: { items: [], choices: [1, 2] } },
-    "who keeps the character's own name (3.3.0); a surname with game markup and any GUID go");
+    who: { level: 60, class: 4, faction: "Alliance", name: "Tester" }, rewards: { items: [], choices: [1, 2] }, xp: 10 },
+    "who keeps the character's own name (3.3.0); a surname with game markup and any GUID go; xp since 3.11.0");
   assert.deepEqual(vendor.items, [{ id: 4, n: 1, price: 7, limited: null }]);
   assert.deepEqual(inside.where, { map: 409, itype: "raid", difficulty: 9 }, "no x/y inside an instance");
   assert.deepEqual(inside.src, { kind: "mob", npc: 7, guid: "Creature-0-1-0-1-7-AB" });

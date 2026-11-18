@@ -1,7 +1,7 @@
 // Offline check for KutzInventory/Observations.lua (default-on drop / quest / vendor / trainer recording) in a
 // small fake game: on from a new install's first load (an opt-in era install keeps its choice), nothing recorded while off,
 // /kinv track (status, off, on again), the one-time note, each event type (loot per source incl. coin-only opens, skinning / herbs / fishing / containers,
-// quests with rewards, vendors with costs, rx and the item filter, trainers' whole lists, flight masters and flight times), item links cut to colour, id and name, the character's own name and surname
+// quests with rewards and their extras (level, group, daily, timed, start item, XP, reputation changes), vendors with costs, rx and the item filter, trainers' whole lists, flight masters and flight times), item links cut to colour, id and name, the character's own name and surname
 // (never anyone else's), that gold and other players are never recorded, the caps and pruning,
 // and that a client without the APIs records nothing and raises no error.
 "use strict";
@@ -428,6 +428,241 @@ do
   g.event("QUEST_DETAIL"); g.event("QUEST_ACCEPTED", 7787); g.event("QUEST_COMPLETE"); g.event("QUEST_TURNED_IN", 7787)
   assert(not g.events()[2].text and g.events()[3].text.title == "T", "kept accept text is not repeated; the turn-in text is new")
   print("OK   quest text: title, details, objectives, progress and completion as shown, own name as $N, once per quest and act, capped")
+end
+
+-- 6c) quest extras: lv, group, freq, timed and startItem on accept; xp and rep (changes only) on turn-in; never money or a
+--     standing. questy() adds the quest log, XP, combat and reputation APIs:
+--     s.log[questID] = info (with index); s.timeAllowed[questID]; s.level / s.maxLevel; s.xp; s.xpOff; s.combat;
+--     s.factions = { { id, st, header, rep (a header with its own standing), collapsed, parent, major } } in list order, a
+--     collapsed header hiding its children; s.expands counts ExpandAllFactionHeaders
+do
+  local QFREQ = { Default = 0, Daily = 1, Weekly = 2, ResetByScheduler = 3 }
+  local function questy(opts)
+    local h = fresh(opts); h.on()
+    local s, G = h.s, h.G
+    s.log, s.timeAllowed, s.level, s.maxLevel, s.factions, s.expands = {}, {}, 30, 60, {}, 0
+    G.UnitLevel = function(u) if u == "player" then return s.level end; local x = s.units[u]; return x and x.level end
+    G.C_QuestLog = { GetLogIndexForQuestID = function(q) return s.log[q] and s.log[q].index end,
+                     GetInfo = function(i) for _, x in pairs(s.log) do if x.index == i then return x end end end,
+                     GetTimeAllowed = function(q) local t = s.timeAllowed[q]; if t then return t, 0 end end }
+    G.Enum.QuestFrequency = QFREQ
+    G.GetRewardXP = function() return s.xp end
+    G.IsXPUserDisabled = function() return s.xpOff or false end
+    G.InCombatLockdown = function() return s.combat or false end
+    G.GetRewardMoney = function() s.moneyRead = true; return 123456 end
+    local function shown()
+      local out, hidden = {}, {}
+      for _, f in ipairs(s.factions) do
+        local under = f.parent and hidden[f.parent]
+        if not under then out[#out + 1] = f end
+        if f.header and (f.collapsed or under) then hidden[f.id] = true end
+      end
+      return out
+    end
+    local function data(f)
+      if f then return { factionID = f.id, name = "Faction " .. f.id, currentStanding = f.st, isHeader = f.header or false,
+                         isHeaderWithRep = f.rep or false, isCollapsed = f.collapsed or false } end
+    end
+    G.C_Reputation = { GetNumFactions = function() return #shown() end,
+                       GetFactionDataByIndex = function(i) return data(shown()[i]) end,
+                       GetFactionDataByID = function(id) for _, f in ipairs(s.factions) do if f.id == id then return data(f) end end end,
+                       ExpandAllFactionHeaders = function() s.expands = s.expands + 1; for _, f in ipairs(s.factions) do f.collapsed = false end end,
+                       CollapseFactionHeader = function(i) local f = shown()[i]; if f then f.collapsed = true end end,
+                       IsMajorFaction = function(id) for _, f in ipairs(s.factions) do if f.id == id then return f.major or false end end; return false end }
+    return h
+  end
+  local function standings(h, changes) for _, f in ipairs(h.s.factions) do if changes[f.id] then f.st = f.st + changes[f.id] end end end
+  local function guild(h)                       -- a reputation list: two collapsed headers, a header with its own standing
+    h.s.factions = { { id = 1118, st = 0, header = true, collapsed = true }, { id = 72, st = 9000, parent = 1118 },
+                     { id = 47, st = 3000, parent = 1118 }, { id = 69, st = 3100, parent = 1118 },
+                     { id = 1834, st = 500, header = true, rep = true }, { id = 1835, st = 42, parent = 1834 },
+                     { id = 1, st = 0, header = true, collapsed = true }, { id = 87, st = -6500, parent = 1 } }
+  end
+  local function quest(h, id)
+    local e = h.events()
+    for i = #e, 1, -1 do if e[i].quest == id then return e[i] end end
+  end
+  local function lastOf(h, act) local e = h.events(); for i = #e, 1, -1 do if e[i].act == act then return e[i] end end end
+
+  -- accept: the log's facts and the item that started it
+  local h = questy()
+  h.s.quest = 7787
+  h.s.log[7787] = { index = 3, questID = 7787, title = "Rise", level = 58, suggestedGroup = 5, frequency = 1, isHeader = false }
+  h.s.timeAllowed[7787] = 900
+  h.event("QUEST_DETAIL", 19016); h.event("QUEST_ACCEPTED", 7787)
+  local a = lastOf(h, "accept")
+  assert(a.lv == 58 and a.group == 5 and a.freq == "daily" and a.timed == true and a.startItem == 19016 and not a.xp and not a.rep, dump(a))
+  h.s.quest = 7788; h.s.log[7788] = { index = 4, questID = 7788, level = 60, suggestedGroup = 1, frequency = 2, isHeader = false }
+  h.event("QUEST_DETAIL", 0); h.event("QUEST_ACCEPTED", 7788)
+  a = lastOf(h, "accept")
+  assert(a.lv == 60 and a.freq == "weekly" and not a.group and not a.timed and not a.startItem, "group 1, no timer, item 0: " .. dump(a))
+  -- the facts belong to the quest the log holds: a header, another quest at that index, junk, ResetByScheduler, limits
+  local function facts(info, extra)
+    local x = questy(extra and extra.opts)
+    x.s.quest = 500; x.s.log[500] = info
+    if extra and extra.setup then extra.setup(x) end
+    x.event("QUEST_DETAIL", extra and extra.item); x.event("QUEST_ACCEPTED", extra and extra.accept or 500)
+    x.drain()
+    assert(not x.db().lastError, tostring(x.db().lastError))
+    return lastOf(x, "accept"), x
+  end
+  local function bare(e) return not (e.lv or e.group or e.freq or e.timed or e.startItem) end
+  assert(bare((facts({ index = 1, questID = 500, level = 10, isHeader = true }))), "a header is no quest")
+  assert(bare((facts({ index = 1, questID = 501, level = 10, suggestedGroup = 5 }))), "another quest's log entry")
+  assert(bare((facts({ index = 1, level = 10, suggestedGroup = 5 }))), "a log entry that does not say its quest")
+  local j = facts({ index = 1, questID = 500, level = 0, suggestedGroup = 41, frequency = 3 })
+  assert(bare(j), "level 0, group 41, ResetByScheduler: " .. dump(j))
+  j = facts({ index = 1, questID = 500, level = 256, suggestedGroup = 2.5, frequency = "1" })
+  assert(bare(j), "level 256, group 2.5, frequency a string: " .. dump(j))
+  j = facts({ index = 1, questID = 500, level = 12, suggestedGroup = 40, frequency = 0 }, { item = -3 })
+  assert(j.lv == 12 and j.group == 40 and not j.freq and not j.startItem, "group 40 kept, frequency 0, item -3: " .. dump(j))
+  j = facts({ index = 1, questID = 500, level = 12, frequency = 1 }, { setup = function(x) x.G.Enum.QuestFrequency = nil end })
+  assert(j.lv == 12 and not j.freq, "no Enum.QuestFrequency: no freq " .. dump(j))
+  j = facts({ index = 1, questID = 500, level = 12 }, { setup = function(x) x.s.timeAllowed[500] = 0 end })
+  assert(not j.timed, "a time allowed of 0 is no timer")
+  -- the item and the facts only for the quest the window showed, the facts still from the log
+  j = facts({ index = 1, questID = 600, level = 20 }, { item = 19016, accept = 600,
+                                                        setup = function(x) x.s.log[600] = x.s.log[500]; x.s.log[500] = nil end })
+  assert(j.quest == 600 and j.lv == 20 and not j.startItem, "another quest's window: no startItem " .. dump(j))
+  -- a secret value is left out; an API that errors or answers junk records nothing and raises nothing
+  local SECRET = {}
+  j = facts({ index = 1, questID = 500, level = SECRET, suggestedGroup = 3, frequency = SECRET },
+            { item = SECRET, opts = { globals = { issecretvalue = function(v) return v == SECRET end } } })
+  assert(not j.lv and j.group == 3 and not j.freq and not j.startItem, "secrets left out: " .. dump(j))
+  j = facts({ index = 1, questID = 500, level = 9 }, { setup = function(x) x.G.C_QuestLog.GetInfo = function() error("boom") end end })
+  assert(bare(j), "GetInfo errors")
+  j = facts({ index = 1, questID = 500, level = 9 }, { setup = function(x) x.G.C_QuestLog.GetInfo = function() return "x" end end })
+  assert(bare(j), "GetInfo answers junk")
+  j = facts({ index = 1, questID = 500, level = 9 }, { setup = function(x) x.G.C_QuestLog = nil end })
+  assert(bare(j), "no C_QuestLog")
+  -- not in the log yet when accepted: read once more a second later and added to the saved event; nothing more after that
+  local late = questy(); late.s.quest = 700
+  late.event("QUEST_DETAIL"); late.event("QUEST_ACCEPTED", 700)
+  local le = lastOf(late, "accept")
+  assert(bare(le), dump(le))
+  late.s.log[700] = { index = 1, questID = 700, level = 33, suggestedGroup = 3 }
+  late.drain()
+  assert(le.lv == 33 and le.group == 3 and late.db().events[#late.db().events] == le, "added a second later: " .. dump(le))
+  local never = questy(); never.s.quest = 701
+  never.event("QUEST_DETAIL"); never.event("QUEST_ACCEPTED", 701); never.drain(); never.drain()
+  assert(bare(lastOf(never, "accept")) and not never.db().lastError, "still not in the log: nothing")
+  local gone = questy(); gone.s.quest = 702
+  gone.event("QUEST_DETAIL"); gone.event("QUEST_ACCEPTED", 702)
+  gone.s.log[702] = { index = 1, questID = 702, level = 33 }; gone.cmd("track drops off"); gone.drain()
+  assert(bare(gone.db().events[#gone.db().events]), "turned off within the second: not added")
+
+  -- turn-in: the reward window's XP and the reputation the turn-in changed, as differences only
+  local t = questy(); guild(t)
+  t.s.quest, t.s.xp = 7787, 6600
+  t.s.units.questnpc = { guid = "Creature-0-4170-0-1234-11811-000012AAAB" }
+  t.event("QUEST_COMPLETE")
+  assert(t.s.expands == 1 and t.s.factions[1].collapsed and t.s.factions[7].collapsed, "headers opened for the read and closed again")
+  t.event("QUEST_TURNED_IN", 7787, 6600, 123456)
+  local e = lastOf(t, "turnin")
+  assert(e.xp == 6600 and e.npc == 11811 and not e.rep, "xp now, rep a second later: " .. dump(e))
+  standings(t, { [72] = 250, [47] = 62, [87] = -25, [1834] = 10 })
+  t.s.factions[#t.s.factions + 1] = { id = 999, st = 100 }          -- a faction met only now: no change to measure
+  t.drain()
+  assert(dump(e.rep) == "{1={d=62,f=47},2={d=250,f=72},3={d=-25,f=87},4={d=10,f=1834}}", dump(e.rep))
+  local all = dump(t.db())
+  assert(not all:find("9250") and not all:find("3062") and not all:find("6525") and not all:find("123456") and not t.s.moneyRead,
+         "never a standing, never the money")
+  assert(not e.lv and not e.startItem and not t.db().lastError, dump(e))
+
+  -- rep: nothing when anything else could have moved it, or the numbers are odd
+  local function turn(change, between, after, opts)
+    local x = questy(opts); guild(x)
+    x.s.quest, x.s.xp = 7787, 500
+    x.event("QUEST_COMPLETE")
+    if between then between(x) end
+    x.event("QUEST_TURNED_IN", 7787)
+    standings(x, change or { [72] = 250 })
+    if after then after(x) end
+    x.drain()
+    assert(not x.db().lastError, tostring(x.db().lastError))
+    return quest(x, 7787), x
+  end
+  local ok = turn()
+  assert(dump(ok.rep) == "{1={d=250,f=72}}", "the plain case: " .. dump(ok.rep))
+  local function norep(what, ...) local q = turn(...); assert(q and not q.rep, what .. ": " .. dump(q)); return q end
+  norep("loot before the turn-in", nil, function(x) x.event("LOOT_OPENED") end)
+  norep("loot within the second", nil, nil, function(x) x.event("LOOT_OPENED") end)
+  norep("combat before", nil, function(x) x.event("PLAYER_REGEN_DISABLED") end)
+  norep("combat within the second", nil, nil, function(x) x.event("PLAYER_REGEN_DISABLED") end)
+  local cw = questy(); guild(cw); cw.s.quest = 7787; cw.s.combat = true; cw.event("QUEST_COMPLETE"); cw.s.combat = false
+  cw.event("QUEST_TURNED_IN", 7787); standings(cw, { [72] = 250 }); cw.drain()
+  assert(not quest(cw, 7787).rep and cw.s.expands == 0, "the window opened in combat: not even read")
+  norep("in combat a second later", nil, nil, function(x) x.s.combat = true end)
+  norep("combat state unknown", nil, nil, function(x) x.G.InCombatLockdown = function() return SECRET end end,
+        { globals = { issecretvalue = function(v) return v == SECRET end } })
+  norep("over 5 minutes from the window", nil, function(x) x.s.clock = x.s.clock + 301 end)
+  norep("no change", {})
+  local seven = questy(); guild(seven); seven.s.factions[#seven.s.factions + 1] = { id = 930, st = 0 }
+  seven.s.quest = 7787; seven.event("QUEST_COMPLETE"); seven.event("QUEST_TURNED_IN", 7787)
+  standings(seven, { [72] = 1, [47] = 1, [69] = 1, [1834] = 1, [1835] = 1, [87] = 1, [930] = 1 }); seven.drain()
+  assert(not quest(seven, 7787).rep, "more than 6 changed: none kept")
+  local six = questy(); guild(six); six.s.quest = 7787; six.event("QUEST_COMPLETE"); six.event("QUEST_TURNED_IN", 7787)
+  standings(six, { [72] = 1, [47] = 1, [69] = 1, [1834] = 1, [1835] = 1, [87] = 1 }); six.drain()
+  assert(#quest(six, 7787).rep == 6, "six are kept")
+  norep("a change over 100000", { [72] = 100001 })
+  assert(dump(turn({ [72] = -100000 }).rep) == "{1={d=-100000,f=72}}", "100000 is still a change")
+  norep("recording turned off within the second", nil, nil, function(x) x.cmd("track drops off") end)
+  local nr = questy(); nr.G.C_Reputation = nil; guild(nr); nr.s.quest = 7787
+  nr.event("QUEST_COMPLETE"); nr.event("QUEST_TURNED_IN", 7787); nr.drain()
+  assert(not quest(nr, 7787).rep and not nr.db().lastError, "no C_Reputation: no rep, no error")
+  local nt = questy(); guild(nt); nt.s.quest = 7787; nt.G.C_Timer = nil
+  nt.event("QUEST_COMPLETE"); nt.event("QUEST_TURNED_IN", 7787); standings(nt, { [72] = 250 })
+  assert(not quest(nt, 7787).rep and nt.s.expands == 0 and not nt.db().lastError, "no timer: nothing is read")
+  -- a renown faction (its standing restarts each level) and a secret standing are left out; the rest still counts
+  local mj = turn({ [72] = 250, [47] = 9 }, function(x) x.s.factions[3].major = true end)
+  assert(dump(mj.rep) == "{1={d=250,f=72}}", "renown left out: " .. dump(mj.rep))
+  local sc = turn({ [72] = 250 }, nil, function(x) x.s.factions[3].st = SECRET end,
+                  { globals = { issecretvalue = function(v) return v == SECRET end } })
+  assert(dump(sc.rep) == "{1={d=250,f=72}}", "a secret standing is left out: " .. dump(sc.rep))
+  -- another quest's window or turn-in in between: neither turn-in keeps rep
+  local two = questy(); guild(two); two.s.quest = 7787
+  two.event("QUEST_COMPLETE"); two.event("QUEST_TURNED_IN", 7787)
+  two.s.quest = 7788; two.event("QUEST_COMPLETE"); two.event("QUEST_TURNED_IN", 7788)
+  standings(two, { [72] = 250 }); two.drain()
+  assert(not quest(two, 7787).rep and not quest(two, 7788).rep, "two turn-ins within the second")
+  local tw = questy(); guild(tw); tw.s.quest = 7787
+  tw.event("QUEST_COMPLETE"); tw.event("QUEST_TURNED_IN", 7787); tw.event("QUEST_TURNED_IN", 7790)
+  standings(tw, { [72] = 250 }); tw.drain()
+  assert(not quest(tw, 7787).rep and not quest(tw, 7790).rep, "another turn-in within the second")
+  local other = questy(); guild(other); other.s.quest = 7787
+  other.event("QUEST_COMPLETE"); other.event("QUEST_TURNED_IN", 7790); standings(other, { [72] = 250 }); other.drain()
+  assert(not quest(other, 7790).rep, "a turn-in of a quest whose window was not read")
+  -- a quest accepted within the second (the next one in a chain) cannot move a reputation: rep is kept
+  local chain = turn(nil, nil, function(x) x.s.quest = 7788; x.event("QUEST_DETAIL"); x.event("QUEST_ACCEPTED", 7788) end)
+  assert(dump(chain.rep) == "{1={d=250,f=72}}", "a chained accept: " .. dump(chain.rep))
+  -- a window read again before the turn-in starts over from the new read
+  local again = turn({ [72] = 250 }, function(x) standings(x, { [72] = 40 }); x.event("QUEST_COMPLETE") end)
+  assert(dump(again.rep) == "{1={d=250,f=72}}" and again.xp == 500, dump(again))
+
+  -- xp: only while this character can gain XP
+  local function xp(setup, opts)
+    local x = questy(opts); x.s.quest, x.s.xp = 7787, 6600
+    if setup then setup(x) end
+    x.event("QUEST_COMPLETE"); x.event("QUEST_TURNED_IN", 7787, 6600, 123456); x.drain()
+    assert(not x.db().lastError and not x.s.moneyRead, tostring(x.db().lastError))
+    return quest(x, 7787).xp
+  end
+  assert(xp() == 6600, "under the cap")
+  assert(xp(function(x) x.G.IsXPUserDisabled = nil end) == 6600, "a client without the XP lock")
+  assert(not xp(function(x) x.s.level = 60 end), "at the level cap")
+  assert(not xp(function(x) x.s.level = 70 end), "over the cap")
+  assert(not xp(function(x) x.s.xpOff = true end), "XP turned off")
+  assert(not xp(function(x) x.G.IsXPUserDisabled = function() error("no") end end), "the XP lock unreadable")
+  assert(not xp(function(x) x.G.IsXPUserDisabled = function() return SECRET end end,
+                { globals = { issecretvalue = function(v) return v == SECRET end } }), "the XP lock a secret")
+  assert(not xp(function(x) x.G.GetMaxPlayerLevel = nil end), "the cap unknown")
+  assert(not xp(function(x) x.s.xp = 0 end), "0 XP")
+  assert(not xp(function(x) x.s.xp = 12.5 end), "not a whole number")
+  assert(not xp(function(x) x.s.xp = SECRET end, { globals = { issecretvalue = function(v) return v == SECRET end } }), "XP a secret")
+  local wx = questy(); wx.s.quest, wx.s.xp = 7787, 6600
+  wx.event("QUEST_COMPLETE"); wx.event("QUEST_TURNED_IN", 7790)
+  assert(not quest(wx, 7790).xp, "a turn-in of another quest than the window's")
+  print("OK   quest extras: lv, group, freq, timed, startItem on accept; xp under the cap; rep changes only, dropped when unsure; no money")
 end
 
 -- 7) vendors: items, stack, price, extended costs, limited stock; the same stock once an hour
@@ -919,7 +1154,7 @@ do
                        "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                        "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                        "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
-                       "HEARTHSTONE_BOUND" }) do
+                       "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED" }) do
     h.event(e, 1, 2, 3)
   end
   h.drain()

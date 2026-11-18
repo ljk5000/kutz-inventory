@@ -786,10 +786,14 @@ KutzInventoryObsDB = {
 				["y"] = 0.3301,
 			},
 			["who"] = {
-				["level"] = 60,
+				["level"] = 58,
 				["class"] = 4,
 				["faction"] = "Alliance",
 			},
+			["lv"] = 58,
+			["group"] = 5,
+			["freq"] = "daily",
+			["timed"] = true,
 			["text"] = {
 				["title"] = "A Made-up Errand",
 				["details"] = "You look capable, $N.\n\nTake this crate to the far camp.",
@@ -811,7 +815,7 @@ KutzInventoryObsDB = {
 				["y"] = 0.3301,
 			},
 			["who"] = {
-				["level"] = 60,
+				["level"] = 58,
 				["class"] = 4,
 				["faction"] = "Alliance",
 			},
@@ -827,6 +831,17 @@ KutzInventoryObsDB = {
 					19019, -- [2]
 				},
 				["chose"] = 19019,
+			},
+			["xp"] = 6600,
+			["rep"] = {
+				{
+					["f"] = 47,
+					["d"] = 62,
+				}, -- [1]
+				{
+					["f"] = 72,
+					["d"] = 250,
+				}, -- [2]
 			},
 			["text"] = {
 				["title"] = "A Made-up Errand",

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/inventory-export.v3.schema.json",
   "title": "KutzInventory export 3.x",
-  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took); npcs entries may carry svc, the services an NPC was seen to offer.",
+  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took); npcs entries may carry svc, the services an NPC was seen to offer; quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin: the reputation changes, never a standing).",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -1597,7 +1597,7 @@
         },
         {
           "type": "object",
-          "description": "A quest was accepted or turned in. rewards only on turnin; never the money or XP. text (since 3.6.0) is the quest's own words.",
+          "description": "A quest was accepted or turned in. rewards only on turnin; never the money. text (since 3.6.0) is the quest's own words. Since 3.11.0: lv, group, freq, timed and startItem only on accept; xp and rep only on turnin; each is left out when the client did not say or the addon was not sure.",
           "required": [
             "id",
             "t",
@@ -1751,8 +1751,109 @@
                   "description": "What the ender says in the reward window (GetRewardText)."
                 }
               }
+            },
+            "lv": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 255,
+              "description": "Since 3.11.0, accept only: the quest's level as the quest log shows it (C_QuestLog.GetInfo level). On a client that scales quests to the character, the level it showed this character."
+            },
+            "group": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 40,
+              "description": "Since 3.11.0, accept only: the quest log's suggested group size (suggestedGroup), only when 2 or more."
+            },
+            "freq": {
+              "enum": [
+                "daily",
+                "weekly"
+              ],
+              "description": "Since 3.11.0, accept only: a daily or weekly quest (the quest log's frequency, Enum.QuestFrequency Daily or Weekly). Absent for any other quest, or when the client did not say."
+            },
+            "timed": {
+              "const": true,
+              "description": "Since 3.11.0, accept only: the quest has a time limit (C_QuestLog.GetTimeAllowed above 0 when it was accepted). Absent when it has none or the client did not say: absent is not proof of no timer."
+            },
+            "startItem": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "Since 3.11.0, accept only: the item that started the quest (the QUEST_DETAIL questStartItemID), only when the window that offered it showed this very quest."
+            },
+            "xp": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "Since 3.11.0, turnin only: the XP the reward window showed (GetRewardXP), as offered to this character (it may include the character's XP bonuses). Only while the character is under the level cap with XP not turned off; never 0."
+            },
+            "rep": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "description": "Since 3.11.0, turnin only: the reputation the turn-in changed, as changes, never a standing. Each faction's standing was read when the reward window opened and again about a second after the turn-in; only factions in both reads that changed, sorted by f, each once. Absent when nothing changed, more than 6 changed, or something else could have moved them in between (loot, combat, another reward window or turn-in, more than 5 minutes from the window to the turn-in).",
+              "items": {
+                "type": "object",
+                "required": [
+                  "f",
+                  "d"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "f": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "The faction ID (factionID)."
+                  },
+                  "d": {
+                    "type": "integer",
+                    "minimum": -100000,
+                    "maximum": 100000,
+                    "not": {
+                      "const": 0
+                    },
+                    "description": "The change in reputation points: positive gained, negative lost. Never 0."
+                  }
+                }
+              }
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "act": {
+                    "const": "accept"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "xp": false,
+                  "rep": false
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "act": {
+                    "const": "turnin"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "lv": false,
+                  "group": false,
+                  "freq": false,
+                  "timed": false,
+                  "startItem": false
+                }
+              }
+            }
+          ]
         },
         {
           "type": "object",

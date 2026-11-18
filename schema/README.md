@@ -78,7 +78,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `where`: instance/map ID, UI map, instance type/difficulty inside an instance, otherwise `x`/`y` from 0–1 rounded to four places.
 - `who`: recording character's level, numeric class, faction, and optional **name/surname** (3.3.0). No realm or player GUID in this block.
 - `loot`: `src` with kind (mob/boss/chest/fishing/herb/mine/skin/container/other, plus schema-compatible future kinds), NPC/object/item ID, creature/object GUID when known, level and attribution method; `items: [{ id, n, link?, won? }]`. Coins-only windows have empty items. Known reopened corpses are deduplicated, with skinning separate.
-- `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money.
+- `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money. From 3.11.0, accept may carry the quest's level, group size, daily/weekly, time limit and starting item, and turn-in the XP and the reputation changes ([below](#quest-extras-3110)).
 - `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session. From 3.9.0, optional `rx` and `filtered` (below).
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
@@ -151,6 +151,31 @@ Nodes the character has not discovered or cannot reach (`DISTANT`, `NONE`) are n
 ```
 
 `sec` is this character's flight as flown (the game's flight speed, with any detour of the route); it is not a price and says nothing about money. **Privacy:** a taxi event has the same `where` and `who` as any event (where the flight master stands); a flight event adds only which two nodes and how long, with no position, path or time other than the landing's `t`. Measured as compact JSON with a named `who`: a taxi event with 40 reachable nodes is about 1.6 KB (about 33 bytes per node beyond a 260-byte event with none; 430 bytes gzipped), a flight event about 200 bytes.
+
+### Quest extras (3.11.0)
+
+From 3.11.0 (KutzInventory 1.18.0) quest events may carry a few more facts; `observations.v` stays `1` and every one is optional (an older reader ignores them). Each is left out when the client did not say or the addon was not sure, so a missing field is never proof of "no".
+
+**On accept**, read at `QUEST_ACCEPTED` from the quest log (`C_QuestLog.GetLogIndexForQuestID`, then `C_QuestLog.GetInfo`; the entry must be this quest by its own `questID` and not a header; when the quest is not in the log yet it is read once more about a second later and the fields are added to the saved event), plus the item that started it from the offer window (`QUEST_DETAIL`'s `questStartItemID`, kept only when that window showed this very quest). **On turn-in**: `xp` is what the reward window showed (`GetRewardXP` at `QUEST_COMPLETE`), only while the character is under the level cap (`UnitLevel("player")` below `GetMaxPlayerLevel()`, both known) and XP is not turned off (`IsXPUserDisabled` a plain `false`, or a client without it). `rep` compares standings: every faction's standing is read when the reward window opens (`QUEST_COMPLETE`, out of combat; collapsed headers of the reputation list are opened for the read and closed again, as the addon's reputation scan does) and the same factions again about a second after that quest's `QUEST_TURNED_IN` (by `C_Reputation.GetFactionDataByID`); only the differences are kept, never a standing. Headers without a standing of their own, renown factions (`C_Reputation.IsMajorFaction`; their standing restarts each level) and factions first met by this turn-in are left out. **`rep` is dropped whole** when something else could have moved a standing in between: a loot window (`LOOT_OPENED`), combat (`PLAYER_REGEN_DISABLED`, or `InCombatLockdown` not a plain `false` at either read), another reward window or turn-in before the second read, or more than 5 minutes from the window to the turn-in; also on a client without `C_Timer`, when more than 6 factions changed, when one changed by more than 100000, or when nothing changed. Accepting another quest within that second (the next quest of a chain) does not drop it: an accept cannot change a reputation. Exact contract (the exporter leaves out each accept field that fails its check, an `xp` that is not an integer >= 1, and the whole `rep` when any entry fails, a faction repeats or there are more than 6; the schema refuses accept fields on a turn-in and `xp`/`rep` on an accept):
+
+```text
+{ id, t, b?, type: "quest", act: "accept", quest, npc? | object?, where, who, text?,
+  lv?:        integer 1-255      the quest's level in the quest log (on a client that scales quests, as shown to this character)
+  group?:     integer 2-40       the quest log's suggested group size; absent for 0 or 1
+  freq?:      "daily" | "weekly" the quest log's frequency (Enum.QuestFrequency Daily / Weekly); absent for any other
+  timed?:     true               C_QuestLog.GetTimeAllowed(quest) above 0 when accepted; absent otherwise
+  startItem?: integer >= 1       the item that started it (QUEST_DETAIL questStartItemID); absent for 0
+}
+{ id, t, b?, type: "quest", act: "turnin", quest, npc? | object?, where, who, text?, rewards?,
+  xp?:  integer >= 1             GetRewardXP() in the reward window, as offered to this character (it may include the
+                                 character's XP bonuses); absent at the level cap, with XP turned off, or when 0
+  rep?: [ 1-6 of {               the reputation the turn-in changed, sorted by f, each faction once
+    f: integer >= 1              the faction ID (factionID)
+    d: integer, -100000 to 100000, never 0   the change in reputation points: positive gained, negative lost
+  } ] }
+```
+
+**Never recorded:** quest money (`GetRewardMoney` is never called and the money argument of `QUEST_TURNED_IN` is never read), the player's money, and any standing, reputation level or renown level: `d` is a change, so a reader cannot tell from it where the character stands. Measured as compact JSON with a named `who`: the five accept fields add about 65 bytes to an accept (`lv` alone about 8), `xp` about 10 bytes to a turn-in and each `rep` entry about 20 (xp with two changes about 50; six changes about 120).
 
 ### NPC summary (3.10.0)
 

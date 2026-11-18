@@ -36,8 +36,9 @@ const SCHEMA_VERSION = "2.1.0";
 // range, classification, type, family, reaction per side, subtitle, beast attack speed, last day seen, map squares
 // stood beside it), and install, the id of the install(s) it summarises (KutzInventory 1.17.0). observations.v stays 1.
 // 3.11.0: observations may be of type "taxi" (a flight master's reachable nodes with their prices) and "flight" (how many
-// seconds a flight from one node to another took); npcs entries may carry svc, the services an NPC was seen to offer
-// (KutzInventory 1.18.0). observations.v stays 1.
+// seconds a flight from one node to another took); npcs entries may carry svc, the services an NPC was seen to offer;
+// quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin, reputation changes
+// only) (KutzInventory 1.18.0). observations.v stays 1.
 const SCHEMA_VERSION_3 = "3.11.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
@@ -489,6 +490,31 @@ function obsQuestText(t, act) {
   }
   return Object.keys(out).length ? out : undefined;
 }
+// Quest extras (3.11.0). accept: the quest log's facts and the item that started it, each dropped alone when it fails its
+// check. turnin: the reward window's XP, and rep, the reputation changes { f, d } (never a standing): all or nothing, so
+// one bad entry, a repeated faction, a change of 0 or over 100000, or more than 6 entries drops rep; sorted by f.
+const OBS_QUEST_FREQ = ["daily", "weekly"];
+const OBS_REP = { max: 6, d: 100000 };
+function obsQuestFacts(e) {
+  const lv = obsInt(e.lv, 1), group = obsInt(e.group, 2);
+  return pick({ lv: lv <= 255 ? lv : undefined, group: group <= 40 ? group : undefined,
+                freq: OBS_QUEST_FREQ.includes(e.freq) ? e.freq : undefined, timed: e.timed === true ? true : undefined,
+                startItem: obsInt(e.startItem, 1) });
+}
+function obsQuestRep(list) {
+  if (!Array.isArray(list) && !(list && typeof list === "object")) return undefined;
+  const rows = asList(list);
+  if (!rows.length || rows.length > OBS_REP.max) return undefined;
+  const seen = new Set(), out = [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") return undefined;
+    const f = obsInt(r.f, 1), d = r.d;
+    if (f === undefined || seen.has(f) || !Number.isInteger(d) || d === 0 || Math.abs(d) > OBS_REP.d) return undefined;
+    seen.add(f);
+    out.push({ f, d });
+  }
+  return out.sort((a, b) => a.f - b.f);
+}
 function obsCost(list) {
   return asList(list).map((c) => {
     if (!c || typeof c !== "object") return {};
@@ -528,12 +554,14 @@ function observationEvent(e) {
     if ((e.act !== "accept" && e.act !== "turnin") || obsInt(e.quest, 1) === undefined) return null;
     const giver = obsInt(e.npc, 1) !== undefined ? { npc: e.npc } : obsInt(e.object, 1) !== undefined ? { object: e.object } : {};
     const out = { ...base, act: e.act, quest: e.quest, ...giver, ...place() };
+    if (e.act === "accept") Object.assign(out, obsQuestFacts(e));
     const text = obsQuestText(e.text, e.act);
     if (text) out.text = text;
     if (e.act === "turnin" && e.rewards && typeof e.rewards === "object") {
       const choices = asList(e.rewards.choices).filter((c) => obsInt(c, 1) !== undefined).slice(0, 20);
       out.rewards = { items: obsItems(e.rewards.items), choices, ...(choices.includes(e.rewards.chose) ? { chose: e.rewards.chose } : {}) };
     }
+    if (e.act === "turnin") Object.assign(out, pick({ xp: obsInt(e.xp, 1), rep: obsQuestRep(e.rep) }));   // never the money
     return out;
   }
   if (e.type === "vendor") {

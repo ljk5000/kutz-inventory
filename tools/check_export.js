@@ -312,6 +312,23 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         fl({ sec: undefined }), fl({ money: 210 }), fl({ path: [[1429, 41, 65]] }), fl({ who: undefined }),
     ];
     badTaxi.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(withObs(o)))).length) fail("the 3.x schema accepted bad taxi/flight #" + n); });
+    // 3.11.0: quest extras: the log's facts and starting item on accept; XP and reputation changes (never a standing) on turnin
+    const acc = (patch) => ev(1, { act: "accept", rewards: undefined, ...patch });
+    const tin = (patch) => ev(1, patch);
+    const qp = [withObs(acc({ lv: 58, group: 5, freq: "daily", timed: true, startItem: 19016 })), withObs(acc({ lv: 255, group: 40, freq: "weekly" })),
+        withObs(tin({ xp: 6600, rep: [{ f: 47, d: 62 }, { f: 72, d: -100000 }] })), withObs(tin({ rep: Array.from({ length: 6 }, (_, i) => ({ f: i + 1, d: 1 })) })),
+        withObs(tin({ xp: 1, rep: [{ f: 1, d: 100000 }] }))].flatMap((o) => validateExport(JSON.parse(JSON.stringify(o))));
+    if (qp.length) fail("3.11.0 quest extras do not match the 3.x schema:\n  " + qp.join("\n  "));
+    const badQuest = [
+        acc({ lv: 0 }), acc({ lv: 256 }), acc({ lv: 5.5 }), acc({ group: 1 }), acc({ group: 41 }), acc({ freq: "monthly" }), acc({ freq: "Daily" }),
+        acc({ timed: false }), acc({ timed: 1 }), acc({ startItem: 0 }), acc({ xp: 10 }), acc({ rep: [{ f: 72, d: 1 }] }), acc({ standing: 9000 }),
+        tin({ lv: 58 }), tin({ group: 5 }), tin({ freq: "daily" }), tin({ timed: true }), tin({ startItem: 19016 }),
+        tin({ xp: 0 }), tin({ xp: 1.5 }), tin({ money: 300 }), tin({ rep: [] }), tin({ rep: [{ f: 72, d: 0 }] }), tin({ rep: [{ f: 72, d: 100001 }] }),
+        tin({ rep: [{ f: 72, d: -100001 }] }), tin({ rep: [{ f: 0, d: 1 }] }), tin({ rep: [{ f: 72 }] }), tin({ rep: [{ d: 5 }] }),
+        tin({ rep: [{ f: 72, d: 5, standing: 9250 }] }), tin({ rep: [{ f: 72, d: 1.5 }] }), tin({ rep: { 72: 5 } }),
+        tin({ rep: Array.from({ length: 7 }, (_, i) => ({ f: i + 1, d: 1 })) }),
+    ];
+    badQuest.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(withObs(o)))).length) fail("the 3.x schema accepted bad quest extras #" + n); });
     if (!validateExport({ ...data, schemaVersion: SCHEMA_VERSION_3 }).length) fail("the 3.x schema accepted a 2.x document");
     const eq = run([inv, out3, "--format=3"], { WOW_IMPORT_TOKEN: "", WOW_IMPORT_URL: "" });
     if (eq.status !== 0 || JSON.parse(fs.readFileSync(out3, "utf8")).schemaVersion !== SCHEMA_VERSION_3) fail("--format=3 did not write 3.x");

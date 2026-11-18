@@ -121,8 +121,8 @@ KutzInventoryDB = {
   },
 }
 -- /kinv track drops on: made-up observations (ids, GUIDs and timings invented). Includes a coins-only corpse (items = {}),
--- the same corpse skinned, a quest accepted and turned in, a vendor, a class trainer, a flight master's map, a flight
--- from it, and one broken event the exporter leaves out.
+-- the same corpse skinned, a quest accepted and turned in (with its level, group size, XP and reputation changes), a
+-- vendor, a class trainer, a flight master's map, a flight from it, and one broken event the exporter leaves out.
 KutzInventoryObsDB = {
   v = 1, on = true, agreed = true, noted = true, addon = "1.8.0", prefix = "k1f9c2", n = 26,
   events = {
@@ -141,12 +141,14 @@ KutzInventoryObsDB = {
       where = { map = 0, uiMap = 1429, x = 0.4123, y = 0.6543 }, who = { level = 60, class = 4, faction = "Alliance" },
       items = { { id = 2318, n = 2 } } },
     { id = "k1f9c2-000020", t = 1762905680, b = "1.60.1.70888", type = "quest", act = "accept", quest = 7787, npc = 11811,
-      where = { map = 1, uiMap = 1449, x = 0.5012, y = 0.3301 }, who = { level = 60, class = 4, faction = "Alliance" },
+      where = { map = 1, uiMap = 1449, x = 0.5012, y = 0.3301 }, who = { level = 58, class = 4, faction = "Alliance" },
+      lv = 58, group = 5, freq = "daily", timed = true,
       text = { title = "A Made-up Errand", details = "You look capable, $N.\n\nTake this crate to the far camp.",
                objectives = "Carry the crate to the far camp." } },
     { id = "k1f9c2-000021", t = 1762905700, b = "1.60.1.70888", type = "quest", act = "turnin", quest = 7787, npc = 11811,
-      where = { map = 1, uiMap = 1449, x = 0.5012, y = 0.3301 }, who = { level = 60, class = 4, faction = "Alliance" },
+      where = { map = 1, uiMap = 1449, x = 0.5012, y = 0.3301 }, who = { level = 58, class = 4, faction = "Alliance" },
       rewards = { items = { { id = 19019, n = 1 } }, choices = { 19018, 19019 }, chose = 19019 },
+      xp = 6600, rep = { { f = 47, d = 62 }, { f = 72, d = 250 } },
       text = { title = "A Made-up Errand", progress = "Is the crate here, $N?", completion = "The camp thanks you, $N." } },
     { id = "k1f9c2-000022", t = 1762905800, b = "1.60.1.70888", type = "vendor", npc = 12944, rx = 5,
       where = { map = 0, uiMap = 1428, x = 0.0912, y = 0.2287 },

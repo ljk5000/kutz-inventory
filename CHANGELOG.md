@@ -7,7 +7,9 @@
 
 - The NPC summary records `svc`, the services each NPC was seen to offer (vendor, repair, flight, trainer, bank, guildbank, inn, auction, stable, battlemaster, spirit, guild, tabard), from the interaction window the game opens with it (`PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, matched by the interaction type's name), the vendor, trainer and flight master windows, whether the merchant can repair, and binding your Hearthstone at an inn. Creatures only (never a mailbox or other object); each counts as standing beside it. No gossip text.
 
-Inventory export 3.11.0 (default) adds the observation types `taxi` and `flight`, strictly validated (a doubtful node list is dropped whole), and `svc` on NPC summary entries, a sorted list of the known services; the observations section stays `v: 1`. 2.1.0 (`--format 2`) and auction scans 1.2.0 are unchanged.
+- Quest observations carry more facts. On accept, from the quest log: the quest's level, its suggested group size (2 or more), whether it is a daily or weekly, whether it has a time limit, and the item that started it (only when the offer window showed that quest). On turn-in: the XP the reward window showed (only while you are under the level cap with XP not turned off) and the reputation the turn-in changed, as changes per faction (`{ f, d }`), never a standing: standings are read when the reward window opens and again a second after the turn-in, and the changes are dropped whole when a loot window, combat, another reward window or turn-in came in between, more than 5 minutes passed, or more than 6 factions changed. Quest money is still never read.
+
+Inventory export 3.11.0 (default) adds the observation types `taxi` and `flight`, strictly validated (a doubtful node list is dropped whole), `svc` on NPC summary entries, a sorted list of the known services, and on quest events `lv`, `group`, `freq`, `timed` and `startItem` (accept) and `xp` and `rep` (turn-in; `rep` all or nothing); the observations section stays `v: 1`. 2.1.0 (`--format 2`) and auction scans 1.2.0 are unchanged.
 
 ## KutzInventory 1.17.0
 

@@ -29,6 +29,11 @@
 --           text = { title, details, objectives } on accept and { title, progress, completion } on turnin: the quest's
 --           words as the game showed them, with this character's own name put back to "$N". Once per quest and act
 --           while the event is kept, and not at all once the events are past half the size cap.
+--           1.18.0, on accept: lv, group (2-40), freq ("daily"|"weekly"), timed (true) from the quest log, and startItem
+--           (QUEST_DETAIL's arg, only for the quest that window showed). On turnin: xp (GetRewardXP at QUEST_COMPLETE, only
+--           under the level cap with XP not turned off) and rep = { { f = factionID, d = change } }: the standings read at
+--           QUEST_COMPLETE and again 1 s after the turn-in, only the changes (never a standing), at most 6, none when
+--           loot, combat or another reward window or turn-in came in between.
 --   vendor  npc, rx, filtered, items = { { id, n, link, price (copper per n, as shown), cost = { { item|currency, n } }, limited } }
 --           read under the merchant window's "all" item filter, put back at once; filtered = true when it could not be
 --           switched (the list then misses the items the class filter hides). The same stock and rx once an hour.
@@ -50,8 +55,9 @@
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
--- Never recorded: coin loot, quest money, the player's money, other players' names or GUIDs, chat, guild. (Loot chat is
--- read only for this player's own "You won" line, kept as the won flag; who else rolled or won is never kept.)
+-- Never recorded: coin loot, quest money (GetRewardMoney, QUEST_TURNED_IN's money), the player's money, a reputation
+-- standing, other players' names or GUIDs, chat, guild. (Loot chat is read only for this player's own "You won" line,
+-- kept as the won flag; who else rolled or won is never kept.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
 --
 -- npcs (KutzInventory 1.17.0): not events but one summary per install of the creatures this player looked at
@@ -635,6 +641,9 @@ local detail = nil                              -- { quest, what, id, at } from 
 local turnin = nil                              -- { quest, what, id, items, choices, chose } from the reward window
 local progress = nil                            -- { quest, text } from the "do you have it yet?" window before it
 local hookedReward, haveTurnedInEvent = false, false
+-- the extras (1.18.0), filled in further down: facts from the quest log on accept; the reward window's XP and the
+-- reputation a turn-in changed. rep: the watch { quest, before = { [factionID] = standing }, at, turned, spoiled, e }
+local qx = { REP_MAX = 6, REP_D = 100000, STALE = 300, WAIT = 1, FACTIONS = 1000, rep = nil }
 
 local function QuestId(...)                     -- QUEST_ACCEPTED is (index, questId) in older clients, (questId) in newer
     local a, b = Plain((...)), Plain((select(2, ...)))
@@ -707,10 +716,12 @@ local function TurnedIn(questId)
         local choices = {}
         for _, it in ipairs(p.choices) do choices[#choices + 1] = it.id end
         e.rewards = { items = p.items, choices = choices, chose = p.chose }
+        e.xp = p.xp
         if p.text and WantsText(questId, "turnin") then e.text = p.text end
     end
     turnin, progress = nil, nil
     Add(e)
+    pcall(qx.TurnedIn, questId, e)
 end
 
 local function HookReward()
@@ -1476,11 +1487,143 @@ Sighting = function(unit, open, svc)
 end
 
 ---------------------------------------------------------------------------
+-- quest extras (1.18.0)
+---------------------------------------------------------------------------
+function qx.Later(fn)                           -- fn a second from now; nothing without a timer
+    if C_Timer and C_Timer.After then C_Timer.After(qx.WAIT, function() pcall(fn) end) end
+end
+
+function qx.Amend(e, fields)                    -- add fields to an event already saved, and count its size again
+    local d = DB()
+    if not (d and d.on and d.agreed) then return end
+    local list = d.events
+    for i = #list, math.max(1, #list - 200), -1 do
+        if list[i] == e then
+            local was = Size(e)
+            for k, v in pairs(fields) do e[k] = v end
+            bytes = bytes + Size(e) - was
+            return
+        end
+    end
+end
+
+-- On accept, from the quest log: lv (the quest's level, 1-255), group (its suggested group size, only 2-40), freq
+-- ("daily" | "weekly", Enum.QuestFrequency by name) and timed (true when it has a time limit). Written into out. True when
+-- the log held this quest (its own questID, not a header) or there is no log to ask; false when it is not there yet.
+function qx.Facts(quest, out)
+    local L = C_QuestLog
+    if not (L and type(L.GetLogIndexForQuestID) == "function" and type(L.GetInfo) == "function") then return true end
+    local i = Int((Try(L.GetLogIndexForQuestID, quest)), 1)
+    local info = i and Try(L.GetInfo, i)
+    if type(info) ~= "table" or Plain(info.isHeader) == true or Int(info.questID, 1) ~= quest then return false end
+    local lv, group, freq, F = Int(info.level, 1), Int(info.suggestedGroup, 2), Int(info.frequency), Enum and Enum.QuestFrequency
+    if lv and lv <= 255 then out.lv = lv end
+    if group and group <= 40 then out.group = group end
+    if freq and type(F) == "table" then
+        if freq == Int(F.Daily) then out.freq = "daily" elseif freq == Int(F.Weekly) then out.freq = "weekly" end
+    end
+    if Int((Try(L.GetTimeAllowed, quest)), 1) then out.timed = true end
+    return true
+end
+
+-- The XP the reward window shows (GetRewardXP), only while this character can gain XP: its level and the cap known and
+-- under it, and XP not turned off (IsXPUserDisabled, when the client has it, plainly false). nil when 0 or unsure.
+function qx.Xp()
+    local max, me = Int(Try(GetMaxPlayerLevel), 1), Int(Try(UnitLevel, "player"), 1)
+    if not (max and me and me < max) then return nil end
+    if type(IsXPUserDisabled) == "function" and not False(IsXPUserDisabled) then return nil end
+    return Int((Try(GetRewardXP)), 1)
+end
+
+-- Standings by faction id: of the factions in ids (GetFactionDataByID), or of the whole list (headers opened for the
+-- read and closed again, from the bottom up, as ScanReputation does). Headers without a standing of their own and,
+-- where the client says so, renown factions (their standing restarts each level) are left out. nil when unreadable.
+function qx.Standings(ids)
+    local R = C_Reputation
+    if type(R) ~= "table" then return nil end
+    local out = {}
+    local function put(f)
+        if type(f) ~= "table" then return end
+        local id, s = Int(f.factionID, 1), Int(f.currentStanding, -2147483647)
+        if not (id and s) or (Plain(f.isHeader) ~= false and Plain(f.isHeaderWithRep) ~= true) then return end
+        if type(R.IsMajorFaction) == "function" and not False(R.IsMajorFaction, id) then return end
+        out[id] = s
+    end
+    if ids then
+        if type(R.GetFactionDataByID) ~= "function" then return nil end
+        for id in pairs(ids) do put(Try(R.GetFactionDataByID, id)) end
+        return out
+    end
+    if type(R.GetNumFactions) ~= "function" or type(R.GetFactionDataByIndex) ~= "function" then return nil end
+    local closed = {}
+    for i = 1, math.min(Int((Try(R.GetNumFactions))) or 0, qx.FACTIONS) do
+        local f = Try(R.GetFactionDataByIndex, i)
+        local id = type(f) == "table" and Plain(f.isHeader) == true and Plain(f.isCollapsed) == true and Int(f.factionID, 1)
+        if id then closed[id] = true end
+    end
+    if next(closed) then Try(R.ExpandAllFactionHeaders) end
+    local count = math.min(Int((Try(R.GetNumFactions))) or 0, qx.FACTIONS)
+    for i = 1, count do put(Try(R.GetFactionDataByIndex, i)) end
+    if next(closed) then
+        for i = count, 1, -1 do
+            local f = Try(R.GetFactionDataByIndex, i)
+            local id = type(f) == "table" and Int(f.factionID, 1)
+            if id and closed[id] and Plain(f.isCollapsed) == false then Try(R.CollapseFactionHeader, i) end
+        end
+    end
+    return out
+end
+
+-- The reputation a turn-in changed: every standing read when the reward window opens (QUEST_COMPLETE, out of combat),
+-- the same factions again a second after that quest's turn-in; rep = { { f = factionID, d = change } } of those that
+-- changed, sorted by f. Never the standing itself. Nothing when something else could have moved them in between (loot,
+-- combat, another reward window or turn-in, more than 5 minutes between the window and the turn-in), when more than 6
+-- changed, or when a change is over 100000.
+function qx.Spoil() if qx.rep then qx.rep.spoiled = true end end
+
+function qx.Watch(quest)                        -- QUEST_COMPLETE
+    local w = qx.rep
+    if w and w.turned then w.spoiled = true; return end   -- a turn-in still settling: neither is sure
+    qx.rep = nil
+    if not (quest and C_Timer and C_Timer.After and False(InCombatLockdown)) then return end
+    local before = qx.Standings()
+    if before and next(before) then qx.rep = { quest = quest, before = before, at = Now() } end
+end
+
+function qx.TurnedIn(quest, e)
+    local w = qx.rep
+    if w and w.turned then w.spoiled = true; return end   -- two turn-ins within the second
+    if not (w and w.quest == quest and not w.spoiled and Now() - w.at <= qx.STALE and C_Timer and C_Timer.After) then
+        qx.rep = nil
+        return
+    end
+    w.turned, w.e = true, e
+    qx.Later(function()
+        if qx.rep ~= w then return end
+        qx.rep = nil
+        if w.spoiled or not False(InCombatLockdown) then return end
+        local after = qx.Standings(w.before)
+        if not after then return end
+        local rep = {}
+        for f, s in pairs(w.before) do
+            local d = after[f] and after[f] - s
+            if d and d ~= 0 then
+                if math.abs(d) > qx.REP_D then return end
+                rep[#rep + 1] = { f = f, d = d }
+            end
+        end
+        if #rep == 0 or #rep > qx.REP_MAX then return end
+        table.sort(rep, function(a, b) return a.f < b.f end)
+        qx.Amend(e, { rep = rep })
+    end)
+end
+
+---------------------------------------------------------------------------
 -- events: only registered while recording is on
 ---------------------------------------------------------------------------
 local handlers = {}
 
-function handlers.LOOT_OPENED() RecordLoot() end
+function handlers.LOOT_OPENED() qx.Spoil(); RecordLoot() end
 function handlers.LOOT_CLOSED() lootDone = false end
 local function Cast(unit, _, spellId)
     if unit ~= "player" then return end
@@ -1528,10 +1671,10 @@ local function QuestGiverSeen()                 -- the quest window is open with
     pcall(Sighting, "npc", true)                -- the same creature: the 30 s throttle makes this a no-op
 end
 
-function handlers.QUEST_DETAIL()
+function handlers.QUEST_DETAIL(startItem)       -- (questStartItemID): the item that started it, 0 when none
     QuestGiverSeen()
     local what, id = Giver("questnpc", "npc")
-    detail = { quest = Int(Try(GetQuestID), 1), what = what, id = id, at = time(),
+    detail = { quest = Int(Try(GetQuestID), 1), what = what, id = id, at = time(), startItem = Int(startItem, 1),
                text = QuestText({ title = GetTitleText, details = GetQuestText, objectives = GetObjectiveText }) }
 end
 function handlers.QUEST_ACCEPTED(...)
@@ -1541,9 +1684,16 @@ function handlers.QUEST_ACCEPTED(...)
     e.act, e.quest = "accept", quest
     local p = detail
     if p and p.what and (p.quest == quest or (not p.quest and time() - p.at <= 60)) then e[p.what] = p.id end
-    if p and p.text and p.quest == quest and WantsText(quest, "accept") then e.text = p.text end   -- only a sure match
+    if p and p.quest == quest then                                           -- only a sure match
+        if p.text and WantsText(quest, "accept") then e.text = p.text end
+        e.startItem = p.startItem
+    end
     detail = nil
+    local ok, found = pcall(qx.Facts, quest, e)
     Add(e)
+    if ok and not found then                    -- not in the log yet: once more a second later, added to the saved event
+        qx.Later(function() local f = {}; if qx.Facts(quest, f) and next(f) then qx.Amend(e, f) end end)
+    end
 end
 function handlers.QUEST_PROGRESS()
     progress = { quest = Int(Try(GetQuestID), 1), text = Prose(GetProgressText, TEXT_MAX.progress) }
@@ -1560,12 +1710,16 @@ function handlers.QUEST_COMPLETE()
         local cid = ItemId(Plain(Try(GetQuestItemLink, "choice", i)))
         turnin.choices[i] = cid and { id = cid } or false
     end
+    turnin.xp = quest and qx.Xp()
     HookReward()
+    qx.Watch(quest)
 end
-function handlers.QUEST_TURNED_IN(questId)        -- (questId, xp, money): the money is never read
+function handlers.QUEST_TURNED_IN(questId)        -- (questId, xp, money): the money is never read, nor GetRewardMoney
     questId = Int(questId, 1)
     if questId then TurnedIn(questId) end
 end
+-- what could move a reputation besides the turn-in being watched
+function handlers.PLAYER_REGEN_DISABLED() qx.Spoil() end
 
 function handlers.MERCHANT_SHOW()
     merchantOpen = true
@@ -1616,7 +1770,7 @@ local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                     "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
-                    "HEARTHSTONE_BOUND" }
+                    "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -1643,6 +1797,7 @@ local function Disable()
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
     taxi.Reset()
+    qx.rep = nil                                         -- a turn-in's rep still settling is dropped
 end
 
 local function AddonVersion()
