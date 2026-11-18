@@ -360,6 +360,95 @@ do
   print("OK   game-readable pages, bag or object provenance, per-page dedup, never read mail or secret creator")
 end
 
+-- NPC lines use only the sender GUID and leave repeats before all unit/roster/location reads.
+do
+  local secret = {}
+  local function district(opts)
+    opts = opts or {}
+    opts.globals = { issecretvalue = function(v) return v == secret end }
+    local h = fresh(opts)
+    local s = h.s
+    s.units.npc = { guid = MOB, ctId = 7 }
+    s.units.target = { guid = PLAYER, name = "Exampletarget", player = true }
+    s.units.party1 = { name = "Exampleparty" }
+    s.units.raid1 = { name = "Exampleraid" }
+    local n = h.G.UnitName
+    s.lookup, s.where, s.roster, s.grouped = 0, 0, 0, true
+    h.G.IsInGroup = function() s.roster = s.roster + 1; return s.grouped end
+    h.G.IsInRaid = function() return s.raid == true end
+    h.G.GetNumGroupMembers = function() return s.raid and 1 or 2 end
+    h.G.UnitTokenFromGUID = function(guid)
+      s.lookup = s.lookup + 1
+      if guid == s.units.npc.guid then return "npc" end
+    end
+    h.G.UnitCreatureType = function() return "Humanoid", s.units.npc.ctId end
+    h.G.C_Map.GetBestMapForUnit = function() s.where = s.where + 1; return s.uiMap end
+    h.G.UnitName = function(unit)
+      if unit == "party1" then return s.units.party1.name, "Example Realm" end
+      return n(unit)
+    end
+    h.G.GetUnitName = function(unit)
+      if unit == "player" then return "Tester Testwood" end
+      if unit == "party1" then return "Exampleparty Examplefamily" end
+      return s.units[unit] and s.units[unit].name
+    end
+    function h.line(event, body, who, guid, extra)
+      h.event(event, body, "Synthetic speaker", nil, nil, who, nil, nil, nil, nil, nil, 1, guid, extra)
+    end
+    return h
+  end
+  local h = district()
+  local say = "CHAT_MSG_MONSTER_SAY"
+  local body = "Keep close, Tester Testwood, exampleparty-ExampleRealm, and Exampletarget."
+  h.line(say, body, nil, MOB)
+  local e = h.events()[1]
+  assert(e and e.npc == 11502 and e.type == "line" and e.kind == "say"
+    and e.text == "Keep close, $N, $N, and $N." and e.guid == nil and e.where.x == 0.4123, h.db().lastError)
+  h.line("CHAT_MSG_MONSTER_YELL", body, nil, MOB)
+  assert(#h.events() == 1 and h.s.lookup == 1 and h.s.roster == 1 and h.s.where == 1, "a repeat costs no game reads")
+  h.line("CHAT_MSG_MONSTER_YELL", "Keep close, $N, $N, and $N.", nil, MOB)
+  assert(#h.events() == 1 and h.s.lookup == 1 and h.s.roster == 1, "saved normalized checksum before unit reads")
+  h.line("CHAT_MSG_MONSTER_YELL", "Look out!", nil, MOB)
+  h.line("CHAT_MSG_MONSTER_WHISPER", "The path is safe, Examplerecipient.", "Examplerecipient", MOB)
+  h.line("CHAT_MSG_MONSTER_EMOTE", "%s waves to Exampletarget.", nil, MOB)
+  h.s.raid = true
+  h.line("CHAT_MSG_RAID_BOSS_EMOTE", "Stand back, Exampleraid!", nil, MOB)
+  assert(h.events()[2].kind == "yell" and h.events()[3].kind == "whisper"
+    and h.events()[3].text == "The path is safe, $N." and h.events()[4].kind == "emote"
+    and h.events()[4].text == "%s waves to $N." and h.events()[5].kind == "boss"
+    and h.events()[5].text == "Stand back, $N!", "five supported kinds")
+  h.line(say, "Exampleunknown, come here.", nil, MOB)
+  h.line(say, "Look out, Exampleunknown!", nil, MOB)
+  h.line(say, "Come here, é.", nil, MOB)
+  h.line(say, "Run for cover.", nil, nil, MOB) -- a creature in another argument must not be used
+  h.line(say, "Look behind you.", nil, PLAYER)
+  h.line(say, "Look behind you.", nil, MOB:gsub("^Creature", "Pet"))
+  h.line(say, "Look behind you.", nil, secret)
+  h.line(say, secret, nil, MOB)
+  h.line(say, "Look behind you.", secret, MOB)
+  h.s.units.npc.controlled = true
+  h.line(say, "Look behind you.", nil, MOB)
+  h.s.units.npc.controlled, h.s.units.npc.ctId = false, 12
+  h.line(say, "Look behind you.", nil, MOB)
+  h.s.units.npc.ctId = 7
+  h.line(say, "Look behind you.", nil, MOB2) -- unresolvable creature
+  h.s.raid, h.s.units.party1.name = false, secret
+  h.line(say, "Look behind you.", nil, MOB)
+  h.G.IsInGroup = nil
+  h.line(say, "Look behind you.", nil, MOB)
+  assert(#h.events() == 5 and not h.db().lastError, "ambiguous names, controlled/unidentified speakers and secret values")
+  h.db().events = {}
+  local r = district({ db = h.db() })
+  r.line(say, "Look out!", nil, MOB)
+  assert(#r.events() == 0 and r.s.lookup == 0, "plain repeats survive a reload and event pruning")
+  r.line(say, "The " .. string.rep("a", 2500), nil, MOB)
+  assert(#r.events()[1].text == 2000, "line length cap")
+  local full = district({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  full.line(say, "Look out!", nil, MOB)
+  assert(full.s.lookup == 0 and not full.db().textSeen, "half cap skips lines")
+  print("OK   creature lines, safe player-name normalization, all event kinds, cheap repeats and privacy exclusions")
+end
+
 -- 1) on by default for a new install only: a first load makes the table and records without any command; a table
 --    from the opt-in days keeps its choice (off stays off, on stays on), only a missing setting becomes on; an off
 --    survives reloads

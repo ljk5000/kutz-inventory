@@ -676,7 +676,7 @@ KutzInventoryObsDB = {
 	["noted"] = true,
 	["addon"] = "1.19.0",
 	["prefix"] = "k1f9c2",
-	["n"] = 27,
+	["n"] = 28,
 	["events"] = {
 		{
 			["id"] = "k1f9c2-000017",
@@ -1042,6 +1042,27 @@ KutzInventoryObsDB = {
 			},
 		}, -- [11]
 		{
+			["id"] = "k1f9c2-000028",
+			["t"] = 1762906450,
+			["b"] = "1.60.1.70888",
+			["type"] = "line",
+			["npc"] = 352,
+			["kind"] = "say",
+			["text"] = "Keep the road clear, $N.",
+			["where"] = {
+				["uiMap"] = 1453,
+				["x"] = 0.7081,
+				["y"] = 0.7254,
+			},
+			["who"] = {
+				["level"] = 20,
+				["class"] = 8,
+				["faction"] = "Alliance",
+				["name"] = "Exampleobserver",
+				["surname"] = "Examplefamily",
+			},
+		}, -- [12]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -1050,7 +1071,7 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [12]
+		}, -- [13]
 	},
 	["npcs"] = {
 		[525] = {

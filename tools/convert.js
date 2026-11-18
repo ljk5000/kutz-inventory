@@ -535,6 +535,7 @@ const OBS_PROSE_UNSAFE = /[|\u0000-\u0009\u000b-\u001f\u007f]|[a-z]+-[0-9]+-[0-9
 const obsProse = (v, max) =>
   (typeof v === "string" && v.length <= max && v.trim() && !OBS_PROSE_UNSAFE.test(v) ? v : undefined);
 const OBS_GOSSIP_KINDS = ["gossip", "greeting"];
+const OBS_LINE_KINDS = ["say", "yell", "whisper", "emote", "boss"];
 const OBS_TRAINER_KINDS = ["class", "profession"];
 const OBS_TRAINER_STATES = ["a", "u", "k"];
 const OBS_TRAINER_ROWS = 400;
@@ -609,6 +610,11 @@ function observationEvent(e) {
         || (typeof e.material === "string" && /mail|letter|stationery/i.test(e.material))) return null;
     return { ...base, ...pick({ item, object }), title, page, ...(e.last === true ? { last: true } : {}),
              ...(material?.trim() ? { material } : {}), text, ...place() };
+  }
+  if (e.type === "line") {
+    const npc = obsInt(e.npc, 1), text = obsProse(e.text, 2000);
+    if (npc === undefined || !text || /[^\x00-\x7f]/.test(text) || !OBS_LINE_KINDS.includes(e.kind)) return null;
+    return { ...base, npc, kind: e.kind, text, ...place() };
   }
   if (e.type === "flight") {
     if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;

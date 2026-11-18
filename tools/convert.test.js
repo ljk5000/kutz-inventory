@@ -199,7 +199,7 @@ test("observations: the example's events are exported in the documented shape; t
   assert.equal(obs.v, 1); assert.equal(obs.addon, "1.19.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -306,6 +306,16 @@ test("observations 3.12.0: read events omit unknown fields and reject unsafe pag
                      { text: "x".repeat(8001) }, { creator: "Examplewriter" }, { mail: true }, { material: "Stationery" }]) {
     assert.equal(obs(bad), null);
   }
+});
+
+test("observations 3.12.0: line events retain safe fields only and reject malformed lines", () => {
+  const event = { id: "abc123-1", t: 100, type: "line", npc: 352, kind: "emote", text: "%s waves to $N.",
+                  sender: "Discard", guid: "discard", recipient: "Discard" };
+  const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
+  assert.deepEqual(obs({}).events[0], { id: event.id, t: 100, type: "line",
+    npc: 352, kind: "emote", text: event.text, where: {}, who: {} });
+  for (const bad of [{ npc: 0 }, { kind: "party" }, { text: "" }, { text: "é" }, { text: "Player-1-26" },
+                     { text: "x".repeat(2001) }]) assert.equal(obs(bad), null);
 });
 
 test("observations 3.11.0: taxi and flight events keep only the documented fields; a doubtful list is dropped whole", () => {

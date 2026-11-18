@@ -6,7 +6,9 @@
 
 - Record pages of game-authored books and readable objects using the title, page number and a source ID when known. The recorder checks for mail and player-written letters before reading a page.
 
-Inventory export 3.12.0 (default) adds `gossip` and `read` observations. The observations section stays `v: 1`.
+- Record game-authored NPC speech and emotes when the client supplies a creature GUID and the speaker and player names can be checked. Known player names become $N. Ambiguous lines are skipped.
+
+Inventory export 3.12.0 (default) adds `gossip`, `read` and `line` observations. The observations section stays `v: 1`.
 
 ## KutzInventory 1.18.0
 

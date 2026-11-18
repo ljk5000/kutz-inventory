@@ -33,7 +33,7 @@ const known = new Set(("_G ipairs pairs pcall select type unpack tostring tonumb
  "GetQuestItemInfo GetQuestItemLink GetQuestReward GetNumQuestChoices GetNumQuestRewards GetMerchantItemCostInfo GetMerchantItemCostItem " +
  "C_Trainer C_TooltipInfo GetTrainerServiceNumAbilityReq GetTrainerServiceAbilityReq GetMerchantFilter SetMerchantFilter LE_LOOT_FILTER_ALL " +
  "StaticPopupDialogs StaticPopup_Show YES NO " +
- "UnitPlayerControlled UNKNOWNOBJECT UnitCreatureType UnitCreatureFamily CheckInteractDistance GetMaxPlayerLevel " +   // Observations.lua npcs
+ "UnitPlayerControlled UnitTokenFromGUID UNKNOWNOBJECT UnitCreatureType UnitCreatureFamily CheckInteractDistance GetMaxPlayerLevel " +   // Observations.lua npcs
  "C_TaxiMap GetTaxiMapID NumTaxiNodes TaxiNodeName TaxiNodeGetType TaxiNodeCost GetNumRoutes TakeTaxiNode UnitOnTaxi " +   // Observations.lua taxi
  "C_QuestLog GetRewardXP IsXPUserDisabled GetGossipText GetGreetingText ItemTextGetCreator ItemTextGetMaterial ItemTextGetItem ItemTextGetPage ItemTextGetText ItemTextHasNextPage " +   // Observations.lua quest extras
  "SetTrainerServiceTypeFilter UnitArmor UnitAttackPower UnitAttackSpeed UnitDamage UnitDefenseSkill UnitHonor UnitHonorLevel UnitHonorMax UnitRangedAttackPower UnitRangedDamage UnitResistance UnitSex UnitSpellHaste UnitStat").split(" "));

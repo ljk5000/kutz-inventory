@@ -84,6 +84,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
 - `gossip` (3.12.0): game-authored NPC or object gossip and quest greetings ([below](#game-text-3120)).
 - `read` (3.12.0): game-authored pages of books and readable objects ([below](#game-text-3120)).
+- `line` (3.12.0): game-authored creature speech and emotes ([below](#game-text-3120)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -153,6 +154,19 @@ The recorder trims prose, removes control characters other than line feeds, and 
 ```
 
 At most one source ID is present. When provenance is ambiguous or unavailable, a safely identified game-authored page has the title alone. Labels have no pipe markup, GUID shapes or control characters. Text and labels are capped in UTF-8 bytes by the addon. Consumers render these strings as text. The exporter drops events without usable required fields, with both IDs valid, or with explicit mail or creator metadata. Invalid optional values are omitted.
+
+**NPC lines** come from `CHAT_MSG_MONSTER_SAY`, `CHAT_MSG_MONSTER_YELL`, `CHAT_MSG_MONSTER_WHISPER`, `CHAT_MSG_MONSTER_EMOTE` and `CHAT_MSG_RAID_BOSS_EMOTE`. The speaker must have a plain `Creature-` GUID in argument 12 and resolve to a current unit the client identifies as neither a player, player-controlled nor a non-combat pet. Missing, secret or doubtful identities are skipped. The recording character's, roster members', current player target's and any provided recipient's names are replaced with `$N` in the prose. If the identity checks fail, if non-ASCII text remains after scrubbing, or if capitalized words remain outside a small list of common sentence openers and the pronoun “I” and its contractions, the line is skipped. The handler refuses incoming bodies over 8,000 bytes. Dedup uses NPC ID and a checksum of the normalized, capped text, shared across all five kinds. Same-session repeats of an already accepted body check a bounded checksum cache before roster or location reads.
+
+```text
+{ id, t, b?, type: "line", where, who,
+  npc:     integer 1-2147483647                        creature ID from the event's sender GUID
+  kind:    "say" | "yell" | "whisper" | "emote" | "boss"  source event, in the order listed above
+  text:    ASCII prose 1-2000                          normalized game text, line breaks allowed; no pipe markup,
+                                                       GUID shapes or other control characters
+}
+```
+
+Speaker GUIDs and recipient metadata are never saved. Player chat and player or pet speakers are excluded. The exporter drops events with invalid required fields. Location uses the usual `where` precision.
 
 ### Flight masters and flights (3.11.0)
 

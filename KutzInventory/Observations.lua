@@ -54,6 +54,7 @@
 --           trail. One per from/to in 30 days (saved events).
 --   gossip NPC or object greeting and dialogue body only, while under half the event size cap.
 --   read   one page of game-authored book or object text, only when mail and creator checks pass.
+--   line   game speech or emotes from an identified, uncontrolled creature; player names scrubbed.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
@@ -86,7 +87,7 @@ local MAX_EVENTS, MAX_AGE, MAX_BYTES = 5000, 30 * 86400, 2000000
 local CAST_WINDOW = 5                           -- seconds (GetTime) from a gathering / skinning cast to its loot window
 local VENDOR_AGAIN = 3600                       -- the same vendor with the same stock is recorded at most once an hour
 local LF = string.char(10)
-local TEXT_MAX = { title = 200, details = 8000, objectives = 4000, progress = 4000, completion = 8000, gossip = 4000, read = 8000 }   -- bytes
+local TEXT_MAX = { title = 200, details = 8000, objectives = 4000, progress = 4000, completion = 8000, gossip = 4000, read = 8000, line = 2000 }   -- bytes
 
 local function Plain(v)
     if issecretvalue and issecretvalue(v) then return nil end
@@ -653,20 +654,21 @@ end
 
 -- The quest window's words. The game writes the character's name into them; it goes back to "$N", so the text is the
 -- quest's and not about the player. Cut to the field's limit on a whole UTF-8 character.
-local function ReplaceName(s, name)
+local function ReplaceName(s, name, fold)
     local pat = name:gsub("(%W)", "%%%1")
+    if fold then pat = pat:gsub("%a", function(c) return "[" .. c:lower() .. c:upper() .. "]" end) end
     if name:find("^%w") then pat = "%f[%w]" .. pat end
     if name:find("%w$") then pat = pat .. "%f[%W]" end
     return (s:gsub(pat, "$N"))
 end
 
-local function Prose(s, max, names)
+local function Prose(s, max, names, fold)
     s = Plain(s)
     if type(s) ~= "string" then return nil end
     s = s:gsub("%c", function(c) return c == LF and c or "" end):gsub("^%s+", ""):gsub("%s+$", "")
     if s == "" then return nil end
     if names then
-        for _, name in ipairs(names) do s = ReplaceName(s, name) end
+        for _, name in ipairs(names) do s = ReplaceName(s, name, fold) end
     else
         local given = Me()
         if given then s = ReplaceName(s, given) end
@@ -728,7 +730,7 @@ end
 -- Includes the new event in the half-cap check. A refused event does not consume an ID or a dedup key.
 function gameText.Record(kind, key, fields)
     local index = gameText.Index(kind)
-    if index.seen[key] then return end
+    if index.seen[key] then return true end
     local d, e = DB(), NewEvent(kind)
     for k, v in pairs(fields) do e[k] = v end
     if not gameText.Room(Size(e)) then d.n = d.n - 1; return end
@@ -738,6 +740,7 @@ function gameText.Record(kind, key, fields)
     local old = ring.keys[i]
     if old then seen[old] = nil end
     ring.keys[i], seen[key], ring.next = key, i, i % gameText.CAP + 1
+    return true
 end
 
 function gameText.InMail()
@@ -1665,6 +1668,124 @@ Sighting = function(unit, open, svc)
 end
 
 ---------------------------------------------------------------------------
+-- NPC lines: the chat payload's creature GUID, never the speaker name, determines the NPC ID
+---------------------------------------------------------------------------
+local line = { kinds = { CHAT_MSG_MONSTER_SAY = "say", CHAT_MSG_MONSTER_YELL = "yell",
+                         CHAT_MSG_MONSTER_WHISPER = "whisper", CHAT_MSG_MONSTER_EMOTE = "emote",
+                         CHAT_MSG_RAID_BOSS_EMOTE = "boss" },
+               raw = {}, count = 0, openers = {} }
+
+for word in ("A An And Away Back Be But Can Come Do Don't Everyone For Get Go Good Halt Hear Hello Here How If In It "
+    .. "Keep Leave Let Look Move My Never No Now Oh On Our Run See Stand Stay Stop Take That The There These They This "
+    .. "Those To Wait Watch We Welcome Well What When Where Who Why With Yes You Your"):gmatch("%S+") do
+    line.openers[word] = true
+end
+
+function line.AddName(names, value)
+    local name = gameText.PlainText(value)
+    if not name or #name < 2 or #name > 96 or name ~= Label(name, 96) then return false end
+    names[#names + 1] = name
+    return true
+end
+
+-- Include the name with its realm/surname before the bare given name, so no tail is left after replacement.
+function line.AddUnit(names, unit)
+    local given, realm = Try(UnitName, unit)
+    if Secret(realm) or not line.AddName(names, given) then return false end
+    if realm ~= nil and realm ~= "" then
+        if type(realm) ~= "string" or not line.AddName(names, given .. "-" .. realm:gsub("%s+", "")) then return false end
+    end
+    if type(GetUnitName) == "function" then
+        local full = Plain(Try(GetUnitName, unit, true))
+        if not line.AddName(names, full) then return false end
+        local suffix = full:sub(1, #given + 1) == given .. " " and full:sub(#given + 2)
+        if suffix and not suffix:find("^%-") and not line.AddName(names, suffix) then return false end
+    end
+    return true
+end
+
+function line.Names(recipient)
+    if Secret(recipient) then return nil end
+    local names = {}
+    if recipient ~= nil and recipient ~= "" then
+        if not line.AddName(names, recipient) then return nil end
+        local base = recipient:match("^([^%-]+)%-")
+        if base and not line.AddName(names, base) then return nil end
+    end
+    if not line.AddUnit(names, "player") then return nil end
+    local ok, target = pcall(UnitGUID, "target")
+    if not ok or Secret(target) or (target ~= nil and type(target) ~= "string") then return nil end
+    if target then
+        local player = Plain(Try(UnitIsPlayer, "target"))
+        if player ~= true and player ~= false then return nil end
+        if (player or target:find("^Player%-")) and not line.AddUnit(names, "target") then return nil end
+    end
+    local raid, grouped = Plain(Try(IsInRaid)), Plain(Try(IsInGroup))
+    if type(raid) ~= "boolean" or type(grouped) ~= "boolean" or (raid and not grouped) then return nil end
+    if grouped then
+        local count = Int(Try(GetNumGroupMembers), 1)
+        if not count or count > (raid and 40 or 5) then return nil end
+        for i = 1, (raid and count or count - 1) do
+            if not line.AddUnit(names, (raid and "raid" or "party") .. i) then return nil end
+        end
+    end
+    table.sort(names, function(a, b) return #a > #b end)
+    return names
+end
+
+-- Game substitutions use character-name capitalization. Once known substitutions are scrubbed,
+-- refuse unresolved capitalized words except ordinary sentence openers and the pronoun I.
+-- The secondary check is limited to ASCII; names/words in other scripts may not follow these rules.
+function line.HasUnknownName(text)
+    if text:find("[\128-\255]") then return true end
+    text = text:gsub("%$N", "@")
+    for at, word in text:gmatch("()([%a']+)") do
+        if word ~= "I" and not word:match("^I'[a-z]+$") and word:find("%u") then
+            if not line.openers[word] then return true end
+            local before = text:sub(1, at - 1)
+            if not before:match("^%s*$") and not before:match("[.!?]%s*$") then return true end
+        end
+    end
+    return false
+end
+
+function line.Record(kind, text, recipient, guid)
+    if not gameText.Room() then return end
+    guid, text = Plain(guid), Plain(text)
+    if type(guid) ~= "string" or guid:sub(1, 9) ~= "Creature-" or type(text) ~= "string" or #text > 8000 then return end
+    local _, id = FromGuid(guid)
+    local npc = gameText.Id(id)
+    if not npc then return end
+
+    local raw = npc .. ":" .. gameText.Checksum(text)
+    local index = gameText.Index("line")
+    local normalized = line.raw[raw]
+    if index.seen[raw] or (normalized and index.seen[normalized]) then return end
+
+    -- Even a Creature GUID can be a charmed creature or a summoned guardian. Require a current unit
+    -- that the client says is uncontrolled. Sender and recipient names are never saved as metadata.
+    local speaker = Plain(Try(UnitTokenFromGUID, guid))
+    if type(speaker) ~= "string" or Plain(Try(UnitGUID, speaker)) ~= guid
+        or Plain(Try(UnitIsPlayer, speaker)) ~= false or Plain(Try(UnitPlayerControlled, speaker)) ~= false then return end
+    local _, rawType = Try(UnitCreatureType, speaker)
+    local ct = Int(rawType, 1)
+    if not ct or ct == CT_COMPANION then return end
+    text = gameText.PlainText(text)
+    if not text then return end
+    local names = line.Names(recipient)
+    text = names and Prose(text, 8000, names, true)
+    if not text or line.HasUnknownName(text) then return end
+
+    text = Cut(text, TEXT_MAX.line)
+    local key = npc .. ":" .. gameText.Checksum(text)
+    if gameText.Record("line", key, { npc = npc, kind = kind, text = text }) and raw ~= key then
+        if line.count >= gameText.CAP then line.raw, line.count = {}, 0 end
+        if not line.raw[raw] then line.count = line.count + 1 end
+        line.raw[raw] = key
+    end
+end
+
+---------------------------------------------------------------------------
 -- quest extras (1.18.0)
 ---------------------------------------------------------------------------
 function qx.Later(fn)                           -- fn a second from now; nothing without a timer
@@ -1815,6 +1936,14 @@ end
 -- events: only registered while recording is on
 ---------------------------------------------------------------------------
 local handlers = {}
+
+-- The documented chat payload has text at 1, the optional recipient at 5 and sender GUID at 12.
+for event, kind in pairs(line.kinds) do
+    local lineKind = kind
+    handlers[event] = function(text, _, _, _, recipient, _, _, _, _, _, _, guid)
+        line.Record(lineKind, text, recipient, guid)
+    end
+end
 
 function handlers.LOOT_OPENED() qx.Spoil(); RecordLoot() end
 function handlers.LOOT_CLOSED() lootDone = false end
@@ -1987,6 +2116,7 @@ local function Enable()
         local ok, err = pcall(ev.RegisterEvent, ev, e)   -- an event this client lacks is simply skipped
         if e == "QUEST_TURNED_IN" then haveTurnedInEvent = ok and err ~= false end
     end
+    for e in pairs(line.kinds) do pcall(ev.RegisterEvent, ev, e) end
     if not hookedBags and type(hooksecurefunc) == "function" and C_Container and type(C_Container.UseContainerItem) == "function" then
         hookedBags = pcall(hooksecurefunc, C_Container, "UseContainerItem", function(bag, slot)
             bag, slot = Plain(bag), Int(slot, 1)
@@ -2002,6 +2132,8 @@ local function Enable()
 end
 local function Disable()
     for _, e in ipairs(RECORDING) do pcall(ev.UnregisterEvent, ev, e) end
+    for e in pairs(line.kinds) do pcall(ev.UnregisterEvent, ev, e) end
+    line.raw, line.count = {}, 0
     lootDone, detail, turnin, progress, merchantOpen = false, nil, nil, nil, false
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
