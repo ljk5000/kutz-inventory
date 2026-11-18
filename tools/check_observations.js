@@ -1,7 +1,7 @@
-// Offline check for KutzInventory/Observations.lua (default-on drop / quest / vendor recording) in a
+// Offline check for KutzInventory/Observations.lua (default-on drop / quest / vendor / trainer recording) in a
 // small fake game: on from a new install's first load (an opt-in era install keeps its choice), nothing recorded while off,
 // /kinv track (status, off, on again), the one-time note, each event type (loot per source incl. coin-only opens, skinning / herbs / fishing / containers,
-// quests with rewards, vendors with costs), item links cut to colour, id and name, the character's own name and surname
+// quests with rewards, vendors with costs, rx and the item filter, trainers' whole lists), item links cut to colour, id and name, the character's own name and surname
 // (never anyone else's), that gold and other players are never recorded, the caps and pruning,
 // and that a client without the APIs records nothing and raises no error.
 "use strict";
@@ -33,7 +33,9 @@ local function fresh(opts)
   opts = opts or {}
   local frames, timers, printed, registered, hooks, popups = {}, {}, {}, {}, {}, {}
   local s = { now = 1767225600, clock = 100, slots = {}, units = {}, fishing = false, itype = "none", iid = 0, difficulty = 0,
-              uiMap = 1429, x = 0.412345, y = 0.65432, quest = nil, rewards = {}, choices = {}, merchant = {}, rolls = {} }
+              uiMap = 1429, x = 0.412345, y = 0.65432, quest = nil, rewards = {}, choices = {}, merchant = {}, rolls = {},
+              mfilter = 1, filterSets = 0,
+              trainer = { type = 0, rows = {}, reads = 0, sets = 0, filters = { available = true, unavailable = true, used = true } } }
   local G = setmetatable({}, { __index = _G })
   G._G = G
   G.CreateFrame = function()
@@ -89,12 +91,46 @@ local function fresh(opts)
     G.hooksecurefunc = function(a, b, c)
       if type(a) == "string" then hooks[a] = b else hooks[b] = c end
     end
-    G.GetMerchantNumItems = function() return #s.merchant end
-    G.GetMerchantItemID = function(i) return s.merchant[i].id end
-    G.GetMerchantItemLink = function(i) local x = s.merchant[i]; return x.link end
-    G.GetMerchantItemInfo = function(i) local x = s.merchant[i]; return "n", 1, x.price, x.n, x.avail, true, true, x.cost ~= nil end
-    G.GetMerchantItemCostInfo = function(i) return #(s.merchant[i].cost or {}) end
-    G.GetMerchantItemCostItem = function(i, j) local c = s.merchant[i].cost[j]; return 1, c[2], c[1], "name" end
+    -- the merchant window's item filter: 1 = all, 2 = this class (hides the items marked other)
+    local function wares() local out = {}; for _, x in ipairs(s.merchant) do if s.mfilter == 1 or not x.other then out[#out + 1] = x end end; return out end
+    G.GetMerchantNumItems = function() return #wares() end
+    G.GetMerchantItemID = function(i) return wares()[i].id end
+    G.GetMerchantItemLink = function(i) local x = wares()[i]; return x.link end
+    G.GetMerchantItemInfo = function(i) local x = wares()[i]; return "n", 1, x.price, x.n, x.avail, true, true, x.cost ~= nil end
+    G.GetMerchantItemCostInfo = function(i) return #(wares()[i].cost or {}) end
+    G.GetMerchantItemCostItem = function(i, j) local c = wares()[i].cost[j]; return 1, c[2], c[1], "name" end
+    G.LE_LOOT_FILTER_ALL = 1
+    G.GetMerchantFilter = function() return s.mfilter end
+    if not opts.noSetMerchantFilter then
+      G.SetMerchantFilter = function(f) s.filterSets = s.filterSets + 1; if not s.stuckFilter then s.mfilter = f end end
+    end
+    G.UnitReaction = function(u, other) if u == "npc" and other == "player" then return s.reaction end end
+    -- trainers: rows { name, st = available|unavailable|used|header, rank, lv, skill, skillReq, needs, cost, s, tipType };
+    -- the window's type filters hide rows from addons, and switching one fires TRAINER_UPDATE at once
+    local function services()
+      local out = {}
+      for _, r in ipairs(s.trainer.rows) do if r.st == "header" or s.trainer.filters[r.st] then out[#out + 1] = r end end
+      return out
+    end
+    G.GetNumTrainerServices = function() s.trainer.reads = s.trainer.reads + 1; return #services() end
+    G.GetTrainerServiceInfo = function(i) local r = services()[i]; if r then return r.name, r.st, "tex", r.lv or 0, r.rank, "cat" end end
+    G.GetTrainerServiceSkillReq = function(i) local r = services()[i]; if r and r.skill then return r.skill, r.skillReq, true end end
+    G.GetTrainerServiceNumAbilityReq = function(i) local r = services()[i]; return r and r.needs and #r.needs or 0 end
+    G.GetTrainerServiceAbilityReq = function(i, j) return services()[i].needs[j], true end
+    G.GetTrainerServiceCost = function(i) local r = services()[i]; return r and r.cost, false end
+    G.GetTrainerServiceTypeFilter = function(f) return s.trainer.filters[f] end
+    G.SetTrainerServiceTypeFilter = function(f, on)
+      s.trainer.filters[f], s.trainer.sets = on and true or false, s.trainer.sets + 1
+      frames[1].scripts.OnEvent(frames[1], "TRAINER_UPDATE")
+    end
+    G.C_Trainer = { GetTrainerType = function() return s.trainer.type end }
+    G.Enum = { TrainerType = { General = 0, Tradeskills = 2, Pet = 3 }, TooltipDataType = { Item = 0, Spell = 1 } }
+    if not opts.noTooltip then
+      G.C_TooltipInfo = { GetTrainerService = function(i)
+        local r = services()[i]
+        if r and r.s then return { type = r.tipType or 1, id = r.s, lines = {} } end
+      end }
+    end
     G.StaticPopupDialogs = {}
     G.StaticPopup_Show = function(name) popups[#popups + 1] = name end
   end
@@ -361,6 +397,152 @@ do
   print("OK   vendors: id, n, price per n, item and currency costs, limited stock; the same stock once an hour")
 end
 
+-- 7a) vendors: rx (the npc's reaction) is recorded and part of the same-stock check; the class item filter is switched
+--     to "all" for the read and put back; filtered = true when it cannot be switched
+do
+  local VENDOR = "Creature-0-4170-0-1234-2843-000012AAAE"
+  local function shop(opts)
+    local h = fresh(opts); h.on()
+    h.s.units.npc = { guid = VENDOR }
+    h.s.reaction, h.s.mfilter = 5, 2
+    h.s.merchant = { { id = 4470, n = 1, price = 38, avail = -1 }, { id = 2488, n = 1, price = 500, avail = -1, other = true } }
+    return h
+  end
+  local h = shop()
+  h.event("MERCHANT_SHOW"); h.drain()
+  local e = h.events()[1]
+  assert(e.rx == 5 and e.filtered == nil and #e.items == 2 and e.items[2].id == 2488, "the read sees every item: " .. dump(e))
+  assert(h.s.mfilter == 2 and h.s.filterSets == 2, "the class filter is put back: " .. h.s.mfilter .. " " .. h.s.filterSets)
+  h.event("MERCHANT_CLOSED"); h.event("MERCHANT_SHOW"); h.drain()
+  assert(#h.events() == 1, "same stock, same rx: once an hour")
+  h.event("MERCHANT_CLOSED"); h.s.reaction = 6; h.event("MERCHANT_SHOW"); h.drain()
+  assert(#h.events() == 2 and h.events()[2].rx == 6, "a new reaction is a new reading")
+  h.s.mfilter, h.s.filterSets, h.s.reaction = 1, 0, 7
+  h.event("MERCHANT_CLOSED"); h.event("MERCHANT_SHOW"); h.drain()
+  assert(h.s.filterSets == 0 and #h.events() == 3 and #h.events()[3].items == 2, "already 'all': the filter is not touched")
+  local g = shop({ noSetMerchantFilter = true })
+  g.event("MERCHANT_SHOW"); g.drain()
+  e = g.events()[1]
+  assert(e.filtered == true and #e.items == 1 and g.s.mfilter == 2, "no SetMerchantFilter: filtered " .. dump(e))
+  local k = shop(); k.s.stuckFilter = true
+  k.event("MERCHANT_SHOW"); k.drain()
+  e = k.events()[1]
+  assert(e.filtered == true and #e.items == 1 and k.s.filterSets == 2, "a switch that does not take: filtered " .. dump(e))
+  local n = shop(); n.G.UnitReaction = function() return 9 end
+  n.event("MERCHANT_SHOW"); n.drain()
+  assert(n.events()[1].rx == nil, "rx only 1..8")
+  print("OK   vendors: rx recorded and in the same-stock check; read under the 'all' item filter and put back; else filtered = true")
+end
+
+-- 7b) trainers: the whole list (every type filter on for the read, put back after), spell ids from the tooltip, rx;
+--     once a week per trainer and list (learning a spell changes nothing); never the Beast Training window; no GUID
+do
+  local TRAINER = "Creature-0-4170-0-1234-5146-000012AAAD"
+  local function rows()
+    return {
+      { name = "Frost Magic", st = "header" },
+      { name = "Frostbolt", rank = "Rank 4", st = "available", lv = 20, cost = 1800, s = 7322 },
+      { name = "Blizzard", rank = "Rank 2", st = "unavailable", lv = 28, cost = 4000, s = 8427, needs = { "Blizzard" } },
+      { name = "Frostbolt", rank = "Rank 1", st = "used", lv = 4, cost = 100, s = 116 },
+      { name = "  Arcane Intellect ", st = "available", lv = 0, cost = 0 },
+      { name = "Made-up Ward", st = "available", lv = 30, cost = 10, s = 4711, tipType = 0 },   -- the tooltip names an item
+    }
+  end
+  local function school(opts)
+    local h = fresh(opts); h.on()
+    h.s.units.npc = { guid = TRAINER }
+    h.s.reaction = 6
+    h.s.trainer.filters = { available = true, unavailable = false, used = false }
+    h.s.trainer.rows = rows()
+    return h
+  end
+  local function visit(h) h.event("TRAINER_SHOW"); h.drain(); h.drain(); h.event("TRAINER_CLOSED") end
+  local h = school()
+  assert(h.registered.TRAINER_SHOW and h.registered.TRAINER_UPDATE and h.registered.TRAINER_CLOSED, "trainer events registered")
+  visit(h)
+  local ev = h.events()
+  assert(#ev == 1, "one event, the filter switches' TRAINER_UPDATEs read nothing again: " .. #ev)
+  local e = ev[1]
+  assert(e.type == "trainer" and e.npc == 5146 and e.kind == "class" and e.rx == 6 and e.who.name == "Tester" and e.where.uiMap == 1429, dump(e))
+  assert(dump(e.rows) == "{1={cost=1800,lv=20,name=Frostbolt,rank=Rank 4,s=7322,st=a},"
+         .. "2={cost=4000,lv=28,name=Blizzard,needs={1=Blizzard},rank=Rank 2,s=8427,st=u},"
+         .. "3={cost=100,lv=4,name=Frostbolt,rank=Rank 1,s=116,st=k},"
+         .. "4={cost=0,name=Arcane Intellect,st=a},"
+         .. "5={cost=10,lv=30,name=Made-up Ward,st=a}}", dump(e.rows))
+  assert(dump(h.s.trainer.filters) == "{available=true,unavailable=false,used=false}" and h.s.trainer.sets == 4,
+         "the filters are put back: " .. dump(h.s.trainer.filters))
+  assert(not dump(h.db()):find("Creature%-") and not h.db().lastError, "no GUID is stored")
+  -- the same list again, also after learning a spell and after a reload: not recorded again within 7 days
+  visit(h)
+  h.s.trainer.rows[2].st = "used"; visit(h)
+  local r = school({ db = h.db() }); r.s.trainer.rows[2].st = "used"
+  visit(r)
+  assert(#h.events() == 1 and #r.events() == 1, "the same trainer and list once a week, across a reload while the event is kept")
+  -- what is recorded again: a week later, another reaction (another price), another cost
+  r.s.now = r.s.now + 7 * 86400; visit(r)
+  assert(#r.events() == 2, "a week later")
+  r.s.reaction = 7; visit(r)
+  assert(#r.events() == 3 and r.events()[3].rx == 7, "a new reaction")
+  r.s.trainer.rows[3].cost = 3800; visit(r)
+  assert(#r.events() == 4 and r.events()[4].rows[2].cost == 3800, "a new cost")
+  -- never: the hunter's Beast Training window, a trainer that is no creature, while off
+  local p = school(); p.s.trainer.type = 3; visit(p)
+  assert(#p.events() == 0 and p.s.trainer.sets == 0, "Beast Training is never read")
+  local q = school(); q.s.units.npc = { guid = PLAYER }; visit(q)
+  q.s.units.npc = nil; visit(q)
+  assert(#q.events() == 0, "no creature id, no event")
+  local o = school(); o.cmd("track drops off"); visit(o)
+  assert(#o.events() == 0 and not o.registered.TRAINER_SHOW, "nothing while off")
+  -- a list that arrives after the window opened: read again on TRAINER_UPDATE, at most 5 times while it is empty
+  local l = school(); l.s.trainer.rows = {}
+  l.event("TRAINER_SHOW"); l.drain(); l.drain()
+  assert(l.s.trainer.reads == 1, "our own filter switches do not start another read: " .. l.s.trainer.reads)
+  for _ = 1, 9 do l.event("TRAINER_UPDATE"); l.drain() end
+  assert(#l.events() == 0 and l.s.trainer.reads == 5, "five reads of an empty list: " .. l.s.trainer.reads)
+  l.event("TRAINER_CLOSED"); l.event("TRAINER_SHOW"); l.drain()
+  l.s.trainer.rows = rows(); l.event("TRAINER_UPDATE"); l.drain(); l.event("TRAINER_UPDATE"); l.drain()
+  assert(#l.events() == 1, "the late list is recorded once")
+  -- the npc unit not there yet on the first read: not given up, read again on the next TRAINER_UPDATE (same 5 tries)
+  local u = school(); u.s.units.npc = nil
+  u.event("TRAINER_SHOW"); u.drain()
+  assert(#u.events() == 0 and u.s.trainer.reads == 0 and u.s.trainer.sets == 0, "no npc yet: nothing read, no filter touched")
+  u.s.units.npc = { guid = TRAINER }; u.event("TRAINER_UPDATE"); u.drain(); u.drain()
+  assert(#u.events() == 1 and u.events()[1].npc == 5146 and dump(u.s.trainer.filters) == "{available=true,unavailable=false,used=false}",
+         "the npc that arrives late is recorded: " .. #u.events())
+  local w = school(); w.s.units.npc = nil
+  w.event("TRAINER_SHOW"); w.drain()
+  for _ = 1, 9 do w.event("TRAINER_UPDATE"); w.drain() end
+  w.s.units.npc = { guid = TRAINER }; w.event("TRAINER_UPDATE"); w.drain()
+  assert(#w.events() == 0 and w.s.trainer.reads == 0, "five tries without an npc, then the window is left alone")
+  -- closed before the read: nothing
+  local c = school(); c.event("TRAINER_SHOW"); c.event("TRAINER_CLOSED"); c.drain()
+  assert(#c.events() == 0, "closed before it was read")
+  -- a profession trainer: kind, skill and skill rank
+  local f = school(); f.s.trainer.type = 2
+  f.s.trainer.rows = { { name = "Blacksmithing", rank = "Journeyman", st = "available", lv = 10, cost = 500, s = 3100, skill = "Blacksmithing", skillReq = 50 } }
+  visit(f)
+  assert(f.events()[1].kind == "profession" and dump(f.events()[1].rows) ==
+         "{1={cost=500,lv=10,name=Blacksmithing,rank=Journeyman,s=3100,skill=Blacksmithing,skillReq=50,st=a}}", dump(f.events()[1]))
+  -- a client that spells the enum Tradeskill (no s)
+  local f2 = school(); f2.G.Enum = { TrainerType = { General = 0, Tradeskill = 5, Pet = 3 }, TooltipDataType = { Item = 0, Spell = 1 } }
+  f2.s.trainer.type = 5; visit(f2)
+  assert(f2.events()[1].kind == "profession", "Enum.TrainerType.Tradeskill: " .. tostring(f2.events()[1].kind))
+  -- limits: 400 rows, names cut to 120 bytes on a whole character, 5 needs; rows with markup or no cost are left out
+  local big = school(); big.s.trainer.rows = {
+    { name = string.rep("é", 70), st = "available", cost = 1, needs = { "a", "b", "c", "d", "e", "f", "g" } },
+    { name = "|cffff0000Red|r", st = "available", cost = 1 }, { name = "No Cost", st = "available" } }
+  for i = 1, 450 do big.s.trainer.rows[#big.s.trainer.rows + 1] = { name = "Spell " .. i, st = "available", cost = i } end
+  visit(big)
+  e = big.events()[1]
+  assert(#e.rows == 400 and #e.rows[1].name == 120 and #e.rows[1].needs == 5 and e.rows[2].name == "Spell 1"
+         and e.rows[400].name == "Spell 399", #e.rows .. " " .. #e.rows[1].name .. " " .. e.rows[2].name)
+  -- a client without the tooltip API: no spell ids, the rest as before
+  local t = school({ noTooltip = true }); visit(t)
+  for _, row in ipairs(t.events()[1].rows) do assert(row.s == nil, dump(row)) end
+  assert(#t.events()[1].rows == 5, "rows without spell ids")
+  print("OK   trainers: whole list with filters put back, spell ids, rx, kind; once a week per list; no Beast Training, no GUID, caps")
+end
+
 -- 8) never money or other players, anywhere in the saved table; the only name is this character's own, in who
 do
   local h = fresh(); h.on()
@@ -509,7 +691,7 @@ do
   h.cmd("track drops on"); h.cmd("track drops yes")
   for _, e in ipairs({ "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_SUCCEEDED", "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE",
                        "QUEST_TURNED_IN", "MERCHANT_SHOW", "MERCHANT_CLOSED", "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_START",
-                       "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT" }) do
+                       "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED" }) do
     h.event(e, 1, 2, 3)
   end
   h.drain()
@@ -517,7 +699,7 @@ do
   local loot = {}
   for _, e in ipairs(h.events()) do if e.type == "loot" then loot[#loot + 1] = e end; assert(not e.b and not next(e.who), dump(e)) end
   assert(#loot == 1 and #loot[1].items == 0 and loot[1].src.kind == "other", dump(loot))
-  print("OK   a client without the loot / quest / merchant / map APIs raises no error")
+  print("OK   a client without the loot / quest / merchant / trainer / map APIs raises no error")
 end
 `;
 

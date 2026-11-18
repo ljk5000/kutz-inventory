@@ -149,6 +149,19 @@ count=7;emit('BAG_UPDATE',0);emit('BAG_UPDATE_DELAYED')
 check(c.bags[0].items[1].count==7,'last-moment bag update must be immediate')
 xp=99;emit('PLAYER_XP_UPDATE','player');check(c.xp==99,'last-moment XP must be immediate')
 coins=54321;emit('PLAYER_MONEY');check(c.money==54321,'money change')
+do -- trainers: the class trainer's list; the hunter's Beast Training window (trainer type Pet) never replaces it
+ local ttype,list=0,{{'Frostbolt','available',10},{'Blizzard','unavailable',20}}
+ C_Trainer={GetTrainerType=function() return ttype end}
+ GetNumTrainerServices=function() return #list end
+ GetTrainerServiceInfo=function(i) local r=list[i];return r[1],r[2],nil,r[3] end
+ GetTrainerServiceCost=function() return 100 end
+ emit('TRAINER_SHOW');advance(1)
+ check(c.trainers and c.trainers.class and #c.trainers.class==2 and c.trainers.class[1].name=='Frostbolt','class trainer recorded')
+ ttype,list=3,{{'Growl','available',1}}
+ emit('TRAINER_SHOW');advance(1)
+ check(#c.trainers.class==2 and c.trainers.class[1].name=='Frostbolt','Beast Training must not replace the class trainer')
+ C_Trainer,GetNumTrainerServices=nil,nil
+end
 rank=7;emit('TRAIT_NODE_CHANGED')
 emit('PLAYER_EQUIPMENT_CHANGED')
 if '${mode}'~='NativeExit' then

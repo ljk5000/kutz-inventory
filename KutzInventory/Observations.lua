@@ -1,5 +1,5 @@
--- KutzInventory / Observations: default-on recording of what drops, what quests give and what vendors sell, for cr0m's
--- item database. On from the first load of a new install; an install from the opt-in days keeps
+-- KutzInventory / Observations: default-on recording of what drops, what quests give, what vendors sell and what
+-- trainers teach, for cr0m's item database. On from the first load of a new install; an install from the opt-in days keeps
 -- its choice (off stays off). /kinv track drops off stops it and stays off across reloads; /kinv track shows the status.
 --
 -- A module on its own: its own saved table, KutzInventoryObsDB, and nothing in the other files depends on it (they
@@ -9,7 +9,7 @@
 --                        addon = "1.8.0", prefix = "k1f9c2", n = 17, events = { oldest first } }
 --   on: a new table starts true (KutzInventory 1.13.0); an existing one keeps what it holds, only a missing on becomes
 --   true. Recording needs on and agreed.
--- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor",
+-- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor"|"trainer",
 --               where = { map, uiMap, itype, difficulty, x, y }, who = { level, class, faction, name, surname }, ... }
 --   who.name / who.surname: this character's own name (never anyone else's), so cr0m can credit the right character.
 --   items carry link = "|cffa335ee|Hitem:19019|h[Name]|h|r": only the item's quality colour, id and name, so cr0m can name
@@ -27,7 +27,17 @@
 --           text = { title, details, objectives } on accept and { title, progress, completion } on turnin: the quest's
 --           words as the game showed them, with this character's own name put back to "$N". Once per quest and act
 --           while the event is kept, and not at all once the events are past half the size cap.
---   vendor  npc, items = { { id, n, link, price (copper per n, as shown), cost = { { item|currency, n } }, limited } }
+--   vendor  npc, rx, filtered, items = { { id, n, link, price (copper per n, as shown), cost = { { item|currency, n } }, limited } }
+--           read under the merchant window's "all" item filter, put back at once; filtered = true when it could not be
+--           switched (the list then misses the items the class filter hides). The same stock and rx once an hour.
+--   trainer npc, kind = "class"|"profession", rx, rows = { { s, name, rank, lv, skill, skillReq, needs, cost, st } }:
+--           a trainer's whole list (all three type filters on for the read, put back after), at most 400 rows.
+--           s = spell id (from the tooltip data; left out when the client gives none), st = "a" available, "u" not
+--           yet, "k" known. The hunter's Beast Training window is never recorded. The same trainer with the same list
+--           (st aside, so learning a spell changes nothing) and rx is recorded at most once in 7 days.
+--   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
+--           which already includes this character's reputation discount: rx tells a list price from a discounted one.
+--           They are game prices, not the player's money.
 -- Never recorded: coin loot, quest money, the player's money, other players' names or GUIDs, chat, guild. (Loot chat is
 -- read only for this player's own "You won" line, kept as the won flag; who else rolled or won is never kept.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
@@ -51,9 +61,32 @@ local function Try(fn, ...)
     local ok, a, b, c, d, e, f, g, h, i, j = pcall(fn, ...)
     if ok then return a, b, c, d, e, f, g, h, i, j end
 end
+local function Secret(v) return issecretvalue ~= nil and issecretvalue(v) and true or false end
 local function Say(msg) print(PREFIX .. msg) end
 local function Num(v) v = Plain(v); return type(v) == "number" and v or nil end
 local function Int(v, min) v = Num(v); if v and v == math.floor(v) and v >= (min or 0) then return v end end
+
+local function Cut(s, max)                      -- at most max bytes, cut before a split UTF-8 character
+    if #s <= max then return s end
+    local i = max
+    while i > 0 and s:byte(i + 1) >= 128 and s:byte(i + 1) < 192 do i = i - 1 end
+    return s:sub(1, i)
+end
+
+-- A short game label (a spell or skill name, "Rank 4"): trimmed, no control characters, cut to max bytes; nil when
+-- empty or when it carries UI markup ("|").
+local function Label(v, max)
+    v = Plain(v)
+    if type(v) ~= "string" then return nil end
+    v = Cut(v:gsub("%c", ""):gsub("^%s+", ""):gsub("%s+$", ""), max)
+    if v == "" or v:find("|", 1, true) then return nil end
+    return v
+end
+
+local function Reaction()                       -- the npc's standing with this character: 1 hated .. 8 exalted
+    local r = Int(Try(UnitReaction, "npc", "player"), 1)
+    return r and r <= 8 and r or nil
+end
 
 local function DB(create)
     local d = KutzInventoryObsDB
@@ -585,11 +618,7 @@ local function Prose(fn, max)
         if given:find("%w$") then pat = pat .. "%f[%W]" end
         s = s:gsub(pat, "$N")
     end
-    if #s > max then
-        local i = max
-        while i > 0 and s:byte(i + 1) >= 128 and s:byte(i + 1) < 192 do i = i - 1 end
-        s = s:sub(1, i)
-    end
+    s = Cut(s, max)
     return s ~= "" and s or nil
 end
 
@@ -678,10 +707,21 @@ local function Cost(i)
     return cost
 end
 
-local function RecordVendor()
-    if not merchantOpen then return end
-    local what, npc = Giver("npc")
-    if what ~= "npc" then return end
+-- The merchant window's item filter (this class / all) hides items from addons too. The read is made under "all" and
+-- the filter put back straight after, in the same frame, so the window never draws the other list; this module has no
+-- MERCHANT_UPDATE handler, so the filter change cannot start a loop. -> the filter to put back (or nil), and true when
+-- the read is still filtered because the filter could not be switched.
+local function AllMerchantItems()
+    local all = Plain(LE_LOOT_FILTER_ALL)
+    if type(GetMerchantFilter) ~= "function" or type(all) ~= "number" then return nil, false end
+    local was = Try(GetMerchantFilter)
+    if Secret(was) or was == nil or was == all then return nil, false end
+    if type(SetMerchantFilter) ~= "function" then return nil, true end
+    Try(SetMerchantFilter, all)
+    return was, Plain(Try(GetMerchantFilter)) ~= all
+end
+
+local function VendorItems()
     local items, sig = {}, {}
     for i = 1, Int((Try(GetMerchantNumItems))) or 0 do
         local id = Int(Try(GetMerchantItemID, i), 1)
@@ -705,14 +745,156 @@ local function RecordVendor()
             sig[#sig + 1] = id .. ":" .. it.n .. ":" .. it.price .. ":" .. tostring(it.limited)
         end
     end
+    return items, sig
+end
+
+local function RecordVendor()
+    if not merchantOpen then return end
+    local what, npc = Giver("npc")
+    if what ~= "npc" then return end
+    local was, filtered = AllMerchantItems()
+    local ok, items, sig = pcall(VendorItems)
+    if was ~= nil then Try(SetMerchantFilter, was) end
+    if not ok then error(items, 0) end
     if #items == 0 then return end
-    sig = table.concat(sig, ",")
+    local rx = Reaction()
+    sig = table.concat(sig, ",") .. "|" .. tostring(rx) .. (filtered and "|filtered" or "")
     local seen, now = vendorSeen[npc], time()
     if seen and seen.sig == sig and now - seen.at < VENDOR_AGAIN then return end
     vendorSeen[npc] = { at = now, sig = sig }
     local e = NewEvent("vendor")
-    e.npc, e.items = npc, items
+    e.npc, e.rx, e.items = npc, rx, items
+    if filtered then e.filtered = true end
     Add(e)
+end
+
+---------------------------------------------------------------------------
+-- trainers: what a class or profession trainer teaches, at what price, when the window opens
+---------------------------------------------------------------------------
+local TRAINER_AGAIN = 7 * 86400                 -- the same trainer with the same list is recorded at most once a week
+local TRAINER_ROWS, TRAINER_TRIES = 400, 5      -- rows kept; reads per window while the list comes back empty
+local TRAINER_FILTERS = { "available", "unavailable", "used" }
+local TRAINER_STATE = { available = "a", unavailable = "u", used = "k" }
+local trainer = { open = false, done = false, pending = false, reading = false, tries = 0, token = 0 }
+local trainerSeen                               -- npc .. "|" .. signature -> the newest t, from the saved events on first use
+
+-- "class" (any general trainer), "profession", or nil for the hunter's Beast Training window (no trainer NPC, and it
+-- costs training points, not copper)
+local function TrainerKind()
+    local T, E = C_Trainer, Enum and Enum.TrainerType
+    local t = T and T.GetTrainerType and Plain(Try(T.GetTrainerType))
+    if t ~= nil then
+        if t == (E and E.Pet or 3) then return nil end
+        return t == (E and (E.Tradeskills or E.Tradeskill) or 2) and "profession" or "class"
+    end
+    return Plain(Try(IsTradeskillTrainer)) and "profession" or "class"
+end
+
+-- A service's spell id: the client has no GetTrainerServiceSpellID, but its tooltip data names the spell. nil when the
+-- client gives none (or names something that is not a spell).
+local function TrainerSpell(i)
+    local TI, spell = C_TooltipInfo, Enum and Enum.TooltipDataType and Enum.TooltipDataType.Spell
+    if not (TI and type(TI.GetTrainerService) == "function" and spell ~= nil) then return nil end
+    local data = Try(TI.GetTrainerService, i)
+    if type(data) ~= "table" or Plain(data.type) ~= spell then return nil end
+    return Int(data.id, 1)
+end
+
+-- What makes two readings of a trainer the same list: each service's name, rank, cost, level and skill, and rx. Not
+-- st (learning a spell changes nothing) and not the spell id (the same whether or not the tooltip answered).
+local function TrainerSig(rows, rx)
+    local parts = {}
+    for i, r in ipairs(rows) do
+        if type(r) ~= "table" then r = {} end
+        parts[i] = tostring(r.name) .. "/" .. tostring(r.rank or "") .. ":" .. tostring(r.cost) .. ":" .. tostring(r.lv or "")
+                   .. ":" .. tostring(r.skillReq or "")
+    end
+    return table.concat(parts, ",") .. "|" .. tostring(rx)
+end
+
+local function TrainerSeen()
+    if not trainerSeen then
+        trainerSeen = {}
+        for _, e in ipairs(DB().events) do
+            if type(e) == "table" and e.type == "trainer" and type(e.rows) == "table" and type(e.t) == "number" then
+                local key = tostring(e.npc) .. "|" .. TrainerSig(e.rows, e.rx)
+                if not trainerSeen[key] or trainerSeen[key] < e.t then trainerSeen[key] = e.t end
+            end
+        end
+    end
+    return trainerSeen
+end
+
+-- The list, read with every type filter on. -> the event, or nil (empty list, or the same list recorded this week)
+local function ReadTrainer(npc, kind)
+    local rows, index = {}, {}
+    for i = 1, Int((Try(GetNumTrainerServices))) or 0 do
+        if #rows >= TRAINER_ROWS then break end
+        local name, status, _, lv, rank = Try(GetTrainerServiceInfo, i)
+        local st, cost = TRAINER_STATE[Plain(status)], Int((Try(GetTrainerServiceCost, i)))
+        name = Label(name, 120)
+        if st and name and cost then                -- headers, and rows whose name or cost cannot be read, are left out
+            local skill, skillReq = Try(GetTrainerServiceSkillReq, i)
+            local row = { name = name, rank = Label(rank, 40), lv = Int(lv, 1) or Int(Try(GetTrainerServiceLevelReq, i), 1),
+                          skill = Label(skill, 64), skillReq = Int(skillReq, 1), cost = cost, st = st }
+            local needs = {}
+            for j = 1, math.min(Int((Try(GetTrainerServiceNumAbilityReq, i))) or 0, 5) do
+                needs[#needs + 1] = Label((Try(GetTrainerServiceAbilityReq, i, j)), 120)
+            end
+            if #needs > 0 then row.needs = needs end
+            index[#rows + 1] = i
+            rows[#rows + 1] = row
+        end
+    end
+    if #rows == 0 then return nil end
+    trainer.done = true
+    local rx = Reaction()
+    local key, now, seen = npc .. "|" .. TrainerSig(rows, rx), time(), TrainerSeen()
+    if seen[key] and now - seen[key] < TRAINER_AGAIN then return nil end
+    seen[key] = now
+    for n, row in ipairs(rows) do row.s = TrainerSpell(index[n]) end   -- only for a list that is recorded
+    local e = NewEvent("trainer")
+    e.npc, e.kind, e.rx, e.rows = npc, kind, rx, rows
+    return e
+end
+
+local function RecordTrainer()
+    trainer.pending = false
+    if not trainer.open or trainer.done or trainer.tries >= TRAINER_TRIES or type(GetNumTrainerServices) ~= "function" then return end
+    trainer.tries = trainer.tries + 1
+    local kind = TrainerKind()
+    if not kind then trainer.done = true; return end
+    local guid = Plain(Try(UnitGUID, "npc"))
+    if type(guid) ~= "string" then return end   -- the npc unit is not there yet: the next TRAINER_UPDATE tries again
+    local what, npc = FromGuid(guid)
+    if what ~= "npc" then trainer.done = true; return end   -- not a creature: never recorded
+    trainer.reading = true                      -- the filter switches below fire TRAINER_UPDATE: ignored meanwhile
+    local off = {}
+    if type(GetTrainerServiceTypeFilter) == "function" and type(SetTrainerServiceTypeFilter) == "function" then
+        for _, f in ipairs(TRAINER_FILTERS) do
+            local on = Try(GetTrainerServiceTypeFilter, f)
+            if not Secret(on) and not on then off[#off + 1] = f; Try(SetTrainerServiceTypeFilter, f, true) end
+        end
+    end
+    local ok, e = pcall(ReadTrainer, npc, kind)
+    for _, f in ipairs(off) do Try(SetTrainerServiceTypeFilter, f, false) end
+    trainer.reading = false
+    if not ok then error(e, 0) end
+    if e then Add(e) end
+end
+
+local function SoonTrainer()                    -- one read about 0.5 s after the window opens (or its list arrives)
+    if trainer.pending or trainer.done or not trainer.open then return end
+    trainer.pending = true
+    local token = trainer.token
+    local function run()
+        if token ~= trainer.token then return end
+        local ok, err = pcall(RecordTrainer)
+        trainer.reading = false
+        local d = DB()
+        if not ok and d then d.lastError = "observations trainer: " .. tostring(err) end
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0.5, run) else run() end
 end
 
 ---------------------------------------------------------------------------
@@ -806,10 +988,18 @@ function handlers.MERCHANT_SHOW()
 end
 function handlers.MERCHANT_CLOSED() merchantOpen = false end
 
+function handlers.TRAINER_SHOW()
+    trainer.open, trainer.done, trainer.pending, trainer.tries, trainer.token = true, false, false, 0, trainer.token + 1
+    SoonTrainer()
+end
+-- the list arriving after the window opened (read again while it was empty); also our own filter switches, ignored
+function handlers.TRAINER_UPDATE() if not trainer.reading then SoonTrainer() end end
+function handlers.TRAINER_CLOSED() trainer.open = false end
+
 local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
-                    "MERCHANT_SHOW", "MERCHANT_CLOSED" }
+                    "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -830,6 +1020,7 @@ end
 local function Disable()
     for _, e in ipairs(RECORDING) do pcall(ev.UnregisterEvent, ev, e) end
     lootDone, detail, turnin, progress, merchantOpen = false, nil, nil, nil, false
+    trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
 end
 
@@ -907,10 +1098,10 @@ function ns.ObsNote()
     if d.noted then return end
     d.noted = true
     if d.on and d.agreed then
-        Say("drop, quest and vendor tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
+        Say("drop, quest, vendor and trainer tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
         print("  It never records gold or anything about other players. |cffaaaaaa/kinv track drops off|r stops recording.")
     else
-        Say("drop, quest and vendor tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
+        Say("drop, quest, vendor and trainer tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
         print("  It never records gold or anything about other players. |cffaaaaaa/kinv track|r shows the status.")
     end
 end

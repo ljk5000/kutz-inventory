@@ -19,7 +19,7 @@ const SCHEMA_VERSION = "2.1.0";
 // API: stats, sheet, talents, spec, role, reputation, statistics, PvP, achievement points; equipped
 // items keep only slotId, id and link. The default since cr0m's 3.x reader was deployed.
 // 3.1.0 adds raids[]: the cr0m raids tracked with /kinv raid that recorded something (KutzInventoryDB.raids).
-// 3.2.0 adds observations: drop / quest / vendor events (KutzInventoryObsDB, /kinv track; default-on for new installs since addon 1.13.0).
+// 3.2.0 adds observations: drop / quest / vendor events (trainer events since 3.9.0) (KutzInventoryObsDB, /kinv track; default-on for new installs since addon 1.13.0).
 // 3.3.0: observation items may carry a short item `link` (colour, id, name) and `who` the recording character's own
 // `name` and `surname`.
 // 3.4.0 adds characters[].crafted: the items the character created, counted as they are made (Crafts.lua).
@@ -30,7 +30,9 @@ const SCHEMA_VERSION = "2.1.0";
 // threshold quality 0-7) and `encounter` (the DungeonEncounter id of a boss); its items may carry won: true, the item
 // this character won by roll (KutzInventory 1.14.0).
 // 2.1.0 / 3.8.0 add characters[].legacyTree: the current character's three Legacy trait trees.
-const SCHEMA_VERSION_3 = "3.8.0";
+// 3.9.0: observations may be of type "trainer" (a class or profession trainer's list with costs, spell ids and the
+// trainer's reaction rx); vendor observations may carry rx and filtered (KutzInventory 1.16.0). observations.v stays 1.
+const SCHEMA_VERSION_3 = "3.9.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).
@@ -413,7 +415,7 @@ function exportRaids(dbs) {
 }
 
 // ---------------------------------------------------------------------------
-// Observations (inventory 3.2.0+): KutzInventoryObsDB.events from Observations.lua, recorded while
+// Observations (inventory 3.2.0+; trainer events 3.9.0): KutzInventoryObsDB.events from Observations.lua, recorded while
 // drop tracking is on (/kinv track; on by default since KutzInventory 1.13.0). Exported as observations = { v: 1, addon, events[] } only when there is
 // at least one usable event. Each event keeps only the fields its type has, with the right types; everything else
 // (anything about money, other players, unknown keys) is dropped. Ids are unique per install, so several saved files
@@ -487,6 +489,27 @@ function obsCost(list) {
     return obsInt(c.item, 1) !== undefined ? { item: c.item, n: obsInt(c.n, 1) } : { currency: obsInt(c.currency, 1), n: obsInt(c.n, 1) };
   }).filter((c) => (c.item !== undefined || c.currency !== undefined) && c.n !== undefined).slice(0, 10);
 }
+// The trainer's reaction to the recording character (UnitReaction, 1 hated .. 8 exalted): prices already include its
+// reputation discount, so rx tells a list price from a discounted one (3.9.0)
+const obsReaction = (v) => (Number.isInteger(v) && v >= 1 && v <= 8 ? v : undefined);
+// A short game label (spell, rank, skill or required ability name): no UI markup, no control characters, and nothing
+// shaped like a GUID, so no player or creature GUID can ride in a name
+const OBS_LABEL = /^[^|\u0000-\u001f\u007f]+$/;
+const OBS_GUIDISH = /(Player|Creature|Pet|GameObject|Vehicle|Item|Vignette|BattlePet)-[0-9]+-[0-9]+/;
+const obsLabel = (v, max) =>
+  (typeof v === "string" && v.length >= 1 && v.length <= max && OBS_LABEL.test(v) && !OBS_GUIDISH.test(v) ? v : undefined);
+const OBS_TRAINER_KINDS = ["class", "profession"];
+const OBS_TRAINER_STATES = ["a", "u", "k"];
+const OBS_TRAINER_ROWS = 400;
+// One service: a row without a usable name, cost or state is dropped; optional fields that fail their checks go
+function obsTrainerRow(r) {
+  if (!r || typeof r !== "object") return null;
+  const name = obsLabel(r.name, 120), cost = obsInt(r.cost);
+  if (name === undefined || cost === undefined || !OBS_TRAINER_STATES.includes(r.st)) return null;
+  const needs = asList(r.needs).map((x) => obsLabel(x, 120)).filter((x) => x !== undefined).slice(0, 5);
+  return pick({ s: obsInt(r.s, 1), name, rank: obsLabel(r.rank, 40), lv: obsInt(r.lv, 1), skill: obsLabel(r.skill, 64),
+                skillReq: obsInt(r.skillReq, 1), needs: needs.length ? needs : undefined, cost, st: r.st });
+}
 function observationEvent(e) {
   if (!e || typeof e !== "object" || !obsText(e.id, OBS_ID) || obsInt(e.t, 1) === undefined || e.t > 1e11) return null;
   const base = { id: e.id, t: e.t, ...(obsText(e.b, /^[0-9][0-9.]{0,39}$/) ? { b: e.b } : {}), type: e.type };
@@ -516,7 +539,15 @@ function observationEvent(e) {
         return { id: it.id, n: obsInt(it.n, 1) ?? 1, ...(link ? { link } : {}), price: obsInt(it.price) ?? 0, ...(cost.length ? { cost } : {}),
                  limited: obsInt(it.limited) ?? null };
       });
-    return { ...base, npc: e.npc, ...place(), items };
+    const rx = obsReaction(e.rx);
+    return { ...base, npc: e.npc, ...(rx ? { rx } : {}), ...(e.filtered === true ? { filtered: true } : {}), ...place(), items };
+  }
+  if (e.type === "trainer") {
+    if (obsInt(e.npc, 1) === undefined || !OBS_TRAINER_KINDS.includes(e.kind)) return null;
+    const rows = asList(e.rows).map(obsTrainerRow).filter(Boolean).slice(0, OBS_TRAINER_ROWS);
+    if (!rows.length) return null;
+    const rx = obsReaction(e.rx);
+    return { ...base, npc: e.npc, kind: e.kind, ...(rx ? { rx } : {}), ...place(), rows };
   }
   return null;
 }

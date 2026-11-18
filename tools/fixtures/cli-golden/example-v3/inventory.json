@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.8.0",
+ "schemaVersion": "3.9.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": null,
  "prices": {
@@ -681,6 +681,7 @@
     "b": "1.60.1.70888",
     "type": "vendor",
     "npc": 12944,
+    "rx": 5,
     "where": {
      "map": 0,
      "uiMap": 1428,
@@ -713,6 +714,61 @@
       "n": 1,
       "price": 38,
       "limited": 5
+     }
+    ]
+   },
+   {
+    "id": "k1f9c2-000023",
+    "t": 1762906000,
+    "b": "1.60.1.70888",
+    "type": "trainer",
+    "npc": 5146,
+    "kind": "class",
+    "rx": 6,
+    "where": {
+     "map": 0,
+     "uiMap": 1453,
+     "x": 0.3812,
+     "y": 0.7907
+    },
+    "who": {
+     "level": 20,
+     "class": 8,
+     "faction": "Alliance"
+    },
+    "rows": [
+     {
+      "s": 7322,
+      "name": "Frostbolt",
+      "rank": "Rank 4",
+      "lv": 20,
+      "cost": 1800,
+      "st": "a"
+     },
+     {
+      "s": 8427,
+      "name": "Blizzard",
+      "rank": "Rank 2",
+      "lv": 28,
+      "needs": [
+       "Blizzard"
+      ],
+      "cost": 4000,
+      "st": "u"
+     },
+     {
+      "s": 116,
+      "name": "Frostbolt",
+      "rank": "Rank 1",
+      "lv": 4,
+      "cost": 100,
+      "st": "k"
+     },
+     {
+      "name": "Made-up Ward",
+      "lv": 30,
+      "cost": 10,
+      "st": "a"
      }
     ]
    }

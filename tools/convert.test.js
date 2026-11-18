@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.8.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.9.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -199,7 +199,7 @@ test("observations: the example's events are exported in the documented shape; t
   assert.equal(obs.v, 1); assert.equal(obs.addon, "1.8.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -210,7 +210,71 @@ test("observations: the example's events are exported in the documented shape; t
   assert.deepEqual(obs.events[5].items, [{ id: 19326, n: 1, link: "|cffa335ee|Hitem:19326|h[Made-up Cloak]|h|r", price: 0,
     cost: [{ item: 17010, n: 1 }], limited: null },
     { id: 4470, n: 1, price: 38, limited: 5 }]);
+  assert.equal(obs.events[5].rx, 5);
+  assert.deepEqual(obs.events[6], { id: "k1f9c2-000023", t: 1762906000, b: "1.60.1.70888", type: "trainer", npc: 5146, kind: "class", rx: 6,
+    where: { map: 0, uiMap: 1453, x: 0.3812, y: 0.7907 }, who: { level: 20, class: 8, faction: "Alliance" },
+    rows: [{ s: 7322, name: "Frostbolt", rank: "Rank 4", lv: 20, cost: 1800, st: "a" },
+      { s: 8427, name: "Blizzard", rank: "Rank 2", lv: 28, needs: ["Blizzard"], cost: 4000, st: "u" },
+      { s: 116, name: "Frostbolt", rank: "Rank 1", lv: 4, cost: 100, st: "k" },
+      { name: "Made-up Ward", lv: 30, cost: 10, st: "a" }] });
   assert.ok(!("observations" in convert.convertSavedVariables([LUA], { format: 2 }).inventory), "2.x must not change");
+});
+
+test("observations 3.9.0: trainer events keep only the documented fields; vendor rx and filtered", () => {
+  const G = "Creature-0-4170-0-1234-5146-000012AAAD";
+  const obs = convert.convertSavedVariables([obsFile(`{
+    { id = "tttt-1", t = 100, type = "trainer", npc = 5146, kind = "class", rx = 6, guid = "${G}", money = 5, ${WHO},
+      rows = { { s = 7322, name = "Frostbolt", rank = "Rank 4", lv = 20, cost = 1800, st = "a", icon = "x" },
+               { s = 0, name = "Blizzard", rank = "${"r".repeat(41)}", lv = 0, skill = "Pet-1-2", skillReq = -1, cost = 4000, st = "u",
+                 needs = { "A", "B", "|cffffffffC|r", "${G}", "D", "E", "F", "G", 7 } },
+               { name = "${G}", cost = 1, st = "a" }, { name = "Red|r", cost = 1, st = "a" }, { name = "No Cost", st = "a" },
+               { name = "Bad State", cost = 1, st = "used" }, { name = "Negative", cost = -1, st = "k" },
+               { name = "${"n".repeat(121)}", cost = 1, st = "a" }, { name = "Line\\nBreak", cost = 1, st = "a" },
+               { name = "Smelting", rank = "Apprentice", skill = "Mining", skillReq = 1, cost = 10, st = "k" } } },
+    { id = "tttt-2", t = 101, type = "trainer", npc = 5146, kind = "pet", ${WHO}, rows = { { name = "Growl", cost = 0, st = "a" } } },
+    { id = "tttt-3", t = 102, type = "trainer", kind = "class", ${WHO}, rows = { { name = "Growl", cost = 0, st = "a" } } },
+    { id = "tttt-4", t = 103, type = "trainer", npc = 5146, kind = "profession", rx = 9, ${WHO}, rows = { { name = "No Cost", st = "a" } } },
+    { id = "tttt-5", t = 104, type = "trainer", npc = 5146, kind = "profession", rx = 0, ${WHO},
+      rows = { { name = "Smelting", cost = 10, st = "a" } } },
+    { id = "tttt-6", t = 105, type = "vendor", npc = 12, rx = 4, filtered = true, ${WHO}, items = { { id = 4, price = 7 } } },
+    { id = "tttt-7", t = 106, type = "vendor", npc = 12, rx = 8.5, filtered = "yes", ${WHO}, items = { { id = 4, price = 7 } } },
+  }`)]).inventory.observations;
+  assert.deepEqual(obs.events.map((e) => e.id), ["tttt-1", "tttt-5", "tttt-6", "tttt-7"], "bad kind, no npc, no usable row: left out");
+  const [t, p, v, w] = obs.events;
+  assert.deepEqual(t, { id: "tttt-1", t: 100, type: "trainer", npc: 5146, kind: "class", rx: 6, where: {},
+    who: { level: 60, class: 4, faction: "Alliance" },
+    rows: [{ s: 7322, name: "Frostbolt", rank: "Rank 4", lv: 20, cost: 1800, st: "a" },
+      { name: "Blizzard", needs: ["A", "B", "D", "E", "F"], cost: 4000, st: "u" },
+      { name: "Smelting", rank: "Apprentice", skill: "Mining", skillReq: 1, cost: 10, st: "k" }] });
+  assert.ok(!("rx" in p), "rx only 1..8");
+  assert.equal(v.rx, 4); assert.equal(v.filtered, true);
+  assert.ok(!("rx" in w) && !("filtered" in w), "rx an integer, filtered only true");
+  assert.ok(!/Creature-|money|icon/.test(JSON.stringify(obs)), "no GUID, money or unknown key");
+  // at most 400 rows
+  const many = Array.from({ length: 450 }, (_, i) => `{ name = "Spell ${i + 1}", cost = ${i}, st = "a" }`).join(",");
+  const capped = convert.convertSavedVariables([obsFile(`{ { id = "tttt-8", t = 1, type = "trainer", npc = 1, kind = "class", rows = { ${many} } } }`)]);
+  assert.equal(capped.inventory.observations.events[0].rows.length, 400);
+  assert.equal(capped.inventory.observations.events[0].rows[399].name, "Spell 400");
+});
+
+// The size budget of one trainer event: a realistic class trainer's list of 60 services (spell id, name, rank, level,
+// cost and state on each; a few with a required ability), as exported.
+test("observations 3.9.0: one 60-row trainer event is a few kilobytes of JSON", () => {
+  const spells = ["Frostbolt", "Fireball", "Arcane Missiles", "Frost Nova", "Blizzard", "Flamestrike", "Arcane Explosion",
+    "Cone of Cold", "Fire Blast", "Arcane Intellect"];
+  const rows = Array.from({ length: 60 }, (_, i) => {
+    const rank = Math.floor(i / spells.length) + 1, lv = 4 + i;
+    const needs = rank > 1 && i % 7 === 0 ? `, needs = { "${spells[i % spells.length]}" }` : "";
+    return `{ s = ${10000 + i * 37}, name = "${spells[i % spells.length]}", rank = "Rank ${rank}", lv = ${lv}, cost = ${lv * lv * 9}` +
+      `${needs}, st = "${i < 30 ? "k" : i < 40 ? "a" : "u"}" }`;
+  }).join(",\n");
+  const obs = convert.convertSavedVariables([obsFile(`{ { id = "k1f9c2-000099", t = 1762906000, b = "1.60.1.70888", type = "trainer",
+    npc = 5146, kind = "class", rx = 6, where = { map = 0, uiMap = 1453, x = 0.3812, y = 0.7907 },
+    who = { level = 60, class = 8, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" }, rows = { ${rows} } } }`)])
+    .inventory.observations;
+  const bytes = Buffer.byteLength(JSON.stringify(obs.events[0]));
+  assert.equal(obs.events[0].rows.length, 60);
+  assert.ok(bytes > 4000 && bytes < 6500, "one 60-row trainer event: " + bytes + " bytes");
 });
 
 test("observations: absent when the module is missing, off with nothing recorded, or has only broken events", () => {
@@ -263,7 +327,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.8.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.9.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });

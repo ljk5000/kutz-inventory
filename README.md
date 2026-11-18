@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.15.1** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.16.0** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)
@@ -47,7 +47,7 @@ Records reflect what the client made available, with timestamps for freshness. B
 | Talents, groups/tabs, selected ranks, points, loadout name/import string where available, selected PvP talents | Login and talent/spec changes |
 | Applied Legacy Tree ranks, choices, shared currency and points spent per tree | With talent reads; staged changes are excluded; a failed/incomplete read retains the last complete one |
 | Learned recipes, output quantities, required/optional reagents and alternatives; unlearned recipes and learning sources | When your own profession window opens/changes or a recipe is learned; enable “show unlearned” for the entries the window otherwise hides |
-| Trainer services, requirements, costs and availability | When a trainer opens/updates; its filters are temporarily enabled and restored |
+| Trainer services, requirements, costs and availability | When a trainer opens/updates; its filters are temporarily enabled and restored. The hunter's Beast Training window is skipped |
 | Reputation, paragon/friendship data where available | Login and reputation changes; collapsed headers are temporarily expanded and restored |
 | Nonzero achievement statistics and total achievement points | After login; after combat at most once per ten minutes; manual scans |
 | PvP kills, honor, honor level, yesterday/session totals and played rated brackets | Login and PvP/honor changes |
@@ -71,7 +71,7 @@ The whole-house request has an approximately 15-minute cooldown. `/kinv ah slow`
 
 Only explicitly tracked raids record events. Up to 20 raids and 2,000 events per raid are retained; raids older than 14 days are pruned on load/add. Raid strings and recorded events are included in 3.x inventory uploads. Server authorization is outside this addon.
 
-### Drop, quest and vendor observations — `Observations.lua`
+### Drop, quest, vendor and trainer observations — `Observations.lua`
 
 **On by default for new installs or a missing preference.** An existing off preference stays off. `/kinv track drops off` stops new recording; it **does not erase old events or exclude them from later uploads**.
 
@@ -80,9 +80,10 @@ While enabled, it records:
 - Loot windows by source (creature/boss, chest, fishing, gathering, skinning or opened item), including empty/coins-only corpses without coin amounts. Known sources are deduplicated; skinning counts separately.
 - Group-loot roll lists, including when another player opens the corpse, the loot threshold and boss encounter when identified. Your own system “You won” line adds a flag; other players' rolls/wins are not retained in observations.
 - Quest acceptance/turn-in, giver/ender IDs and item rewards/choices. Available quest prose is recorded once per quest/action while under half the size cap; occurrences of your given name are replaced with `$N`.
-- Vendor stock, quantities, prices, item/currency costs and limited stock. Identical stock from the same NPC is recorded at most once per hour in a session.
+- Vendor stock, quantities, prices, item/currency costs and limited stock, read under the window's all-items filter (your filter is put back at once), and the vendor's reaction to you. Identical stock from the same NPC is recorded at most once per hour in a session.
+- Class and profession trainers' lists: each service's spell ID where the client gives one, name, rank, required level/skill/abilities, cost, whether you can learn it now or know it, and the trainer's reaction to you. The same list from the same trainer is recorded at most once a week, while the earlier event is still kept (30 days, or less once the size caps prune it). The hunter's Beast Training window is not recorded.
 
-Events include time, game build, map/instance, coordinates outside instances, and **your level, class, faction, given name and surname**. Creature/object GUIDs may identify loot sources. This module does not store player GUIDs, guild, coin loot, quest money or general chat. Raids and inventory have their own, broader data described above. The addon retains at most 5,000 events, 30 days and roughly 2 MB, pruning oldest entries.
+Events include time, game build, map/instance, coordinates outside instances, and **your level, class, faction, given name and surname**. Creature/object GUIDs may identify loot sources. Vendor prices and trainer costs are game prices as shown to you (after any reputation discount), not your money. This module does not store player GUIDs, guild, coin loot, quest money or general chat. Raids and inventory have their own, broader data described above. The addon retains at most 5,000 events, 30 days and roughly 2 MB, pruning oldest entries.
 
 ### Items created — `Crafts.lua`
 
@@ -188,7 +189,7 @@ node tools/inventory_export.js --format 2 <path-to-KutzInventory.lua> <output.js
 
 With no input it looks for all accounts in the conventional Windows `Program Files (x86)/World of Warcraft/_forever_/WTF/Account` folder. Default output is `export/inventory.json` beside the source tree, with `auction-scans.json` alongside it. It prints a local crafting-profit/levelling estimate using observed vendor and AH prices (5% AH sale cut); these are estimates, not guaranteed sale prices. Add `--upload` only after setting `WOW_IMPORT_URL` and `WOW_IMPORT_TOKEN`. `--no-inventory` and `--no-auctions` select upload categories; local conversion still includes both. Details and all tooling: [tools/README.md](tools/README.md).
 
-[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.8.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
+[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.9.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
 
 From the repository root:
 

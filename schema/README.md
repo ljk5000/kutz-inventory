@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.8.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth and retained observations |
+| `inventory-export.v3.schema.json` | **3.9.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth and retained observations |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -69,7 +69,7 @@ Optional `characters[].hearth` is the bind-location name from `GetBindLocation`,
 
 Events have ISO `t` and `kind`: `start` (instance ID/name/type/difficulty, `by`), `end` (instance ID/name), `encounter_start`/`encounter_end` (encounter ID/name, difficulty, group size, plus success on end), `loot` (item ID/link/count, `looter`) or `roster` (`members`). Missing API values are omitted. Account files tracking the same raid string merge their events. The addon records only during the two-hours-before/eight-hours-after window while grouped in an instance; exact matching instance IDs are preferred, with a window fallback. It retains at most 20 raids, 2,000 events each, pruning raids more than 14 days after start on load/add.
 
-### Observations (3.2.0–3.7.0)
+### Observations (3.2.0–3.9.0)
 
 `observations: { v: 1, addon, events: [...] }` comes from the **same saved file's** `KutzInventoryObsDB` table. The addon retains up to 5,000 events, 30 days and roughly 2 MB; export deduplicates by event ID, sorts by time/ID and caps count/serialized size. IDs combine a random install prefix and counter; they are not cryptographic identities or guaranteed globally unique.
 
@@ -79,13 +79,42 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `who`: recording character's level, numeric class, faction, and optional **name/surname** (3.3.0). No realm or player GUID in this block.
 - `loot`: `src` with kind (mob/boss/chest/fishing/herb/mine/skin/container/other, plus schema-compatible future kinds), NPC/object/item ID, creature/object GUID when known, level and attribution method; `items: [{ id, n, link?, won? }]`. Coins-only windows have empty items. Known reopened corpses are deduplicated, with skinning separate.
 - `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money.
-- `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session.
+- `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session. From 3.9.0, optional `rx` and `filtered` (below).
+- `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
 
 From 3.6.0, quests can include `text`: accept has title/details/objectives; turn-in has title/progress/completion. Limits: title 200, details/completion 8,000, objectives/progress 4,000. Lua truncates by UTF-8 bytes; the exporter/schema also apply string-length limits. The recorder replaces occurrences of the given name with `$N`; it does not promise general anonymization. Text is read once per quest/action while the event is kept and while under half the saved-event size cap. Class/race wording remains. Shared/auto-accepted quests may lack window text.
 
 From 3.7.0, loot `src.via: "roll"` is a group-loot roll list even when another player opened the corpse. `src.threshold` is the group's quality threshold (0–7); this is a partial view for items at/above that quality. Items already recorded in the character's loot window are not repeated. The corpse can be inferred from the client handle, a matching window or recent boss kill; otherwise kind is `other`. `src.encounter` identifies a boss encounter where known; `items[].won: true` reflects only the recording character's own system win message. Merge known corpse GUIDs carefully; these are observations, not a complete loot census.
+
+From 3.9.0 (KutzInventory 1.16.0), `observations.v` stays `1`: readers ignore event types they do not know, so an older reader skips trainer events and the new vendor fields.
+
+**`rx`** (vendor and trainer events) is `UnitReaction("npc", "player")` when the window was read: an integer 1–8 (1 hated, 4 neutral, 5 friendly, 6 honored, 7 revered, 8 exalted), absent when the client gave none. Every price and cost in these events is what the game showed this character, which **already includes its reputation discount**; `rx` is what lets a reader tell a list price from a discounted one. Prices and costs are game prices, not the player's money.
+
+**Vendor reads** are made under the merchant window's "all" item filter (`SetMerchantFilter(LE_LOOT_FILTER_ALL)`) and the player's filter is put back immediately, in the same frame. `filtered: true` means the filter (this class only) could not be switched, so the items it hides are missing from `items`; it is absent when the read was unfiltered or the client has no merchant filter. `rx` and `filtered` are part of the once-an-hour same-stock check.
+
+**Trainer events** are recorded at `TRAINER_SHOW` (about 0.5 s after the window opens; again on `TRAINER_UPDATE` while the first read was empty, at most 5 reads per window) with all three type filters (available, unavailable, used) switched on for the read and put back afterwards. Exact contract (the exporter drops anything else; a row without a usable `name`, `cost` or `st` is dropped; an event with no usable row, no `npc` or another `kind` is dropped):
+
+```text
+{ id, t, b?, type: "trainer", where, who,
+  npc:  integer >= 1             the trainer's NPC ID, from UnitGUID("npc") (required; the GUID itself is never kept)
+  kind: "class" | "profession"   profession = C_Trainer.GetTrainerType() is Tradeskills; class = any other general trainer
+  rx?:  integer 1-8              UnitReaction("npc", "player")
+  rows: [ 1-400 of {
+    s?:        integer >= 1      spell ID from C_TooltipInfo.GetTrainerService(i) when its type is Spell; absent otherwise
+    name:      string 1-120      GetTrainerServiceInfo name
+    rank?:     string 1-40       its sub text: "Rank 4", "Journeyman"
+    lv?:       integer >= 1      required character level
+    skill?:    string 1-64       GetTrainerServiceSkillReq skill name
+    skillReq?: integer >= 1      the skill rank it needs
+    needs?:    [ 1-5 strings, each 1-120 ]   GetTrainerServiceAbilityReq ability names
+    cost:      integer >= 0      copper, as the trainer shows it to this character (after any reputation discount)
+    st:        "a" | "u" | "k"   available (learnable now) / unavailable (not yet) / known
+  } ] }
+```
+
+Strings are game labels as shown: the addon trims them and cuts them to the limit in UTF-8 bytes; the exporter and schema refuse (drop) a label with `|` markup, a control character, more than the limit in characters, or anything shaped like a GUID (`Player-1-2`, `Creature-0-…`). Rows keep the window's order with headers left out. The hunter's Beast Training window (trainer type Pet: no trainer NPC, and it costs training points) is never recorded, nor is a window whose `npc` unit has no creature ID. The same `npc` with the same list and `rx` is recorded at most once in 7 days, checked against the retained events, so it holds across sessions while the earlier event is still kept (30 days, or less once the size caps prune it); the comparison uses each row's name, rank, cost, level and skill rank but not `st` (learning a spell does not re-record the list) and not `s`. One realistic 60-row class trainer event is about 5.2 KB of JSON (about 82 bytes per row, 1.1 KB gzipped); 400 rows is about 33 KB.
 
 No observation field is intended for coin loot, quest/player money, general chat, guild or other players' names/GUIDs. Ordinary inventory, monitor errors and raids have different data and must be reviewed separately. Recording defaults on in new installs since addon 1.13.0; existing off choices persist. Old retained events still export after `/kinv track drops off`.
 

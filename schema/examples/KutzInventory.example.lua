@@ -676,7 +676,7 @@ KutzInventoryObsDB = {
 	["noted"] = true,
 	["addon"] = "1.8.0",
 	["prefix"] = "k1f9c2",
-	["n"] = 23,
+	["n"] = 24,
 	["events"] = {
 		{
 			["id"] = "k1f9c2-000017",
@@ -840,6 +840,7 @@ KutzInventoryObsDB = {
 			["b"] = "1.60.1.70888",
 			["type"] = "vendor",
 			["npc"] = 12944,
+			["rx"] = 5,
 			["where"] = {
 				["map"] = 0,
 				["uiMap"] = 1428,
@@ -875,6 +876,61 @@ KutzInventoryObsDB = {
 			},
 		}, -- [6]
 		{
+			["id"] = "k1f9c2-000023",
+			["t"] = 1762906000,
+			["b"] = "1.60.1.70888",
+			["type"] = "trainer",
+			["npc"] = 5146,
+			["kind"] = "class",
+			["rx"] = 6,
+			["where"] = {
+				["map"] = 0,
+				["uiMap"] = 1453,
+				["x"] = 0.3812,
+				["y"] = 0.7907,
+			},
+			["who"] = {
+				["level"] = 20,
+				["class"] = 8,
+				["faction"] = "Alliance",
+			},
+			["rows"] = {
+				{
+					["s"] = 7322,
+					["name"] = "Frostbolt",
+					["rank"] = "Rank 4",
+					["lv"] = 20,
+					["cost"] = 1800,
+					["st"] = "a",
+				}, -- [1]
+				{
+					["s"] = 8427,
+					["name"] = "Blizzard",
+					["rank"] = "Rank 2",
+					["lv"] = 28,
+					["cost"] = 4000,
+					["needs"] = {
+						"Blizzard", -- [1]
+					},
+					["st"] = "u",
+				}, -- [2]
+				{
+					["s"] = 116,
+					["name"] = "Frostbolt",
+					["rank"] = "Rank 1",
+					["lv"] = 4,
+					["cost"] = 100,
+					["st"] = "k",
+				}, -- [3]
+				{
+					["name"] = "Made-up Ward",
+					["lv"] = 30,
+					["cost"] = 10,
+					["st"] = "a",
+				}, -- [4]
+			},
+		}, -- [7]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -883,6 +939,6 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [7]
+		}, -- [8]
 	},
 }

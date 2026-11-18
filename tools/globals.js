@@ -31,6 +31,7 @@ const known = new Set(("_G ipairs pairs pcall select type unpack tostring tonumb
  "IsInInstance IsInGroup GetNumGroupMembers " +   // Raids.lua
  "KutzInventoryObsDB GetAddOnMetadata GetLootRollItemLink GetLootRollItemInfo GetLootThreshold LOOT_ROLL_YOU_WON LOOT_ROLL_YOU_WON_NO_SPAM_NEED LOOT_ROLL_YOU_WON_NO_SPAM_GREED LOOT_ROLL_YOU_WON_NO_SPAM_DE LOOT_ROLL_YOU_WON_NO_SPAM_TRANSMOG GetLootSlotInfo GetLootSlotLink GetLootSourceInfo IsFishingLoot UnitClassification GetQuestID GetTitleText GetQuestText GetObjectiveText GetProgressText GetRewardText " +   // Observations.lua
  "GetQuestItemInfo GetQuestItemLink GetQuestReward GetNumQuestChoices GetNumQuestRewards GetMerchantItemCostInfo GetMerchantItemCostItem " +
+ "C_Trainer C_TooltipInfo GetTrainerServiceNumAbilityReq GetTrainerServiceAbilityReq GetMerchantFilter SetMerchantFilter LE_LOOT_FILTER_ALL " +
  "StaticPopupDialogs StaticPopup_Show YES NO " +
  "SetTrainerServiceTypeFilter UnitArmor UnitAttackPower UnitAttackSpeed UnitDamage UnitDefenseSkill UnitHonor UnitHonorLevel UnitHonorMax UnitRangedAttackPower UnitRangedDamage UnitResistance UnitSex UnitSpellHaste UnitStat").split(" "));
 const odd = [...all].filter(g => !known.has(g)).sort();

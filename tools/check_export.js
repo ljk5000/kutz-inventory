@@ -249,6 +249,25 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         ev(2, { items: [{ id: 4470, n: 1, price: 38, limited: null, cost: [{ gold: 1, n: 1 }] }] }),
     ];
     badObs.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(withObs(o)))).length) fail("the 3.x schema accepted bad observations #" + n); });
+    // 3.9.0: trainer events, and rx / filtered on vendor events
+    const trainerEvent = { id: "k1f9c2-000020", t: 1762906000, type: "trainer", npc: 5146, kind: "class", rx: 6, where: { map: 0 }, who,
+        rows: [{ s: 7322, name: "Frostbolt", rank: "Rank 4", lv: 20, cost: 1800, st: "a" },
+               { name: "Smelting", rank: "Apprentice", skill: "Mining", skillReq: 1, needs: ["Mining"], cost: 10, st: "k" }] };
+    const tr = (patch) => ({ ...goodObs, events: [{ ...trainerEvent, ...patch }] });
+    const row = (patch) => tr({ rows: [{ ...trainerEvent.rows[0], ...patch }] });
+    const trp = validateExport(withObs({ ...goodObs, events: [...obsEvents, trainerEvent, { ...obsEvents[2], rx: 8, filtered: true }] }));
+    if (trp.length) fail("3.9.0 trainer and vendor rx / filtered do not match the 3.x schema:\n  " + trp.join("\n  "));
+    if (validateExport(withObs(tr({ rx: undefined }))).length) fail("a trainer event without rx is no longer valid");
+    const badTrainer = [
+        tr({ kind: "pet" }), tr({ npc: undefined }), tr({ rows: [] }), tr({ rx: 9 }), tr({ rx: 0 }), tr({ guid: "Creature-0-1-0-1-5146-AB" }),
+        tr({ rows: Array.from({ length: 401 }, () => trainerEvent.rows[0]) }), tr({ money: 1 }),
+        row({ name: "Creature-0-4170-0-1234-5146-000012AAAD" }), row({ name: "Player-4170-00ABCDEF" }), row({ name: "|cffffffffX|r" }),
+        row({ name: "x".repeat(121) }), row({ name: "" }), row({ name: "Line\nBreak" }), row({ rank: "r".repeat(41) }), row({ skill: "s".repeat(65) }),
+        row({ st: "available" }), row({ st: undefined }), row({ cost: undefined }), row({ cost: -1 }), row({ cost: 1.5 }), row({ s: 0 }), row({ lv: 0 }),
+        row({ needs: [] }), row({ needs: ["a", "b", "c", "d", "e", "f"] }), row({ needs: ["Pet-0-1-2-3"] }), row({ skillReq: 0 }), row({ icon: 1 }),
+        ev(2, { rx: 9 }), ev(2, { filtered: false }), ev(0, { rx: 5 }),
+    ];
+    badTrainer.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(withObs(o)))).length) fail("the 3.x schema accepted bad trainer/vendor #" + n); });
     if (!validateExport({ ...data, schemaVersion: SCHEMA_VERSION_3 }).length) fail("the 3.x schema accepted a 2.x document");
     const eq = run([inv, out3, "--format=3"], { WOW_IMPORT_TOKEN: "", WOW_IMPORT_URL: "" });
     if (eq.status !== 0 || JSON.parse(fs.readFileSync(out3, "utf8")).schemaVersion !== SCHEMA_VERSION_3) fail("--format=3 did not write 3.x");

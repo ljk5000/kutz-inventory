@@ -672,8 +672,17 @@ end
 local readingTrainer = false
 local TRAINER_FILTERS = { "available", "unavailable", "used" }
 
+-- The hunter's Beast Training window is a trainer window too (C_Trainer.GetTrainerType() == Enum.TrainerType.Pet): it
+-- is not this character's class or profession trainer, so it never replaces trainers.class.
+local function PetTrainer()
+    local T = C_Trainer
+    if not (T and T.GetTrainerType) then return false end
+    local pet = Enum and Enum.TrainerType and Enum.TrainerType.Pet or 3
+    return Plain(Try(T.GetTrainerType)) == pet
+end
+
 local function ScanTrainer()
-    if readingTrainer or not GetNumTrainerServices then return end
+    if readingTrainer or not GetNumTrainerServices or PetTrainer() then return end
     readingTrainer = true
     local saved = {}
     if GetTrainerServiceTypeFilter and SetTrainerServiceTypeFilter then
@@ -1286,7 +1295,7 @@ SlashCmdList.KUTZINVENTORY = function(msg)
     end
     -- /kinv raid <string> tracks a cr0m raid, /kinv raid lists them, /kinv raid clear <CODE> (Raids.lua)
     if ns.RaidCommand and ns.RaidCommand(msg) then return end
-    -- /kinv track drops on|off, /kinv track (status): default-on drop / quest / vendor recording (Observations.lua)
+    -- /kinv track drops on|off, /kinv track (status): default-on drop / quest / vendor / trainer recording (Observations.lua)
     if ns.ObsCommand and ns.ObsCommand(msg) then return end
     if msg == "scan" then
         ScanIdentity(); ScanWallet(); ScanBags(true); ScanGear(); ScanProfessions(); ScanCurrencies(); ScanTalents(); ScanSkills(); ScanSpells(); ScanStats(); ScanGuildBankTab(); ScanRecipes(true)
