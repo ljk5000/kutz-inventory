@@ -676,7 +676,7 @@ KutzInventoryObsDB = {
 	["noted"] = true,
 	["addon"] = "1.20.0",
 	["prefix"] = "k1f9c2",
-	["n"] = 29,
+	["n"] = 30,
 	["events"] = {
 		{
 			["id"] = "k1f9c2-000017",
@@ -1126,6 +1126,30 @@ KutzInventoryObsDB = {
 			},
 		}, -- [13]
 		{
+			["id"] = "k1f9c2-000030",
+			["t"] = 1762906550,
+			["b"] = "1.60.1.70888",
+			["type"] = "credit",
+			["quest"] = 7788,
+			["i"] = 1,
+			["ot"] = "monster",
+			["npc"] = 2958,
+			["by"] = "name",
+			["where"] = {
+				["map"] = 0,
+				["uiMap"] = 1429,
+				["x"] = 0.4219,
+				["y"] = 0.6784,
+			},
+			["who"] = {
+				["level"] = 14,
+				["class"] = 4,
+				["faction"] = "Alliance",
+				["name"] = "Exampleobserver",
+				["surname"] = "Examplefamily",
+			},
+		}, -- [14]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -1134,7 +1158,7 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [14]
+		}, -- [15]
 	},
 	["npcs"] = {
 		[525] = {

@@ -4,9 +4,11 @@
 
 - Record hunter tames while drop tracking is on. When a hunter's Tame Beast begins, the target's creature ID, level and family are noted from its GUID; when a pet appears within 30 seconds (of the same family), its spellbook's abilities with ranks, its attack speed (out of combat, flagged `spdAura` when the pet had an aura at every read) and its diet are read for up to a minute. A tame without a creature ID in the target is not recorded. Interrupting the tame, or Call Pet or Revive Pet, cancels it. The pet's GUID and name are never kept. Once per beast, level, abilities and speed per install, at most 20 a session, under the half caps.
 
+- Record objective credit while drop tracking is on: which creature, item or object counted for a quest objective. A second after the quest log changes, each monster, item and object objective's `numFulfilled` is compared with the last read, in memory only (never saved or exported). When one rose and the player's own evidence of the 6 seconds before names exactly one cause, `{ quest, i, ot, npc|item|object, by }` is recorded. Evidence is a creature a unit token showed dead that no other player had tapped, an item from the player's own "You receive loot / item" line, or an object whose window the player opened. `by` says how: the only candidate named in the objective's text, the only item whose bag count matches, or the only candidate at all (never a creature while grouped, since a group member's kill counts too). No progress numbers, no text, nothing about other players. Once per quest, objective and id per install, at most 200 a session (about 265 bytes each), under the half caps.
+
 - Existing installs get one login line about the new recording and `/kinv track drops off`.
 
-Inventory export 3.13.0 (default) adds `tame` observations. The observations section stays `v: 1`.
+Inventory export 3.13.0 (default) adds `tame` and `credit` observations. The observations section stays `v: 1`.
 
 ## KutzInventory 1.19.0
 

@@ -86,6 +86,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `read` (3.12.0): game-authored pages from world objects ([below](#game-text-3120)).
 - `line` (3.12.0): game-authored creature speech and emotes ([below](#game-text-3120)).
 - `tame` (3.13.0): a hunter's tamed beast and what its new pet showed ([below](#hunter-tames-3130)).
+- `credit` (3.13.0): which creature, item or object counted for a quest objective ([below](#objective-credit-3130)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -250,7 +251,7 @@ poi?: [ 1-8 of {                 first distinct usable quest points in API order
 } ]
 ```
 
-`obj` is recorded only if it fits under the count and size half caps. Text retains line breaks and excludes pipe markup, GUID shapes and other control characters. The recorder strips leading or trailing ASCII fraction/percent counters and refuses text with a remaining such counter. It caps prose in UTF-8 bytes. Only the required amount is kept. `numFulfilled` and `finished` are never read. The exporter drops invalid rows, retains the first 12 valid rows, and omits an empty `obj`.
+`obj` is recorded only if it fits under the count and size half caps. Text retains line breaks and excludes pipe markup, GUID shapes and other control characters. The recorder strips leading or trailing ASCII fraction/percent counters and refuses text with a remaining such counter. It caps prose in UTF-8 bytes. Only the required amount is kept. `finished` is never read; `numFulfilled` is read only in memory, from 3.13.0, to see an objective's count rise ([objective credit](#objective-credit-3130)), and is never saved or exported. The exporter drops invalid rows, retains the first 12 valid rows, and omits an empty `obj`.
 
 `poi` comes only from `C_QuestLog.GetQuestsOnMap(uiMapID)` rows for this quest and map, skipping offer markers. Reads require a plain out-of-combat state and the player's map to still be the acceptance map; a quest flagged ready to turn in is skipped when the client supplies that check. There is no UI or map state change. Secret, missing, out-of-range and zero-origin points are omitted. Points are deduplicated after rounding. The exporter also enforces the acceptance map, deduplicates and caps the array, and omits an empty `poi`. These are game quest markers and can represent an objective area. They contain no player progress counts. A missing `obj` or `poi` means the recorder had no usable reading.
 
@@ -285,6 +286,34 @@ From 3.13.0 (KutzInventory 1.20.0) observations may be of type `tame`; `observat
 Future spells and flyouts in the book are skipped; the pet bar's commands (Attack, Follow, Stay) and reactions drop out because their action ids name no spell of that name, so no id list or id range is used. The exporter drops the event without a valid `npc` and leaves out each other field that fails its check (a row of `spells` or a `diet` label alone). The addon records the same `npc`, `lv`, spells with ranks and `spd` (with its aura flag) at most once per install (a saved index of the last 2,000 keys, as for game text), at most 20 tames a session, and only under the half caps. Measured as compact JSON with a named `who`: about 380 bytes with two abilities and two foods; about 650 with six abilities and six foods. A hunter tames a few beasts a session at most, so the cost is about 1 to 2 KB a session and at most about 13 KB.
 
 **Consumer guidance.** `npc`, `lv` and `fam` are the creature's. `spells` are what the pet's book listed right after the tame, which for a new pet are the beast's natural abilities; a reader should still prefer two agreeing tames of the same `npc` before it publishes them. Treat `spd` without `spdAura` as the beast's attack speed; with `spdAura`, as a hint only. `diet` is the family's diet as the client words it, in the recorder's language.
+
+### Objective credit (3.13.0)
+
+From 3.13.0 (KutzInventory 1.20.0) observations may be of type `credit`: which creature, item or object counted for one objective of a quest in the player's log. `observations.v` stays `1`. The addon reads only what the game already showed this player and asks for nothing: no target, cast, click or query is made for it.
+
+**How a credit is told.** About a second after `QUEST_LOG_UPDATE`, `QUEST_WATCH_UPDATE` or `UNIT_QUEST_LOG_CHANGED("player")` (one read for a burst), the addon reads every quest in the log (`C_QuestLog.GetNumQuestLogEntries` / `GetInfo`, else `GetQuestLogTitle`; headers left out, at most 100 quests) with `C_QuestLog.GetQuestObjectives(quest)`, and for each `monster`, `item` or `object` objective among the first 12 compares `numFulfilled` with the last read. `numFulfilled` is held in memory only, to see a rise: it is never saved or exported. The first read of a session, a quest new to the log and a quest missing from the last read only set the comparison; a fall or no change records nothing. A rise is matched to this player's own evidence of the 6 seconds before the read, of the objective's type, not already used by an earlier read:
+
+- `monster`: a creature a unit token showed dead (`UNIT_HEALTH` with `UnitIsDead` plainly true), once per corpse, with a `Creature-`/`Vehicle-` GUID, `UnitIsPlayer`, `UnitPlayerControlled` and `UnitIsTapDenied` all plainly false (tapped by another player: no evidence; no tap API: no evidence).
+- `item`: an item this player's own loot line named (`CHAT_MSG_LOOT` matching `LOOT_ITEM_SELF(_MULTIPLE)` or `LOOT_ITEM_PUSHED_SELF(_MULTIPLE)`, with the English forms as a fallback). Other players' loot lines never match.
+- `object`: a world object whose window this player opened (`GOSSIP_SHOW`, `QUEST_GREETING`, `QUEST_DETAIL`, `ITEM_TEXT_BEGIN` with a `GameObject-` GUID on `"npc"`, or a loot window from it).
+
+The cause, in this order: `by: "name"` when exactly one candidate's name (the creature's `UnitName`, the item link's name, the object's name) appears as whole words in the objective's text; for items, the bag count (`C_Item.GetItemCount`, else `GetItemCount`) must also equal the new count, or reach the required amount when the objective is done, whenever the client gives one. Else `by: "count"`, items only, when exactly one candidate's bag count does. Else `by: "sole"` when there is exactly one candidate, never for a creature while the player is grouped (`IsInGroup` not plainly false), because a group member's kill out of sight counts too. Anything else (no candidate, two named, two left) records nothing. The objective's text and the names are compared in memory and never kept.
+
+```text
+{ id, t, b?, type: "credit", where, who,      where: the player's place at the read
+  quest: integer 1-2147483647      the quest id
+  i:     integer 1-12              the objective's position in C_QuestLog.GetQuestObjectives(quest), from 1
+  ot:    "monster" | "item" | "object"   the objective's type as the client gave it
+  npc:    integer 1-2147483647     ot monster only: the creature id, from the dead creature's GUID
+  item:   integer 1-2147483647     ot item only: the item id, from the player's own loot line
+  object: integer 1-2147483647     ot object only: the object id, from the opened object's GUID
+  by:    "name" | "count" | "sole" how the cause was told; "count" only with ot item
+}
+```
+
+Never recorded: the objective's progress (`numFulfilled`, `numRequired`) or text, the creature's GUID or name, other players' kills, names or loot, and no position but the event's usual `where`. The exporter drops an event without a valid `quest`, `i`, `ot`, `by` or the one id field its `ot` names, with another id field, or with `by: "count"` on a non-item; the schema refuses the same. The addon records each `quest`, `i`, `ot` and id at most once per install (a saved index of the last 2,000 keys, as for game text), at most 200 a session, and only under the half caps. One event is about 265 bytes as compact JSON with a named `who`. A questing session credits a few objectives per quest with one to three ids each, about 20 to 60 events or 5 to 16 KB; the session cap bounds it at about 53 KB.
+
+**Consumer guidance.** `i` counts every objective the client listed; the accept event's `obj` keeps the same order but skips rows it could not use, so match `i` to `obj` only when the row count and `ot` agree. One objective can count several creatures or items, each its own event. Prefer `name` and `count`; treat `sole` as a hint until another recorder agrees, since an unseen cause with one unrelated death, loot or window in the same 6 seconds can still be taken for it. Evidence that an earlier read used is not reused, but one kill that counts for two quests in the same read credits both. Credits from `event` objectives (escorts and the like), from spells cast on creatures that do not die, and from objects that open no window are missing by design. About 20 to 60 events a session is an estimate, not a measurement.
 
 ### NPC summary (3.10.0)
 

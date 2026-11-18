@@ -199,7 +199,7 @@ test("observations: the example's events are exported in the documented shape; t
   assert.equal(obs.v, 1); assert.equal(obs.addon, "1.20.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame", "30credit"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -352,6 +352,35 @@ test("observations 3.13.0: tame events keep the beast and the pet's facts; no cr
   assert.deepEqual(validateExport(withEvent(bare)), []);
   for (const patch of [{ npc: undefined }, { spdAura: false }, { spells: [] }, { spells: [{ s: 1 }] }, { diet: ["a", "a"] },
                        { guid: "Pet-0-4170-0-1234-3825-0100AABBCC" }, { lv: 0 }, { spd: 2001 }, { fam: "Creature-0-1-2" }]) {
+    assert.ok(validateExport(withEvent({ ...good, ...patch })).length, "schema rejected " + JSON.stringify(patch));
+  }
+});
+
+test("observations 3.13.0: credit events keep quest, objective, type, one id and how it was told; never progress", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([LUA]).inventory;
+  const where = { map: 0, uiMap: 1429, x: 0.4123, y: 0.6543 };
+  const who = { level: 12, class: 4, faction: "Alliance", name: "Exampleobserver", surname: "Examplefamily" };
+  const event = { id: "abc123-2", t: 100, b: "1.60.1.70888", type: "credit", quest: 33, i: 1, ot: "monster", npc: 6, by: "name",
+    numFulfilled: 3, numRequired: 10, text: "Kobold Vermin slain: 3/10", guid: "Creature-0-4170-0-1234-6-0000AB0001", where, who };
+  const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
+  const good = obs({}).events[0];
+  assert.deepEqual(good, { id: "abc123-2", t: 100, b: "1.60.1.70888", type: "credit", quest: 33, i: 1, ot: "monster", npc: 6, by: "name",
+    where, who });
+  const bytes = Buffer.byteLength(JSON.stringify(good));
+  assert.ok(bytes < 300, "one credit event: " + bytes + " bytes");
+  const item = obs({ ot: "item", npc: undefined, item: 750, by: "count" }).events[0];
+  const object = obs({ ot: "object", npc: undefined, object: 3719, by: "sole", i: 12 }).events[0];
+  assert.deepEqual([item.item, item.by, item.npc, object.object, object.i], [750, "count", undefined, 3719, 12]);
+  for (const bad of [{ quest: 0 }, { quest: "33" }, { i: 0 }, { i: 13 }, { i: 1.5 }, { ot: "event" }, { ot: "constructor" }, { ot: undefined },
+                     { npc: undefined }, { npc: 0 }, { npc: undefined, item: 6 }, { item: 750 }, { object: 3 }, { by: "guess" },
+                     { by: undefined }, { by: "count" }]) {
+    assert.equal(obs(bad), null, JSON.stringify(bad));
+  }
+  const withEvent = (e) => ({ ...doc, observations: { v: 1, addon: "1.20.0", events: [e] } });
+  for (const e of [good, item, object]) assert.deepEqual(validateExport(withEvent(e)), []);
+  for (const patch of [{ npc: undefined }, { item: 750 }, { ot: "item" }, { by: "count" }, { i: 13 }, { numFulfilled: 3 }, { ot: "event" },
+                       { by: "guess" }, { quest: 0 }]) {
     assert.ok(validateExport(withEvent({ ...good, ...patch })).length, "schema rejected " + JSON.stringify(patch));
   }
 });

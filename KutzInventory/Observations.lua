@@ -62,12 +62,17 @@
 --          lv and fam (the target's), spells = { { s, name, rank } } (the new pet's spellbook), spd (its attack speed in
 --          hundredths of a second, out of combat; spdAura = true when the pet had an aura at every read), diet (labels),
 --          where = where the tame began. Never the pet's GUID or name. Once per beast, level, abilities and speed.
+--   credit (1.20.0) quest, i (the objective's index in C_QuestLog.GetQuestObjectives), ot = "monster"|"item"|"object" (its
+--          type), npc|item|object (what counted for it), by = "name"|"count"|"sole" (how the cause was told): when the
+--          objective's numFulfilled rose and this player's own evidence of the last 6 s named one cause. numFulfilled is
+--          read in memory to see the rise and never saved; nothing about other players. Once per quest, index and id.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
 -- Never recorded: coin loot, quest money (GetRewardMoney, QUEST_TURNED_IN's money), the player's money, a reputation
 -- standing, player chat, or other players' GUIDs or guild data. The dialogue filters can miss a player name.
--- (Loot chat is read only for this player's own "You won" line, kept as the won flag.)
+-- (Loot chat is read only for this player's own lines: "You won", kept as the won flag, and "You receive loot / item",
+-- held for 6 s in memory as objective credit evidence.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
 --
 -- npcs (KutzInventory 1.17.0): not events but one summary per install of the creatures this player looked at
@@ -309,6 +314,10 @@ local bossNpcs = {}                             -- npc ids seen as boss1..boss5 
 local lastUsedItem = { id = nil, at = -1000 }   -- a container item just opened from the bags
 local lootDone = false
 local Sighting                                  -- (unit, open): the npcs summary's update, defined below
+-- objective credit (1.20.0), its functions below: WINDOW seconds of this player's own evidence, at most SAW entries;
+-- want = the objective types still open at the last scan (no evidence is kept for a type no objective needs)
+local credit = { WINDOW = 6, SAW = 40, SESSION = 200, DEAD = 500, TYPES = { monster = "npc", item = "item", object = "object" },
+                 saw = {}, dead = {}, ndead = 0, base = nil, want = {}, n = 0, scans = 0, token = 0, pending = false }
 
 local function SpellName(id)
     if C_Spell and C_Spell.GetSpellName then return Plain(Try(C_Spell.GetSpellName, id)) end
@@ -492,6 +501,7 @@ local function RecordLoot()
         if e.src.guid then e.src.encounter = bossEncounter[e.src.guid] end
         if not (e.src.guid and Opened(e.src.guid .. "|" .. e.src.kind)) then Add(e) end
         if e.src.guid then Windowed(e.src, s.byId) end
+        if e.src.object then pcall(credit.Saw, "object", e.src.object) end   -- an object this player opened
     end
 end
 
@@ -2291,6 +2301,185 @@ function pet.Record(r)
 end
 
 ---------------------------------------------------------------------------
+-- objective credit (1.20.0): which creature, item or object counted for a quest objective. When an objective's
+-- numFulfilled goes up (read in memory to see the rise; never saved or exported) and this player's own evidence of the
+-- last 6 seconds names exactly one cause, (quest, objective index, type) -> that id is recorded once per install. The
+-- evidence: creatures that died that no one else had tapped (UNIT_HEALTH with UnitIsDead), items this player's own loot
+-- lines named (CHAT_MSG_LOOT "You receive loot / item"), objects this player opened or talked to. Nothing about another
+-- player, no counts, no position but the event's usual where.
+---------------------------------------------------------------------------
+credit.LOOT = { { "LOOT_ITEM_SELF_MULTIPLE", "You receive loot: %sx%d." }, { "LOOT_ITEM_PUSHED_SELF_MULTIPLE", "You receive item: %sx%d." },
+                { "LOOT_ITEM_SELF", "You receive loot: %s." }, { "LOOT_ITEM_PUSHED_SELF", "You receive item: %s." } }
+
+function credit.Saw(kind, id, name)             -- kind is the objective type the evidence can count for
+    id = gameText.Id(id)
+    if not (credit.want[kind] and id) then return end
+    name = gameText.PlainText(name)
+    if #credit.saw >= credit.SAW then table.remove(credit.saw, 1) end
+    credit.saw[#credit.saw + 1] = { kind = kind, id = id, at = Now(),
+                                    name = type(name) == "string" and #name >= 3 and #name <= 120 and name:lower() or nil }
+end
+
+-- UNIT_HEALTH(unit): a creature this unit token shows dead, once per corpse. Not a player's, not one someone controls, and
+-- not one another player had tapped (UnitIsTapDenied plainly false); a missing API or a secret is no answer: no evidence.
+function credit.Died(unit)
+    if not credit.want.monster or type(unit) ~= "string" or unit == "player" or Plain(Try(UnitIsDead, unit)) ~= true then return end
+    local guid = Plain(Try(UnitGUID, unit))
+    local what, id = FromGuid(guid)
+    if what ~= "npc" or credit.dead[guid] then return end
+    if not (False(UnitIsPlayer, unit) and False(UnitPlayerControlled, unit) and False(UnitIsTapDenied, unit)) then return end
+    if credit.ndead >= credit.DEAD then credit.dead, credit.ndead = {}, 0 end
+    credit.dead[guid], credit.ndead = true, credit.ndead + 1   -- the corpse's GUID in memory only, to count it once
+    credit.Saw("monster", id, Plain(Try(UnitName, unit)))
+end
+
+function credit.Loot(text)                      -- CHAT_MSG_LOOT: only this player's own "You receive" lines
+    if not credit.want.item or type(text) ~= "string" then return end
+    if not credit.patterns then
+        credit.patterns = {}
+        for _, f in ipairs(credit.LOOT) do
+            local fmt = _G[f[1]]
+            credit.patterns[#credit.patterns + 1] = FormatPattern(type(fmt) == "string" and fmt ~= "" and fmt or f[2])
+        end
+    end
+    for _, p in ipairs(credit.patterns) do
+        for _, c in ipairs({ text:match(p) }) do
+            local id = type(c) == "string" and ItemId(c)
+            if id then return credit.Saw("item", id, c:match("|h%[([^%]|]+)%]|h")) end
+        end
+    end
+end
+
+function credit.Talked()                        -- an object's gossip, greeting, quest or text window: this player opened it
+    if not credit.want.object then return end
+    local what, id = FromGuid(Plain(Try(UnitGUID, "npc")))
+    if what == "object" then credit.Saw("object", id, Plain(Try(UnitName, "npc"))) end
+end
+
+function credit.Quests()                        -- the quest ids in the log, headers left out, at most 100
+    local L, out = C_QuestLog, {}
+    local function add(quest, header)
+        quest = gameText.Id(quest)
+        if quest and not Secret(header) and header ~= true and #out < 100 then out[#out + 1] = quest end
+    end
+    if type(L) == "table" and type(L.GetNumQuestLogEntries) == "function" and type(L.GetInfo) == "function" then
+        for i = 1, math.min(Int((Try(L.GetNumQuestLogEntries))) or 0, 200) do
+            local info = Plain(Try(L.GetInfo, i))
+            if type(info) == "table" then add(info.questID, info.isHeader) end
+        end
+    elseif type(GetNumQuestLogEntries) == "function" and type(GetQuestLogTitle) == "function" then
+        for i = 1, math.min(Int((Try(GetNumQuestLogEntries))) or 0, 200) do
+            local _, _, _, header, _, _, _, quest = Try(GetQuestLogTitle, i)
+            add(Plain(quest), header)
+        end
+    end
+    return out
+end
+
+function credit.Named(text, name)               -- the name as whole words in the objective's text, both lower case
+    local pat = name:gsub("(%W)", "%%%1")
+    if name:find("^%w") then pat = "%f[%w]" .. pat end
+    if name:find("%w$") then pat = pat .. "%f[%W]" end
+    return text:find(pat) ~= nil
+end
+
+-- One objective rose from was to f (of need). Its cause, in this order: the one candidate named in the objective's text
+-- (by "name"; an item's bag count must also agree when the client gives it); else, for an item, the one candidate whose bag
+-- count is the objective's (by "count"); else the only candidate there is (by "sole"), but never a creature while grouped,
+-- since a group member's kill out of sight counts too. Candidates: this type's evidence of the window, by id, not yet
+-- claimed by an earlier scan.
+function credit.Credit(quest, i, kind, text, f, need, grouped)
+    if credit.n >= credit.SESSION then return end
+    local cands, byId = {}, {}
+    for _, x in ipairs(credit.saw) do
+        if x.kind == kind and (not x.used or x.used == credit.scans) then
+            local c = byId[x.id]
+            if not c then c = { id = x.id }; byId[x.id] = c; cands[#cands + 1] = c end
+            c.name = c.name or x.name
+        end
+    end
+    if #cands == 0 then return end
+    local counted = false
+    if kind == "item" then
+        local get = C_Item and C_Item.GetItemCount or GetItemCount
+        if type(get) == "function" then
+            counted = true
+            local keep = {}
+            for _, c in ipairs(cands) do
+                local n = Int((Try(get, c.id)))
+                if n and (n == f or (f == need and n >= need)) then keep[#keep + 1] = c end
+            end
+            cands = keep
+        end
+    end
+    text = gameText.PlainText(text)
+    text = text and text:lower()
+    local named, pick, by = 0, nil, nil
+    for _, c in ipairs(cands) do
+        if text and c.name and credit.Named(text, c.name) then named, pick = named + 1, c end
+    end
+    if named == 1 then by = "name"
+    elseif named == 0 and #cands == 1 then
+        pick = cands[1]
+        if counted then by = "count" elseif kind ~= "monster" or not grouped then by = "sole" end
+    end
+    if not by then return end
+    for _, x in ipairs(credit.saw) do if x.kind == kind and x.id == pick.id then x.used = credit.scans end end
+    local key = table.concat({ quest, i, kind, pick.id }, ":")
+    if gameText.Index("credit").seen[key] then return end
+    if gameText.Record("credit", key, { quest = quest, i = i, ot = kind, [credit.TYPES[kind]] = pick.id, by = by }) then
+        credit.n = credit.n + 1
+    end
+end
+
+-- Every quest's monster, item and object objectives (the first 12), compared with the last scan. A quest new to the log,
+-- or not in the last scan, only sets its baseline; so does the first scan. Only the rise is used, never the numbers.
+function credit.Scan()
+    local L = C_QuestLog
+    if type(L) ~= "table" or type(L.GetQuestObjectives) ~= "function" then return end
+    local now, old, base, want, fresh = Now(), credit.base, {}, {}, {}
+    credit.scans = credit.scans + 1
+    for _, x in ipairs(credit.saw) do if now - x.at <= credit.WINDOW then fresh[#fresh + 1] = x end end
+    credit.saw = fresh
+    local grouped = not False(IsInGroup)
+    for _, quest in ipairs(credit.Quests()) do
+        local list = Plain(Try(L.GetQuestObjectives, quest))
+        if type(list) == "table" then
+            local rows, was = {}, old and old[quest]
+            for i = 1, math.min(#list, qx.OBJECTIVES) do
+                local r = Plain(list[i])
+                local kind = type(r) == "table" and Plain(r.type)
+                local f, need = kind and Int(r.numFulfilled), kind and Int(r.numRequired, 1)
+                if credit.TYPES[kind] and f and need and f <= need then
+                    rows[i] = f
+                    if f < need then want[kind] = true end
+                    if was and was[i] and f > was[i] then credit.Credit(quest, i, kind, r.text, f, need, grouped) end
+                end
+            end
+            base[quest] = rows
+        end
+    end
+    credit.base, credit.want = base, want
+end
+
+function credit.Soon()                          -- the quest log changed: one scan a second later for a burst of updates
+    if not (C_Timer and C_Timer.After) then return credit.Scan() end
+    if credit.pending then return end
+    credit.pending = true
+    local token = credit.token
+    C_Timer.After(1, function()
+        if token ~= credit.token then return end
+        credit.pending = false
+        pcall(credit.Scan)
+    end)
+end
+
+function credit.Reset()                         -- tracking switched off: the baseline and the evidence are forgotten
+    credit.base, credit.want, credit.saw, credit.dead, credit.ndead = nil, {}, {}, {}, 0
+    credit.pending, credit.token = false, credit.token + 1
+end
+
+---------------------------------------------------------------------------
 -- events: only registered while recording is on
 ---------------------------------------------------------------------------
 local handlers = {}
@@ -2353,7 +2542,8 @@ function handlers.START_LOOT_ROLL(rollID, _, ...)
     else FlushRolls() end
 end
 
-function handlers.CHAT_MSG_LOOT(text) Won(Plain(text)) end
+function handlers.CHAT_MSG_LOOT(text) text = Plain(text); Won(text); credit.Loot(text) end
+handlers.UNIT_HEALTH = credit.Died
 
 local function QuestGiverSeen()                 -- the quest window is open with it (questnpc, else npc)
     pcall(Sighting, "questnpc", true)
@@ -2364,15 +2554,16 @@ function handlers.MAIL_SHOW()
     gameText.mail, gameText.book, gameText.bookUse = true, nil, nil
 end
 function handlers.MAIL_CLOSED() gameText.mail = false end
-function handlers.GOSSIP_SHOW() gameText.Gossip("gossip") end
-function handlers.QUEST_GREETING() gameText.Gossip("greeting") end
+function handlers.GOSSIP_SHOW() credit.Talked(); gameText.Gossip("gossip") end
+function handlers.QUEST_GREETING() credit.Talked(); gameText.Gossip("greeting") end
 
-function handlers.ITEM_TEXT_BEGIN() gameText.BookBegin() end
+function handlers.ITEM_TEXT_BEGIN() credit.Talked(); gameText.BookBegin() end
 function handlers.ITEM_TEXT_READY() gameText.BookPage() end
 function handlers.ITEM_TEXT_CLOSED() gameText.book = nil end
 
 function handlers.QUEST_DETAIL(startItem)       -- (questStartItemID): the item that started it, 0 when none
     QuestGiverSeen()
+    credit.Talked()
     local what, id = Giver("questnpc", "npc")
     detail = { quest = Int(Try(GetQuestID), 1), what = what, id = id, at = time(), startItem = Int(startItem, 1),
                text = QuestText({ title = GetTitleText, details = GetQuestText, objectives = GetObjectiveText }) }
@@ -2404,7 +2595,9 @@ function handlers.QUEST_DATA_LOAD_RESULT(quest, success)
     quest = gameText.Id(quest)
     if quest and Plain(success) == true then qx.Retry(quest) end
 end
-handlers.QUEST_LOG_UPDATE = qx.RetryPending
+function handlers.QUEST_LOG_UPDATE() qx.RetryPending(); credit.Soon() end
+handlers.QUEST_WATCH_UPDATE = credit.Soon
+function handlers.UNIT_QUEST_LOG_CHANGED(unit) if unit == "player" then credit.Soon() end end
 handlers.QUEST_POI_UPDATE = qx.RetryPending
 handlers.PLAYER_REGEN_ENABLED = qx.RetryPending
 function handlers.QUEST_REMOVED(quest)
@@ -2495,7 +2688,8 @@ local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_
                     "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
                     "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED",
-                    "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_PET", "PET_BAR_UPDATE", "SPELLS_CHANGED" }
+                    "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_PET", "PET_BAR_UPDATE", "SPELLS_CHANGED",
+                    "UNIT_HEALTH", "QUEST_WATCH_UPDATE", "UNIT_QUEST_LOG_CHANGED" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -2532,6 +2726,7 @@ local function Disable()
     qx.waiting = {}
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
     pet.arm, pet.read, pet.token = nil, nil, pet.token + 1   -- a tame still being read is dropped
+    credit.Reset()
 end
 
 local function AddonVersion()
@@ -2616,7 +2811,7 @@ function ns.ObsNote(atLogin, hadInventory)
             Say("1.19.0 adds NPC gossip and spoken lines, book pages from world objects, and quest objectives when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
         end
         if (hadInventory or gameText.upgrade) and not d.notedPets then
-            Say("1.20.0 adds hunter tames (the beast, and its pet's abilities, attack speed and diet) when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
+            Say("1.20.0 adds hunter tames (the beast, and its pet's abilities, attack speed and diet) and which creature, item or object counted for a quest objective when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
         end
         d.notedGameText, d.notedPets = true, true
         return

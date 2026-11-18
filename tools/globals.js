@@ -36,6 +36,7 @@ const known = new Set(("_G ipairs pairs pcall select type unpack tostring tonumb
  "UnitPlayerControlled UnitTokenFromGUID UNKNOWNOBJECT UnitCreatureType UnitCreatureFamily CheckInteractDistance GetMaxPlayerLevel " +   // Observations.lua npcs
  "C_TaxiMap GetTaxiMapID NumTaxiNodes TaxiNodeName TaxiNodeGetType TaxiNodeCost GetNumRoutes TakeTaxiNode UnitOnTaxi " +   // Observations.lua taxi
  "C_PetInfo GetPetFoodTypes HasPetSpells GetSpellBookItemName GetSpellBookItemInfo C_UnitAuras UnitAura " +   // Observations.lua hunter tames
+ "UnitIsTapDenied GetItemCount GetNumQuestLogEntries GetQuestLogTitle " +   // Observations.lua objective credit
  "C_QuestLog GetRewardXP IsXPUserDisabled GetGossipText GetGreetingText ItemTextGetCreator ItemTextGetMaterial ItemTextGetItem ItemTextGetPage ItemTextGetText ItemTextHasNextPage " +   // Observations.lua quest extras
  "SetTrainerServiceTypeFilter UnitArmor UnitAttackPower UnitAttackSpeed UnitDamage UnitDefenseSkill UnitHonor UnitHonorLevel UnitHonorMax UnitRangedAttackPower UnitRangedDamage UnitResistance UnitSex UnitSpellHaste UnitStat").split(" "));
 const odd = [...all].filter(g => !known.has(g)).sort();

@@ -40,7 +40,7 @@ const SCHEMA_VERSION = "2.1.0";
 // quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin, reputation changes
 // only) (KutzInventory 1.18.0). observations.v stays 1.
 // 3.12.0: game text observations and quest objective and map data (KutzInventory 1.19.0). observations.v stays 1.
-// 3.13.0: hunter tame events (KutzInventory 1.20.0).
+// 3.13.0: hunter tame and objective credit events (KutzInventory 1.20.0). observations.v stays 1.
 const SCHEMA_VERSION_3 = "3.13.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
@@ -424,7 +424,7 @@ function exportRaids(dbs) {
 }
 
 // ---------------------------------------------------------------------------
-// Observations (inventory 3.2.0+; trainer events 3.9.0; taxi and flight events 3.11.0; tame events 3.13.0): KutzInventoryObsDB.events from Observations.lua, recorded while
+// Observations (inventory 3.2.0+; trainer events 3.9.0; taxi and flight events 3.11.0; tame and credit events 3.13.0): KutzInventoryObsDB.events from Observations.lua, recorded while
 // drop tracking is on (/kinv track; on by default since KutzInventory 1.13.0). Exported as observations = { v: 1, addon, events[] } only when there is
 // at least one usable event. Each event keeps only the fields its type has, with the right types; everything else
 // (anything about money, other players, unknown keys) is dropped. Ids are unique per install, so several saved files
@@ -595,6 +595,9 @@ function obsTameDiet(list) {
   const out = [...new Set(asList(list).map((x) => obsLabel(x, 40)).filter((x) => x !== undefined))].sort();
   return out.length ? out.slice(0, OBS_TAME.diet) : undefined;
 }
+// Objective credit (3.13.0): the objective's type names the one id field it may carry; how the cause was told; "count" is
+// for items only. Never a progress number: those fields are not projected.
+const OBS_CREDIT = { monster: "npc", item: "item", object: "object" }, OBS_CREDIT_BY = ["name", "count", "sole"], OBS_CREDIT_MAX_I = 12;
 function observationEvent(e) {
   if (!e || typeof e !== "object" || !obsText(e.id, OBS_ID) || obsInt(e.t, 1) === undefined || e.t > 1e11) return null;
   const base = { id: e.id, t: e.t, ...(obsText(e.b, /^[0-9][0-9.]{0,39}$/) ? { b: e.b } : {}), type: e.type };
@@ -671,6 +674,13 @@ function observationEvent(e) {
     const spd = Number.isInteger(e.spd) && e.spd >= 10 && e.spd <= 2000 ? e.spd : undefined;
     return { ...base, npc, ...pick({ lv: lv <= 255 ? lv : undefined, fam: obsNpcKind(e.fam), spells: obsTameSpells(e.spells), spd,
              spdAura: spd !== undefined && e.spdAura === true ? true : undefined, diet: obsTameDiet(e.diet) }), ...place() };
+  }
+  if (e.type === "credit") {
+    const quest = obsInt(e.quest, 1), i = obsInt(e.i, 1), field = Object.keys(OBS_CREDIT).includes(e.ot) ? OBS_CREDIT[e.ot] : undefined;
+    const id = field && obsInt(e[field], 1);
+    if (quest === undefined || i === undefined || i > OBS_CREDIT_MAX_I || id === undefined || !OBS_CREDIT_BY.includes(e.by)
+        || (e.by === "count" && e.ot !== "item") || Object.values(OBS_CREDIT).some((k) => k !== field && e[k] != null)) return null;
+    return { ...base, quest, i, ot: e.ot, [field]: id, by: e.by, ...place() };
   }
   if (e.type === "flight") {
     if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;

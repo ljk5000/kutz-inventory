@@ -2256,6 +2256,183 @@ do
   assert(e and e.npc == 3825 and not e.spells and not e.spd and not e.diet and not bareApi.db().lastError, dump(e))
   print("OK   tames: a hunter's beast by the target's GUID at Tame Beast, the pet's book, bare speed and diet; refusals, retries, caps")
 end
+
+-- Objective credit (1.20.0): an objective's count rose and this player's own evidence named one cause.
+do
+  local function kobold(n, id) return "Creature-0-4170-0-1234-" .. (id or 6) .. "-0000AB" .. string.format("%04X", n) end
+  local CRATE = "GameObject-0-4170-0-1234-3719-0000AAAA02"
+  local function pelt(id, name) return "|cffffffff|Hitem:" .. id .. "::::::::12:::::|h[" .. name .. "]|h|r" end
+  local function quester(opts)
+    local h = fresh(opts)
+    local s, G = h.s, h.G
+    -- s.log: the quest log's rows; s.obj[quest]: its objectives { type, numFulfilled, numRequired, text }; s.bags[item]
+    s.log, s.obj, s.bags = { { questID = 0, isHeader = true }, { questID = 100, isHeader = false } }, {}, {}
+    s.obj[100] = { { type = "monster", numFulfilled = 0, numRequired = 10, text = "Kobold Vermin slain: 0/10" },
+                   { type = "item", numFulfilled = 0, numRequired = 5, text = "Wolf Pelt: 0/5" },
+                   { type = "object", numFulfilled = 0, numRequired = 3, text = "Supply Crate searched: 0/3" },
+                   { type = "event", numFulfilled = 0, numRequired = 1, text = "Find the camp" } }
+    G.C_QuestLog = { GetNumQuestLogEntries = function() return #s.log end, GetInfo = function(i) return s.log[i] end,
+                     GetQuestObjectives = function(q) return s.obj[q] end }
+    G.UnitIsTapDenied = function(u) local x = s.units[u]; return x and x.tapped or false end
+    G.GetItemCount = function(id) return s.bags[id] or 0 end
+    h.event("QUEST_LOG_UPDATE"); h.drain()                      -- the baseline
+    return h
+  end
+  local function rise(h, quest, i, f)
+    local r = h.s.obj[quest][i]
+    r.numFulfilled = f
+    r.text = r.text:gsub("%d+/", f .. "/")
+    h.event("QUEST_WATCH_UPDATE", 1); h.event("UNIT_QUEST_LOG_CHANGED", "player"); h.event("QUEST_LOG_UPDATE")
+    h.drain()
+  end
+  local function kill(h, n, name, extra)
+    local u = { guid = kobold(n, extra and extra.id), dead = true, name = name or "Kobold Vermin" }
+    for k, v in pairs(extra or {}) do u[k] = v end
+    h.s.units["nameplate" .. n] = u
+    h.event("UNIT_HEALTH", "nameplate" .. n)
+  end
+  local function credits(h) local out = {}; for _, e in ipairs(h.events()) do if e.type == "credit" then out[#out + 1] = e end end; return out end
+
+  -- a kill named in the objective's text
+  local h = quester()
+  kill(h, 1)
+  rise(h, 100, 1, 1)
+  local c = credits(h)
+  assert(#c == 1, #c .. " " .. tostring(h.db().lastError))
+  local e = c[1]
+  assert(e.quest == 100 and e.i == 1 and e.ot == "monster" and e.npc == 6 and e.by == "name" and e.item == nil and e.where.x == 0.4123
+         and e.who.class == 4, dump(e))
+  local keys = {}; for k in pairs(e) do keys[#keys + 1] = k end; table.sort(keys)
+  assert(table.concat(keys, ",") == "b,by,i,id,npc,ot,quest,t,type,where,who", table.concat(keys, ","))
+  assert(not dump(e):find("Creature%-") and not dump(e):find("Kobold") and not dump(e):find("slain"), "no GUID, no name, no text")
+  assert(not dump(h.db()):find("numFulfilled") and not dump(h.db()):find("Kobold"), "nothing about progress is saved")
+  kill(h, 2); rise(h, 100, 1, 2)
+  assert(#credits(h) == 1, "the same quest, objective and creature once per install")
+  kill(h, 2); rise(h, 100, 1, 3)
+  assert(#credits(h) == 1, "a corpse counts once: its second UNIT_HEALTH is no new evidence")
+  -- a creature the text does not name, the only one: "sole"
+  kill(h, 3, "Kobold Tunneler", { id = 7 }); rise(h, 100, 1, 4)
+  c = credits(h)
+  assert(#c == 2 and c[2].npc == 7 and c[2].by == "sole", dump(c[2]))
+
+  -- an item: named, then counted, then a count that disagrees
+  local it = quester()
+  it.s.bags[750] = 1
+  it.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(750, "Wolf Pelt") .. ".")
+  it.event("CHAT_MSG_LOOT", "Someone Else receives loot: " .. pelt(751, "Wolf Pelt") .. ".")
+  rise(it, 100, 2, 1)
+  c = credits(it)
+  assert(#c == 1 and c[1].ot == "item" and c[1].item == 750 and c[1].by == "name" and c[1].npc == nil, dump(c[1]))
+  it.s.obj[100][2].text = "Pelts of the pack: 1/5"
+  it.s.bags[752] = 2
+  it.event("CHAT_MSG_LOOT", "You receive item: " .. pelt(752, "Grey Pelt") .. "x2.")
+  it.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(2589, "Linen Cloth") .. ".")    -- in the bags, not the count: not it
+  it.s.bags[2589] = 7
+  rise(it, 100, 2, 2)
+  c = credits(it)
+  assert(#c == 2 and c[2].item == 752 and c[2].by == "count", dump(c[2]))
+  it.s.bags[753] = 9
+  it.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(753, "Old Pelt") .. ".")
+  rise(it, 100, 2, 3)
+  assert(#credits(it) == 2, "a bag count that is not the objective's")
+  local full = quester()
+  full.s.obj[100][2].numRequired, full.s.bags[750] = 1, 4
+  full.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(750, "Wolf Pelt") .. "x4.")
+  rise(full, 100, 2, 1)
+  assert(#credits(full) == 1 and credits(full)[1].item == 750, "a finished item objective: the bags may hold more")
+
+  -- objects: a window this player opened (gossip), or a loot window on it
+  local ob = quester()
+  ob.s.units.npc = { guid = CRATE, name = "Supply Crate" }
+  ob.event("GOSSIP_SHOW")
+  rise(ob, 100, 3, 1)
+  c = credits(ob)
+  assert(#c == 1 and c[1].ot == "object" and c[1].object == 3719 and c[1].by == "name", dump(c[1]))
+  ob.s.obj[100][3].text = "Caches searched: 1/3"
+  ob.s.units.npc = nil
+  ob.loot({ item(4, 1, { NODE, 1 }) })
+  rise(ob, 100, 3, 2)
+  c = credits(ob)
+  assert(#c == 2 and c[2].object == 1617 and c[2].by == "sole", dump(c[2]))
+
+  -- refusals
+  local function none(setup, label)
+    local x = quester()
+    setup(x)
+    assert(#credits(x) == 0 and not x.db().lastError, label .. ": " .. dump(credits(x)[1]) .. " " .. tostring(x.db().lastError))
+  end
+  none(function(x) kill(x, 1, nil, { tapped = true }); rise(x, 100, 1, 1) end, "another player's tap")
+  none(function(x) kill(x, 1, nil, { guid = PLAYER }); rise(x, 100, 1, 1) end, "a player")
+  none(function(x) kill(x, 1, nil, { controlled = true }); rise(x, 100, 1, 1) end, "someone's pet")
+  none(function(x) kill(x, 1, nil, { dead = false }); rise(x, 100, 1, 1) end, "not dead")
+  none(function(x) x.G.UnitIsTapDenied = nil; kill(x, 1); rise(x, 100, 1, 1) end, "no tap API: no evidence")
+  none(function(x) kill(x, 1); x.s.clock = x.s.clock + 7; rise(x, 100, 1, 1) end, "evidence older than 6 s")
+  none(function(x) rise(x, 100, 1, 1) end, "no evidence")
+  none(function(x) kill(x, 1, "Kobold Tunneler", { id = 7 }); x.s.clock = x.s.clock + 7; x.event("UNIT_HEALTH", "nameplate1"); rise(x, 100, 1, 1) end,
+       "a corpse counts once: a later UNIT_HEALTH on it is no new evidence")
+  none(function(x) kill(x, 1); kill(x, 2, "Kobold Worker", { id = 8 }); x.s.obj[100][1].text = "Kobolds slain: 0/10"; rise(x, 100, 1, 2) end,
+       "two creatures, neither named")
+  none(function(x) x.G.IsInGroup = function() return true end; kill(x, 1, "Kobold Tunneler", { id = 7 }); rise(x, 100, 1, 1) end,
+       "grouped: a member's kill out of sight counts too, so no sole creature")
+  none(function(x) kill(x, 1); x.s.obj[100][4].numFulfilled = 1; rise(x, 100, 4, 1) end, "an event objective")
+  none(function(x)
+    x.s.log[3] = { questID = 101 }
+    x.s.obj[101] = { { type = "monster", numFulfilled = 2, numRequired = 10, text = "Kobold Vermin slain: 2/10" } }
+    kill(x, 1); rise(x, 101, 1, 3)
+  end, "a quest new to the log: its baseline first")
+  none(function(x) rise(x, 100, 1, 3); kill(x, 1); rise(x, 100, 1, 2) end, "a fall is no rise")
+  none(function(x) x.cmd("track drops off"); kill(x, 1); rise(x, 100, 1, 1); x.cmd("track drops on"); kill(x, 2); rise(x, 100, 1, 2) end,
+       "tracking off, then on: the first scan is a baseline")
+  local used = quester()
+  used.s.log[3] = { questID = 102 }
+  used.s.obj[102] = { { type = "monster", numFulfilled = 0, numRequired = 10, text = "Kobold Vermin slain: 0/10" } }
+  used.event("QUEST_LOG_UPDATE"); used.drain()
+  kill(used, 1); rise(used, 100, 1, 1)
+  rise(used, 102, 1, 1)
+  assert(#credits(used) == 1 and credits(used)[1].quest == 100, "evidence an earlier scan used is not used again")
+  kill(used, 2); used.s.obj[100][1].numFulfilled = 2; used.s.obj[102][1].numFulfilled = 2; used.event("QUEST_LOG_UPDATE"); used.drain()
+  assert(#credits(used) == 2 and credits(used)[2].quest == 102, "one kill, two quests in the same scan")
+  local secret = {}
+  none(function(x)
+    x.G.issecretvalue = function(v) return v == secret end
+    kill(x, 1); x.s.obj[100][1].numFulfilled = secret; x.event("QUEST_LOG_UPDATE"); x.drain()
+    x.s.obj[100][1].numFulfilled = 1; x.event("QUEST_LOG_UPDATE"); x.drain()
+  end, "a secret count")
+  local cap = quester({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  kill(cap, 1); rise(cap, 100, 1, 1)
+  assert(#credits(cap) == 0 and not cap.db().lastError, "past the half caps")
+
+  -- grouped, a named creature still counts; the old quest log API; no timer: a scan at once
+  local g = quester()
+  g.G.IsInGroup = function() return true end
+  kill(g, 1); rise(g, 100, 1, 1)
+  assert(#credits(g) == 1 and credits(g)[1].by == "name", "grouped and named")
+  local o = quester()
+  o.G.C_QuestLog.GetNumQuestLogEntries, o.G.C_QuestLog.GetInfo = nil, nil
+  o.G.GetNumQuestLogEntries = function() return 2, 1 end
+  o.G.GetQuestLogTitle = function(i) if i == 1 then return "Zone", 0, 0, true, false, false, 0, 0 end; return "Q", 10, 0, false, false, false, 0, 100 end
+  o.event("QUEST_LOG_UPDATE"); o.drain()
+  kill(o, 1); rise(o, 100, 1, 1)
+  assert(#credits(o) == 1, "GetQuestLogTitle")
+  local t = quester({ globals = { C_Timer = false } })
+  kill(t, 1); rise(t, 100, 1, 1)
+  assert(#credits(t) == 1, "no timer")
+
+  -- at most 200 a session
+  local many = quester()
+  many.s.obj[100][1].numRequired = 1000
+  for n = 1, 201 do kill(many, n, nil, { id = 5000 + n }); rise(many, 100, 1, n) end
+  assert(#credits(many) == 200, "200 a session: " .. #credits(many))
+
+  -- a client without the quest APIs: nothing, and no error
+  local bare = fresh()
+  bare.event("QUEST_LOG_UPDATE"); bare.drain()
+  bare.s.units.target = { guid = kobold(1), dead = true }
+  bare.event("UNIT_HEALTH", "target"); bare.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(750, "Wolf Pelt") .. ".")
+  bare.event("QUEST_WATCH_UPDATE", 1); bare.drain()
+  assert(#bare.events() == 0 and not bare.db().lastError, tostring(bare.db().lastError))
+  print("OK   objective credit: a creature, item or object counted for a quest objective; by name, count or sole; refusals, dedup, caps")
+end
 `;
 
 // The real /kinv: every file the .toc loads, in a fake game where unknown globals are harmless stubs.
