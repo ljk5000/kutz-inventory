@@ -303,7 +303,7 @@ test("observations 3.12.0: read events omit unknown fields and reject unsafe pag
   assert.deepEqual(obs({ item: 2, last: false, material: "|unsafe" }).events[0],
     { id: event.id, t: 100, type: "read", item: 2, title: event.title, page: 1, text: event.text, where: {}, who: {} });
   for (const bad of [{ item: 2, object: 3 }, { page: 0 }, { title: "Item-0-1" }, { title: "x".repeat(201) },
-                     { text: "x".repeat(8001) }, { creator: "Examplewriter" }, { mail: true }, { material: "Stationery" }]) {
+                     { text: "x".repeat(8001) }, { creator: "Examplewriter" }, { creator: "" }, { mail: true }, { material: "Stationery" }]) {
     assert.equal(obs(bad), null);
   }
 });
@@ -358,8 +358,10 @@ test("observations 3.12.0: quest accept data is bounded, progress-free and tied 
   const turnin = obs({ act: "turnin", obj: data.obj, poi: data.poi });
   assert.ok(!("obj" in turnin) && !("poi" in turnin));
   assert.deepEqual(validateExport({ ...doc, observations: { v: 1, addon: "1.19.0", events: [data] } }), []);
+  assert.deepEqual(validateExport({ ...doc, observations: { v: 1, addon: "1.19.0",
+    events: [{ ...data, poi: [{ ...point, x: 65.431 }] }] } }), [], "schema accepts numeric coordinates in range");
   for (const bad of [{ obj: [] }, { obj: [{ ...valid, numFulfilled: 2 }] }, { obj: [{ ...valid, text: "2/4 Fill the jar" }] },
-                     { poi: [{ ...point, x: 65.431 }] }, { poi: [point, point] }, { poi: [{ ...point, x: 0, y: 0 }] },
+                     { poi: [{ ...point, x: 100.001 }] }, { poi: [point, point] }, { poi: [{ ...point, x: 0, y: 0 }] },
                      { act: "turnin" }]) {
     assert.ok(validateExport({ ...doc, observations: { v: 1, addon: "1.19.0", events: [{ ...data, ...bad }] } }).length);
   }

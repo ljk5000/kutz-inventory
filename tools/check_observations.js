@@ -11,8 +11,14 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require("fengari");
 
 const addonDir = path.join(__dirname, "..", "KutzInventory");
 const source = fs.readFileSync(path.join(addonDir, "Observations.lua"), "utf8");
+const bagSource = source.replace("local READ_BAG_ITEMS = false", "local READ_BAG_ITEMS = true");
+const commonWords = fs.readFileSync(path.join(addonDir, "CommonWords.lua"), "utf8");
+if (bagSource === source) throw new Error("Could not enable the bag-page path for the fake game");
 
 const code = `
+local words = {}
+assert(load([=====[${commonWords}]=====], "@CommonWords.lua"))("KutzInventory", words)
+
 local function dump(v)
   if type(v) ~= "table" then return tostring(v) end
   local keys = {}
@@ -81,6 +87,7 @@ local function fresh(opts)
     G.GetLootRollItemInfo = function(id) local x = s.rolls[id]; return 1, "name", x and x.n, 2 end
     G.GetLootThreshold = function() return 2 end
     G.IsInRaid = function() return false end
+    G.IsInGroup = function() return false end
     G.GetSpellInfo = function(id) return ({ [2366] = "Herb Gathering", [2575] = "Mining", [8613] = "Skinning", [999] = "Mining" })[id] end
     G.GetQuestID = function() return s.quest end
     G.GetNumQuestRewards = function() return #s.rewards end
@@ -195,8 +202,9 @@ local function fresh(opts)
   end
   for k, v in pairs(opts.globals or {}) do G[k] = v end
   G.KutzInventoryObsDB = opts.db
-  local chunk = assert(load([=====[${source}]=====], "@Observations.lua", "t", G))
-  local ns = {}
+  local observationSource = opts.readBag and [=====[${bagSource}]=====] or [=====[${source}]=====]
+  local chunk = assert(load(observationSource, "@Observations.lua", "t", G))
+  local ns = { CommonWords = words.CommonWords }
   chunk("KutzInventory", ns)
   local h = { ns = ns, G = G, s = s, printed = printed, registered = registered, hooks = hooks, popups = popups }
   function h.event(name, ...) frames[1].scripts.OnEvent(frames[1], name, ...) end
@@ -226,18 +234,42 @@ do
     return h
   end
   local h = gossip({ globals = { issecretvalue = function(v) return v == secret end } })
-  h.s.words = "  Welcome Tester Testwood, Rogue.  "
+  h.s.words = "  Welcome back, Tester Testwood, Rogue.  "
   h.event("GOSSIP_SHOW")
   local e = h.events()[1]
   assert(e and e.npc == 11502 and e.type == "gossip" and e.kind == "gossip"
-         and e.text == "Welcome $N, Rogue." and e.guid == nil and e.where and e.who, h.db().lastError)
-  h.s.greeting = "Welcome Tester, Rogue."
+         and e.text == "Welcome back, $N, Rogue." and e.guid == nil and e.where and e.who, h.db().lastError)
+  h.s.greeting = "Welcome back, Tester, Rogue."
   h.event("QUEST_GREETING")
   assert(#h.events() == 1 and h.db().n == 1, "same normalized text across both windows")
   h.s.units.npc.guid = NODE
   h.event("QUEST_GREETING")
   e = h.events()[2]
   assert(e and e.object == 1617 and not e.npc and e.kind == "greeting", "distinct object subject")
+  h.s.words = "Work with Zorvath's tools."
+  h.event("GOSSIP_SHOW")
+  assert(#h.events() == 2, "object gossip declines an unknown capitalized name")
+  h.s.units.npc.guid = MOB
+  h.event("GOSSIP_SHOW")
+  assert(h.events()[3].text == h.s.words, "the unknown-capital rule only applies to objects")
+  h.s.units.target = { guid = PLAYER, player = true, name = "Exampletarget" }
+  h.G.GetUnitName = function(unit) return h.s.units[unit] and h.s.units[unit].name or "Tester Testwood" end
+  h.G.IsInGroup = function() return true end
+  h.G.GetNumGroupMembers = function() return 2 end
+  h.s.units.party1 = { name = "Exampleparty" }
+  for _, private in ipairs({ "Deposit 4 GOLD.", "You have 20silver.", "Return with 123 copper.",
+      "Welcome, exampletarget!", "Balance belongs to Exampleparty's friend.",
+      string.rep("a", 4000) .. " 10 Gold" }) do
+    h.s.words = private
+    h.event("GOSSIP_SHOW")
+  end
+  h.s.greeting = "You have 2 gOLd."
+  h.event("QUEST_GREETING")
+  h.s.greeting = "Welcome back, Exampleparty."
+  h.event("QUEST_GREETING")
+  assert(#h.events() == 3 and not h.db().lastError, "money and roster/target names in either window are skipped")
+  h.G.IsInGroup = function() return false end
+  h.s.units.target = nil
   h.s.units.npc.guid = PLAYER
   h.event("GOSSIP_SHOW")
   h.s.units.npc.guid = secret
@@ -248,23 +280,23 @@ do
   h.event("MAIL_SHOW"); h.event("GOSSIP_SHOW"); h.event("MAIL_CLOSED")
   h.G.InboxFrame = { IsVisible = function() return secret end }
   h.event("GOSSIP_SHOW")
-  assert(#h.events() == 2 and not h.db().lastError, "player, secret values and mail leave no event")
+  assert(#h.events() == 3 and not h.db().lastError, "player, secret values and mail leave no event")
   h.G.InboxFrame, h.G.C_GossipInfo, h.s.legacy = nil, nil, string.rep("a", 3999) .. "é"
   h.event("GOSSIP_SHOW")
-  assert(#h.events()[3].text == 3999, "legacy fallback and correct UTF-8 cut")
+  assert(#h.events()[4].text == 3999, "legacy fallback and correct UTF-8 cut")
   h.s.legacy = "Player-" .. string.char(1) .. "1-0123"
   h.event("GOSSIP_SHOW")   -- stripping a control must not let a GUID through
   h.G.GetGossipText = nil
   h.event("GOSSIP_SHOW")
-  assert(#h.events() == 3, "missing APIs")
+  assert(#h.events() == 4, "missing APIs")
   h.db().events = {}
   local r = gossip({ db = h.db() })
-  r.s.words = "Welcome Tester, Rogue."
+  r.s.words = "Welcome back, Tester, Rogue."
   r.event("GOSSIP_SHOW")
   assert(#r.events() == 0, "saved dedup survives reload and absence of the original event")
   for i = 1, 2000 do r.s.words = "Message number " .. i; r.event("GOSSIP_SHOW") end
   assert(#r.db().textSeen.gossip.keys == 2000 and #r.events() == 2000, r.db().lastError)
-  r.s.words = "Welcome Tester, Rogue."
+  r.s.words = "Welcome back, Tester, Rogue."
   r.event("GOSSIP_SHOW")
   assert(#r.events() == 2001, "oldest key is evicted")
   local full = gossip({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
@@ -314,31 +346,49 @@ do
   assert(h.events()[2].last == true and h.events()[2].object == 1617, "last page of the same object")
 
   h.event("ITEM_TEXT_CLOSED")
-  h.s.units.npc, h.s.page = nil, 1
-  h.hooks.UseContainerItem(secret, secret)
+  h.s.units.npc, h.s.page, h.s.title, h.s.body = nil, 1, "Example Saved Letter", "Synthetic private letter text."
   h.hooks.UseContainerItem(0, 1)
   h.open()
-  assert(h.events()[3].item == 54000 and not h.events()[3].object, "a matching recent bag use")
-  h.event("ITEM_TEXT_CLOSED")
-  h.hooks.UseContainerItem(0, 1)
+  assert(#h.events() == 2 and h.s.bodies == 2, "saved bag letter with a nil creator stays unread")
   h.s.clock = h.s.clock + 2
   h.open()
-  assert(h.events()[4].item == nil and h.events()[4].object == nil, "a stale bag use leaves a title-only event")
-  h.event("ITEM_TEXT_CLOSED")
+  assert(#h.events() == 2 and h.s.bodies == 2, "no title-only fallback")
+  h.s.units.npc = { guid = NODE }
   h.hooks.UseContainerItem(0, 1)
-  h.s.units.npc, h.s.page = { guid = NODE }, 2
   h.open()
-  assert(h.events()[5].page == 2 and h.events()[5].item == nil and h.events()[5].object == nil, "competing sources")
+  h.s.clock = h.s.clock + 2
+  h.event("ITEM_TEXT_BEGIN")
+  h.hooks.UseContainerItem(0, 1)
+  h.event("ITEM_TEXT_READY")
+  assert(#h.events() == 2 and h.s.bodies == 2, "bag use invalidates a read even with a lingering world GUID")
   h.db().events = {}
   local r = library({ db = h.db() })
+  r.s.units.npc = { guid = NODE }
   r.open()
-  assert(r.s.bodies == 0 and #r.events() == 0, "title and page dedup across sessions and pruning")
+  assert(r.s.bodies == 0 and #r.events() == 0, "object and page dedup across sessions and pruning")
   r.s.page, r.s.body = 4, string.rep("a", 7999) .. "é"
   r.open()
   assert(#r.events()[1].text == 7999, "UTF-8 page cap")
 
-  local function never(setup)
-    local n = library()
+  local bag = library({ readBag = true })
+  bag.hooks.UseContainerItem(secret, secret)
+  bag.hooks.UseContainerItem(0, 1)
+  bag.open()
+  assert(bag.events()[1].item == 54000 and not bag.events()[1].object, "enabled: a matching recent bag use")
+  bag.event("ITEM_TEXT_CLOSED")
+  bag.hooks.UseContainerItem(0, 1)
+  bag.s.clock = bag.s.clock + 2
+  bag.open()
+  assert(not bag.events()[2].item and not bag.events()[2].object, "enabled: a stale bag use leaves a title-only event")
+  bag.event("ITEM_TEXT_CLOSED")
+  bag.hooks.UseContainerItem(0, 1)
+  bag.s.units.npc, bag.s.page = { guid = NODE }, 2
+  bag.open()
+  assert(bag.events()[3].page == 2 and not bag.events()[3].item and not bag.events()[3].object, "enabled: competing sources")
+
+  local function never(setup, readBag)
+    local n = library({ readBag = readBag })
+    if not readBag then n.s.units.npc = { guid = NODE } end
     setup(n)
     assert(n.s.bodies == 0 and #n.events() == 0 and not n.db().lastError, "unsafe body left unread")
   end
@@ -348,7 +398,11 @@ do
     n.G.InboxFrame = { IsVisible = function() return true end }; n.event("ITEM_TEXT_BEGIN")
     n.G.InboxFrame = nil; n.event("ITEM_TEXT_READY")
   end)
-  never(function(n) n.s.creator = "Examplewriter"; n.hooks.UseContainerItem(0, 1); n.open() end)
+  never(function(n) n.s.creator = "Examplewriter"; n.hooks.UseContainerItem(0, 1); n.open() end, true)
+  never(function(n) n.s.creator = ""; n.open() end)
+  never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.creator = ""; n.event("ITEM_TEXT_READY") end)
+  never(function(n) n.s.creator = ""; n.hooks.UseContainerItem(0, 1); n.open() end, true)
+  never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.units.npc = nil; n.event("ITEM_TEXT_READY") end)
   never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.creator = secret; n.event("ITEM_TEXT_READY") end)
   never(function(n) n.G.ItemTextGetCreator = nil; n.open() end)
   never(function(n) n.G.ItemTextGetCreator = function() error("not readable") end; n.open() end)
@@ -357,16 +411,17 @@ do
   never(function(n) n.s.page = secret; n.open() end)
   never(function(n) n.event("ITEM_TEXT_BEGIN"); n.event("ITEM_TEXT_CLOSED"); n.event("ITEM_TEXT_READY") end)
   never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.title = "Different Text"; n.event("ITEM_TEXT_READY") end)
-  local unreadable = library()
+  local unreadable = library({ readBag = true })
   unreadable.G.C_Container.GetContainerItemInfo = function()
     return { itemID = 54000, itemName = "Example Journal", isReadable = secret }
   end
   unreadable.hooks.UseContainerItem(0, 1); unreadable.open()
   assert(unreadable.events()[1] and not unreadable.events()[1].item, "bag attribution needs a plain readable flag")
   local full = library({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  full.s.units.npc = { guid = NODE }
   full.open()
   assert(full.s.bodies == 0 and not full.db().textSeen, "half cap skips reading")
-  print("OK   game-readable pages, bag or object provenance, per-page dedup, never read mail or secret creator")
+  print("OK   world-readable pages, disabled bag and title-only paths, per-page dedup, mail and creator guards")
 end
 
 -- NPC lines use only the sender GUID and leave repeats before all unit/roster/location reads.
@@ -377,7 +432,9 @@ do
     opts.globals = { issecretvalue = function(v) return v == secret end }
     local h = fresh(opts)
     local s = h.s
-    s.units.npc = { guid = MOB, ctId = 7 }
+    s.units.npc = { guid = MOB, ctId = 7, name = "Warden Flintmorrow" }
+    h.G.GetRealZoneText = function() return "Examplefen" end
+    h.G.GetSubZoneText = function() return "Morrowcross" end
     s.units.target = { guid = PLAYER, name = "Exampletarget", player = true }
     s.units.party1 = { name = "Exampleparty" }
     s.units.raid1 = { name = "Exampleraid" }
@@ -418,16 +475,30 @@ do
   h.line("CHAT_MSG_MONSTER_YELL", "Keep close, $N, $N, and $N.", nil, MOB)
   assert(#h.events() == 1 and h.s.lookup == 1 and h.s.roster == 1, "saved normalized checksum before unit reads")
   h.line("CHAT_MSG_MONSTER_YELL", "Look out!", nil, MOB)
-  h.line("CHAT_MSG_MONSTER_WHISPER", "The path is safe, Examplerecipient.", "Examplerecipient", MOB)
+  assert(h.s.roster == 1, "only sentence-initial capitals skip the roster read")
+  h.line("CHAT_MSG_MONSTER_WHISPER", "I'll guide you, Examplerecipient.", "Examplerecipient", MOB)
   h.line("CHAT_MSG_MONSTER_EMOTE", "%s waves to Exampletarget.", nil, MOB)
   h.s.raid = true
-  h.line("CHAT_MSG_RAID_BOSS_EMOTE", "Stand back, Exampleraid!", nil, MOB)
+  h.line("CHAT_MSG_RAID_BOSS_EMOTE", "step back, Exampleraid!", nil, MOB)
   assert(h.events()[2].kind == "yell" and h.events()[3].kind == "whisper"
-    and h.events()[3].text == "The path is safe, $N." and h.events()[4].kind == "emote"
+    and h.events()[3].text == "I'll guide you, $N." and h.events()[4].kind == "emote"
     and h.events()[4].text == "%s waves to $N." and h.events()[5].kind == "boss"
-    and h.events()[5].text == "Stand back, $N!", "five supported kinds")
+    and h.events()[5].text == "step back, $N!", "five supported kinds")
   h.line(say, "Exampleunknown, come here.", nil, MOB)
-  h.line(say, "Look out, Exampleunknown!", nil, MOB)
+  local unknown = "Look out for Zorvath's arrows!"
+  local lookups, roster, locations = h.s.lookup, h.s.roster, h.s.where
+  h.line(say, unknown, nil, MOB)
+  assert(h.s.lookup == lookups + 1 and h.s.roster == roster + 1 and #h.events() == 5, "unknown possessive is dropped")
+  for _ = 1, 100 do h.line(say, unknown, nil, MOB) end
+  assert(h.s.lookup == lookups + 1 and h.s.roster == roster + 1 and h.s.where == locations,
+    "100 repeats of a dropped line perform no unit, roster or location reads")
+  assert(not h.db().textSeen.dropped, "rejected checksums are session-only")
+  for _, event in ipairs({ "CHAT_MSG_MONSTER_WHISPER", "CHAT_MSG_MONSTER_EMOTE", "CHAT_MSG_RAID_BOSS_EMOTE" }) do
+    h.line(event, "Wait has fallen...", nil, MOB)
+    h.line(event, "The path is safe, Tester.", nil, MOB)
+  end
+  h.line(say, "Run!", nil, MOB)
+  h.line(say, "Run! Quickly now.", nil, MOB)
   h.line(say, "Come here, é.", nil, MOB)
   h.line(say, "Run for cover.", nil, nil, MOB) -- a creature in another argument must not be used
   h.line(say, "Look behind you.", nil, PLAYER)
@@ -442,20 +513,50 @@ do
   h.s.units.npc.ctId = 7
   h.line(say, "Look behind you.", nil, MOB2) -- unresolvable creature
   h.s.raid, h.s.units.party1.name = false, secret
-  h.line(say, "Look behind you.", nil, MOB)
+  h.line(say, "Look behind you, Exampleparty.", nil, MOB)
   h.G.IsInGroup = nil
-  h.line(say, "Look behind you.", nil, MOB)
+  h.line(say, "Look behind you, Exampletarget.", nil, MOB)
   assert(#h.events() == 5 and not h.db().lastError, "ambiguous names, controlled/unidentified speakers and secret values")
+  h.G.IsInGroup = function() return false end
+  local yell = "CHAT_MSG_MONSTER_YELL"
+  h.line(yell, "Look for Warden Flintmorrow in Examplefen near Morrowcross.", nil, MOB)
+  h.line(yell, "“Keep close,” he said — and don’t stop…", nil, MOB)
+  h.line(say, "Run, quickly.", nil, MOB)
+  h.line(say, "Look out for zorvath's arrows!", nil, MOB)
+  h.line(say, "Wait has fallen...", nil, MOB)
+  assert(h.events()[6].text == "Look for Warden Flintmorrow in Examplefen near Morrowcross.",
+    "speaker, zone and subzone words are allowed in yells")
+  assert(h.events()[7].text == [["Keep close," he said - and don't stop...]], "normalized punctuation is retained")
+  assert(h.events()[8].text == "Run, quickly.", "an opener can be followed by punctuation then a lowercase word")
+  assert(h.events()[9].text == "Look out for zorvath's arrows!", "known gap: lowercase names can pass")
+  assert(h.events()[10].text == "Wait has fallen...", "a rejection for a strict kind is not shared with say")
   h.db().events = {}
   local r = district({ db = h.db() })
   r.line(say, "Look out!", nil, MOB)
   assert(#r.events() == 0 and r.s.lookup == 0, "plain repeats survive a reload and event pruning")
+  r.line(say, unknown, nil, MOB)
+  assert(#r.events() == 0 and r.s.lookup == 1 and r.s.roster == 1, "rejections are read again after reload")
   r.line(say, "The " .. string.rep("a", 2500), nil, MOB)
   assert(#r.events()[1].text == 2000, "line length cap")
   local full = district({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
   full.line(say, "Look out!", nil, MOB)
   assert(full.s.lookup == 0 and not full.db().textSeen, "half cap skips lines")
-  print("OK   creature lines, safe player-name normalization, all event kinds, cheap repeats and privacy exclusions")
+  local many = {}
+  for i = 1, 2499 do many[i] = { t = 1767225600 } end
+  local count = district({ db = { events = many } })
+  count.line(say, "Look out!", nil, MOB)
+  assert(#count.events() == 2500 and count.events()[2500].type == "line", "text can fill the first half of event slots")
+  count.line(say, "Keep close.", nil, MOB)
+  local reads = 0
+  count.G.C_GossipInfo = { GetText = function() reads = reads + 1; return "Look out." end }
+  count.event("GOSSIP_SHOW")
+  count.s.units.npc = { guid = NODE }
+  count.G.ItemTextGetCreator = function() reads = reads + 1 end
+  count.event("ITEM_TEXT_BEGIN"); count.event("ITEM_TEXT_READY")
+  assert(#count.events() == 2500 and count.s.lookup == 1 and reads == 0, "count gate skips all new text at half cap")
+  count.loot({ item(17076, 1, { MOB, 1 }) })
+  assert(#count.events() == 2501 and count.events()[2501].type == "loot", "the text count gate leaves room for loot")
+  print("OK   creature lines, strict and contextual name rules, punctuation, negative cache and event-count gate")
 end
 
 -- Quest objectives and map markers amend one accept, without storing character progress.
@@ -479,10 +580,9 @@ do
         s.poiReads = s.poiReads + 1
         return s.points
       end,
-      GetNextWaypointForMap = function(id, map)
-        assert(id == 7787 and map == 1429 and s.combat == false, "waypoint is for this quest and map only")
+      GetNextWaypointForMap = function()
         s.waypointReads = s.waypointReads + 1
-        if s.waypoint then return s.waypoint[1], s.waypoint[2] end
+        return 0.75, 0.25
       end,
     }
     return h
@@ -536,15 +636,18 @@ do
   assert(not saved.obj and late.s.objReads == 1, "only a plain success for this quest can retry")
   late.event("QUEST_DATA_LOAD_RESULT", 7787, true)
   assert(saved.obj and not saved.poi and #late.events() == 1 and late.events()[1] == saved, "late objective amends in place")
-  late.s.combat, late.s.waypoint = false, { 0.12119, 0.9 }
+  late.s.combat = false
   late.s.uiMap = 1430
   late.event("PLAYER_REGEN_ENABLED")
   assert(not saved.poi and late.s.poiReads == 0, "no map read after moving zones")
   late.s.uiMap = 1429
   late.event("QUEST_POI_UPDATE")
-  assert(#saved.poi == 1 and saved.poi[1].x == 12.12 and late.s.waypointReads == 1, "waypoint fallback")
+  assert(not saved.poi and late.s.waypointReads == 0, "route waypoint API is never called")
+  late.s.points = { { questID = 7787, x = 0.12119, y = 0.9 } }
+  late.event("QUEST_POI_UPDATE")
+  assert(#saved.poi == 1 and saved.poi[1].x == 12.12 and late.s.waypointReads == 0, "late map row amends the accept")
   late.drain()
-  assert(late.s.objReads == 2 and late.s.poiReads == 1 and #late.events() == 1 and not late.db().lastError, "one write per field")
+  assert(late.s.objReads == 2 and late.s.poiReads == 2 and #late.events() == 1 and not late.db().lastError, "one write per field")
 
   local function missing(setup, update, mayHaveObj)
     local x = errands()
@@ -557,17 +660,22 @@ do
   end
   missing(function(x) x.G.C_QuestLog = nil end)
   missing(function(x) x.G.InCombatLockdown = nil end)
-  missing(function(x) x.s.combat = true; x.s.waypoint = { 0.1, 0.1 } end)
-  missing(function(x) x.s.waypoint = { 0.1, 0.1 }; x.G.C_QuestLog.ReadyForTurnIn = function() return true end end)
+  missing(function(x) x.G.C_QuestLog.GetQuestsOnMap = nil end)
+  missing(function(x) x.s.combat = true; x.s.points = { { questID = 7787, x = 0.1, y = 0.1 } } end)
+  missing(function(x)
+    x.s.points = { { questID = 7787, x = 0.1, y = 0.1 } }
+    x.G.C_QuestLog.ReadyForTurnIn = function() return true end
+  end)
   local function ready(x)
-    x.s.waypoint = { 0.1, 0.1 }; x.s.objectives = { { type = "event", numRequired = 1, text = "Wait for dawn." } }
+    x.s.points = { { questID = 7787, x = 0.1, y = 0.1 } }
+    x.s.objectives = { { type = "event", numRequired = 1, text = "Wait for dawn." } }
     x.event("QUEST_LOG_UPDATE")
   end
   missing(function() end, function(x) x.s.now = x.s.now + 11; ready(x) end)
   missing(function() end, function(x) x.event("QUEST_REMOVED", 7787); ready(x) end)
   missing(function() end, function(x) x.cmd("track drops off"); x.cmd("track drops on"); ready(x) end)
   local full = errands({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
-  full.s.objectives, full.s.waypoint = { row }, { 0.1, 0.1 }
+  full.s.objectives, full.s.points = { row }, { { questID = 7787, x = 0.1, y = 0.1 } }
   full.event("QUEST_ACCEPTED", 7787)
   assert(full.s.objReads == 0 and not full.events()[2].obj and full.events()[2].poi, "half cap gates objective prose only")
   print("OK   objective definitions and places, independent late data, caps, secrets, no progress counts")
@@ -617,7 +725,19 @@ do
   off.ns.ObsNote()
   assert(#off.printed == 2 and off.printed[1]:find("off here") and off.printed[1]:find("/kinv track drops on")
          and not off.db().on, "an install that kept it off is told how to start it: " .. table.concat(off.printed, " | "))
-  print("OK   the first /kinv after updating prints a two-line note, once")
+  h.ns.ObsNote(true)
+  assert(#h.printed == 2 and h.db().notedGameText, "fresh installs skip the upgrade notice")
+  for _, on in ipairs({ true, false }) do
+    local existing = fresh({ db = { v = 1, on = on, agreed = true, noted = true } })
+    existing.ns.ObsNote(true); existing.ns.ObsNote(true); existing.ns.ObsNote()
+    assert(#existing.printed == 1 and existing.last():find("NPC gossip and spoken lines")
+      and existing.last():find("book pages from world objects") and existing.last():find("quest objectives")
+      and existing.last():find("/kinv track drops off") and existing.db().on == on, "one upgrade line at login")
+    local reloaded = fresh({ db = existing.db() })
+    reloaded.ns.ObsNote(true)
+    assert(#reloaded.printed == 0, "upgrade notice survives reload")
+  end
+  print("OK   one-time 1.19.0 login notice for existing installs and the original first /kinv note")
 end
 
 -- 3) /kinv track: status, off stops and unregisters, on starts again at once (no prompt), yes is the same as on
@@ -743,8 +863,8 @@ do
   h.s.units.questnpc = { guid = "Creature-0-4170-0-1234-11811-000012AAAB" }
   h.s.quest = 7787
   h.s.text = { title = "  Rise, Thunderfury!  ", details = "Tester, the blade is whole.\\n\\nTesterly folk and Tester's kin wait.",
-               objectives = "Bring the Bindings to Demitrian.", progress = "Do you have them, Tester?",
-               completion = "It is done, Tester.\\rTake it." }
+               objectives = "Bring the Bindings to Demitrian.", progress = "Do you have them, Testwood?",
+               completion = "It is done, Tester Testwood.\\rTake it." }
   h.event("QUEST_DETAIL"); h.event("QUEST_ACCEPTED", 7787)
   h.event("QUEST_PROGRESS"); h.event("QUEST_COMPLETE"); h.event("QUEST_TURNED_IN", 7787, 6600, 123456)
   local ev = h.events()
@@ -1938,7 +2058,7 @@ end
 
 // The real /kinv: every file the .toc loads, in a fake game where unknown globals are harmless stubs.
 const toc = fs.readFileSync(path.join(addonDir, "KutzInventory.toc"), "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l.endsWith(".lua"));
-const slash = (files) => `
+const slash = (files, existing = false) => `
 local stub
 stub = setmetatable({}, { __index = function() return stub end, __call = function() return nil end })
 local frames, printed = {}, {}
@@ -1964,13 +2084,17 @@ local SAVED = { KutzInventoryDB = true, KutzInventoryObsDB = true, KutzUIDB = tr
 local env = setmetatable({}, { __index = function(_, k) local v = rawget(_G, k); if v == nil and not SAVED[k] then return stub end; return v end,
                                __newindex = function(_, k, v) rawset(_G, k, v) end })
 local ns = {}
+local existing = ${existing}
+if existing then KutzInventoryDB = {} end
 for _, file in ipairs({ ${files.map((f) => `{ ${JSON.stringify(f)}, [=====[${fs.readFileSync(path.join(addonDir, f), "utf8")}]=====] }`).join(",\n")} }) do
   chunk = assert(load(file[2], "@" .. file[1], "t", env))
   chunk("KutzInventory", ns)
 end
-for _, f in ipairs(frames) do
-  local on = f.scripts.OnEvent
-  if on then on(f, "ADDON_LOADED", "KutzInventory"); on(f, "PLAYER_LOGIN") end
+for _, event in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN" }) do
+  for _, f in ipairs(frames) do
+    local on = f.scripts.OnEvent
+    if on then on(f, event, "KutzInventory") end
+  end
 end
 if not ns.ObsCommand then                       -- built without Observations.lua: /kinv and /kinv track still work
   assert(KutzInventoryObsDB == nil, "loading the addon without the module made KutzInventoryObsDB")
@@ -1980,6 +2104,8 @@ if not ns.ObsCommand then                       -- built without Observations.lu
   return
 end
 assert(KutzInventoryObsDB and KutzInventoryObsDB.on and KutzInventoryObsDB.agreed, "loading the addon turns drop tracking on")
+local _, upgradeLines = table.concat(printed):gsub("1%.19%.0 adds NPC gossip and spoken lines", "")
+assert(upgradeLines == (existing and 1 or 0), "login notice also applies to an install with no old observations table")
 SlashCmdList.KUTZINVENTORY("")
 local all = table.concat(printed, "\\n")
 assert(all:find("enabled by default") and all:find("/kinv track|r says whether"), "the note and the help line")
@@ -1994,7 +2120,7 @@ assert(printed[#printed]:find("on"), "status")
 assert(not KutzInventoryDB.lastError and not KutzInventoryObsDB.lastError, tostring(KutzInventoryDB.lastError))
 say("OK   /kinv track goes through the addon's slash command with every .toc file loaded")
 `;
-for (const chunk of [code, slash(toc), slash(toc.filter((f) => f !== "Observations.lua"))]) {
+for (const chunk of [code, slash(toc), slash(toc, true), slash(toc.filter((f) => f !== "Observations.lua"))]) {
     const L = lauxlib.luaL_newstate(); lualib.luaL_openlibs(L);
     if (lauxlib.luaL_dostring(L, to_luastring(chunk)) !== 0) {
         console.error("FAIL " + to_jsstring(lua.lua_tostring(L, -1))); process.exit(1);

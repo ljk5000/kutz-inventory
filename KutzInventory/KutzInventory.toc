@@ -10,5 +10,6 @@
 KutzInventory.lua
 Prices.lua
 Raids.lua
+CommonWords.lua
 Observations.lua
 Crafts.lua

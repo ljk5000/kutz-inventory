@@ -636,7 +636,7 @@ function observationEvent(e) {
     const title = obsLabel(e.title, 200), text = obsProse(e.text, 8000);
     const material = obsLabel(e.material, 40);
     if ((item !== undefined && object !== undefined) || page === undefined || !title?.trim() || !text) return null;
-    if (["creator", "author", "sender", "mail"].some((key) => e[key] != null && e[key] !== "" && e[key] !== false)
+    if (e.creator != null || ["author", "sender", "mail"].some((key) => e[key] != null && e[key] !== "" && e[key] !== false)
         || (typeof e.material === "string" && /mail|letter|stationery/i.test(e.material))) return null;
     return { ...base, ...pick({ item, object }), title, page, ...(e.last === true ? { last: true } : {}),
              ...(material?.trim() ? { material } : {}), text, ...place() };

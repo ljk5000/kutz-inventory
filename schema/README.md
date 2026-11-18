@@ -83,13 +83,13 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
 - `gossip` (3.12.0): game-authored NPC or object gossip and quest greetings ([below](#game-text-3120)).
-- `read` (3.12.0): game-authored pages of books and readable objects ([below](#game-text-3120)).
+- `read` (3.12.0): game-authored pages from world objects ([below](#game-text-3120)).
 - `line` (3.12.0): game-authored creature speech and emotes ([below](#game-text-3120)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
 
-From 3.6.0, quests can include `text`: accept has title/details/objectives; turn-in has title/progress/completion. Limits: title 200, details/completion 8,000, objectives/progress 4,000. Lua truncates by UTF-8 bytes; the exporter/schema also apply string-length limits. The recorder replaces occurrences of the given name with `$N`; it does not promise general anonymization. Text is read once per quest/action while the event is kept and while under half the saved-event size cap. Class/race wording remains. Shared/auto-accepted quests may lack window text.
+From 3.6.0, quests can include `text`: accept has title/details/objectives; turn-in has title/progress/completion. Limits: title 200, details/completion 8,000, objectives/progress 4,000. Lua truncates by UTF-8 bytes; the exporter/schema also apply string-length limits. The recorder replaces the recording character's given name, surname and full name with `$N`. The new event must fit under the half caps. Quest prose is deduplicated by quest and action for the session and across reloads while the earlier event is retained. Class/race wording remains. Shared/auto-accepted quests may lack window text.
 
 From 3.7.0, loot `src.via: "roll"` is a group-loot roll list even when another player opened the corpse. `src.threshold` is the group's quality threshold (0–7); this is a partial view for items at/above that quality. Items already recorded in the character's loot window are not repeated. The corpse can be inferred from the client handle, a matching window or recent boss kill; otherwise kind is `other`. `src.encounter` identifies a boss encounter where known; `items[].won: true` reflects only the recording character's own system win message. Merge known corpse GUIDs carefully; these are observations, not a complete loot census.
 
@@ -123,50 +123,53 @@ Strings are game labels as shown: the addon trims them and cuts them to the limi
 
 ### Game text (3.12.0)
 
-KutzInventory 1.19.0 records these events with the usual `id`, `t`, `b?`, `where` and `who` while drop tracking is enabled. A new text event must fit within the first 1,000,000 bytes of the approximate 2,000,000-byte saved-event cap. The addon's separate saved FIFO dedup indexes keep the 2,000 most recently inserted distinct keys per event type, across sessions and event pruning. Hits leave insertion order unchanged. An evicted key may be recorded again. Indexes never export. Export deduplicates by event ID as usual.
+KutzInventory 1.19.0 records these events with the usual `id`, `t`, `b?`, `where` and `who` while drop tracking is enabled. New text can be saved only when fewer than 2,500 events are already saved and the added event fits within the first 1,000,000 bytes of the approximate 2,000,000-byte cap. The addon's separate saved FIFO dedup indexes keep the 2,000 most recently inserted distinct keys per event type across sessions and event pruning. Hits leave insertion order unchanged. An evicted key may be recorded again. Indexes never export. Export deduplicates by event ID as usual.
 
-**Gossip** comes from `C_GossipInfo.GetText()` at `GOSSIP_SHOW` (legacy `GetGossipText()` when the modern read is unavailable) or `GetGreetingText()` at `QUEST_GREETING`. Dedup uses subject type, subject ID and a checksum of the normalized, capped text, shared between both kinds. A secret or invalid subject or text is skipped. The recorder replaces the recording character's name with `$N`; class and race words are preserved as in quest prose. The source is game text. Gossip options, player chat and mail are excluded.
+**Gossip** comes from `C_GossipInfo.GetText()` at `GOSSIP_SHOW` (legacy `GetGossipText()` when the modern read is unavailable) or `GetGreetingText()` at `QUEST_GREETING`. Dedup uses subject type, subject ID and a checksum of the normalized, capped text, shared between both kinds. A secret or invalid subject or text is skipped. Before capping the text, the recorder drops amounts expressed as a number followed by gold, silver or copper, regardless of case. It replaces the recording character's given name, surname and full name with `$N` and skips text that still contains a roster or player target name or when those checks are unavailable. Class and race words are preserved. Object gossip and greetings also use the say/yell capitalized-word rule below, with the object's name in place of the speaker's and the same ASCII check for filtering. Gossip options, player chat and mail are excluded.
 
 ```text
 { id, t, b?, type: "gossip", where, who,
   npc:     integer 1-2147483647   creature or vehicle ID from UnitGUID("npc"), exactly one of npc or object
   object:  integer 1-2147483647   game object ID from UnitGUID("npc"), exactly one of npc or object
   kind:    "gossip" | "greeting"  the window that supplied the text
-  text:    prose 1-4000           normalized game text, line breaks allowed; no pipe markup, GUID shapes or other control characters
+  text:    prose 1-4000           normalized game text, line breaks allowed
 }
 ```
 
-The recorder trims prose, removes control characters other than line feeds, and caps it in UTF-8 bytes on a character boundary. The exporter and schema enforce string-length limits. The exporter drops events without a valid required field or with both subject IDs valid, and projects only the documented fields. GUIDs are never stored in these events.
+The recorder trims prose, removes control characters other than line feeds, and caps it in UTF-8 bytes on a character boundary. Pipe markup and GUID shapes are excluded. The exporter and schema enforce string-length limits. The exporter drops events without a valid required field or with both subject IDs valid, and projects only the documented fields. Subject GUIDs are never stored in these events.
 
-**Readable pages** are read at `ITEM_TEXT_READY` after an observed `ITEM_TEXT_BEGIN`. A mailbox opened at any point invalidates the reading, including when it closes before the page is ready. The recorder checks the mail event state and visible mail frames, and requires successful `ItemTextGetCreator()` and `ItemTextGetMaterial()` checks at begin and at each page before reading any body. Non-empty or secret creator values, unavailable or secret checks, and materials naming mail, letters or stationery are refused. Title and prose replace the recording character's name with `$N`. The title must match across the open and page events. Dedup uses object ID, item ID or a checksum of the normalized title, with separate namespaces, plus the page number. A page revisited with a different body deduplicates on the same key.
+**Readable pages** come from world game objects in addon 1.19.0. A page is read at `ITEM_TEXT_READY` after `ITEM_TEXT_BEGIN`, with the same game object GUID in `UnitGUID("npc")` and the same title at both events. Bag items and title-only recording are disabled in this version. Mail events, visible mail frames and overlapping bag use invalidate reads. A bag use also blocks new page opens for at least one second. At begin and before each body read, `ItemTextGetCreator()` must succeed and return exactly `nil`. An empty string is refused. `ItemTextGetMaterial()` must also succeed and return a plain value. A nil or empty material is allowed, and other values must be usable labels without “mail”, “letter” or “stationery”. The title and body replace the recording character's given name, surname and full name with `$N`. Dedup uses object ID and page number, even if a revisit shows a different body.
 
 ```text
 { id, t, b?, type: "read", where, who,
-  item?:     integer 1-2147483647   bag item ID from a secure UseContainerItem post-hook within 1 second before the open,
-                                    from a slot flagged readable, with matching item name and no "npc" GUID
-  object?:   integer 1-2147483647   game object ID from UnitGUID("npc") on open
-  title:     label 1-200           ItemTextGetItem(), required even when a source ID is known
+  object?:   integer 1-2147483647   world game object ID, always present on pages recorded in 1.19.0
+  item?:     integer 1-2147483647   bag item ID supported by the format
+  title:     label 1-200           ItemTextGetItem(), required
   page:      integer 1-2147483647   ItemTextGetPage(), first page is 1
   last?:     true                  successful ItemTextHasNextPage() returns plain false or nil
   material?: label 1-40            ItemTextGetMaterial() when nonempty and usable
-  text:      prose 1-8000          ItemTextGetText(), line breaks allowed; no pipe markup, GUID shapes or other control characters
+  text:      prose 1-8000          ItemTextGetText(), line breaks allowed
 }
 ```
 
-At most one source ID is present. When provenance is ambiguous or unavailable, a safely identified game-authored page has the title alone. Labels have no pipe markup, GUID shapes or control characters. Text and labels are capped in UTF-8 bytes by the addon. Consumers render these strings as text. The exporter drops events without usable required fields, with both IDs valid, or with explicit mail or creator metadata. Invalid optional values are omitted.
+The exporter still accepts pages with a single source ID or a title alone. It drops events with invalid required fields, both source IDs valid, a non-nil creator value or explicit mail metadata. Invalid optional fields are omitted. Pipe markup and GUID shapes are excluded from labels and prose. Control characters are excluded, with line feeds allowed in prose. The addon caps labels and text in UTF-8 bytes. Consumers render these strings as text.
 
-**NPC lines** come from `CHAT_MSG_MONSTER_SAY`, `CHAT_MSG_MONSTER_YELL`, `CHAT_MSG_MONSTER_WHISPER`, `CHAT_MSG_MONSTER_EMOTE` and `CHAT_MSG_RAID_BOSS_EMOTE`. The speaker must have a plain `Creature-` GUID in argument 12 and resolve to a current unit the client identifies as neither a player, player-controlled nor a non-combat pet. Missing, secret or doubtful identities are skipped. The recording character's, roster members', current player target's and any provided recipient's names are replaced with `$N` in the prose. If the identity checks fail, if non-ASCII text remains after scrubbing, or if capitalized words remain outside a small list of common sentence openers and the pronoun “I” and its contractions, the line is skipped. The handler refuses incoming bodies over 8,000 bytes. Dedup uses NPC ID and a checksum of the normalized, capped text, shared across all five kinds. Same-session repeats of an already accepted body check a bounded checksum cache before roster or location reads.
+**NPC lines** come from `CHAT_MSG_MONSTER_SAY`, `CHAT_MSG_MONSTER_YELL`, `CHAT_MSG_MONSTER_WHISPER`, `CHAT_MSG_MONSTER_EMOTE` and `CHAT_MSG_RAID_BOSS_EMOTE`. Argument 12 must contain a plain creature GUID that resolves to a current unit the client identifies as neither a player, player-controlled nor a non-combat pet. Bodies over 8,000 bytes are refused. The recorder replaces its own and any supplied recipient's names with `$N`. It checks and scrubs roster and player target names when a capital appears beyond sentence starts. Curly quotes, en and em dashes, and ellipses become ASCII. Remaining non-ASCII text is refused.
+
+Whispers, creature emotes and raid boss emotes refuse any capitalized word left after scrubbing except `I`, `I'd`, `I'll`, `I'm` and `I've`. Say and yell lines also allow words from the speaker's name, zone or subzone, familiar openers and a bundled list of common English words. A common word or opener used at a sentence start needs a following lowercase word, which may follow punctuation.
 
 ```text
 { id, t, b?, type: "line", where, who,
   npc:     integer 1-2147483647                        creature ID from the event's sender GUID
   kind:    "say" | "yell" | "whisper" | "emote" | "boss"  source event, in the order listed above
-  text:    ASCII prose 1-2000                          normalized game text, line breaks allowed; no pipe markup,
+  text:    ASCII prose 1-2000                          normalized text with line feeds and without pipe markup,
                                                        GUID shapes or other control characters
 }
 ```
 
-Speaker GUIDs and recipient metadata are never saved. Player chat and player or pet speakers are excluded. The unknown-name check relies on the game's capitalization of substituted names. Ambiguous lowercased words cannot be identified as names from the body alone. The exporter drops events with invalid required fields. Location uses the usual `where` precision.
+Dedup uses NPC ID and a checksum of the normalized, capped text across all five kinds. A cached accepted repeat can skip unit, roster and location reads. A rejected repeat hashes the raw body, checks a session-only cache and skips those reads while its key is kept. That cache holds up to 2,000 rejections and also keys on kind, speaker GUID and recipient checksum. Speaker GUIDs and recipient metadata are never saved. The exporter drops events with invalid required fields. Location uses the usual `where` precision.
+
+**Consumer guidance.** `line` and `gossip` text can still contain a player name the recorder could not recognize, including an unknown lowercase name or a name that matches an allowed word. Publish a text only when two different recorders independently sent the same text for the same subject. Repeated uploads from one recorder count once.
 
 ### Flight masters and flights (3.11.0)
 
@@ -237,7 +240,7 @@ These optional fields are on the existing `type: "quest", act: "accept"` event o
 obj?: [ 1-12 of {                first valid rows in C_QuestLog.GetQuestObjectives(quest) order
   t:    string 1-40              objective type as supplied, matching [a-z][a-z0-9_-]{0,39}
   n:    integer 0-2147483647     numRequired
-  text: prose 1-400             objective wording, with progress counters stripped and player name replaced with $N
+  text: prose 1-400             objective wording, with progress counters stripped and the recorder's names replaced with $N
 } ]
 poi?: [ 1-8 of {                 first distinct usable quest points in API order, on the accept event's where.uiMap
   map:  integer 1-2147483647     UI map ID
@@ -246,9 +249,9 @@ poi?: [ 1-8 of {                 first distinct usable quest points in API order
 } ]
 ```
 
-`obj` is recorded only if it fits under the half-cap gate. Text retains line breaks and excludes pipe markup, GUID shapes and other control characters. The recorder strips leading or trailing ASCII fraction/percent counters and refuses text with a remaining such counter. It caps prose in UTF-8 bytes. Only the required amount is kept. `numFulfilled` and `finished` are never read. The exporter drops invalid rows, retains the first 12 valid rows, and omits an empty `obj`.
+`obj` is recorded only if it fits under the count and size half caps. Text retains line breaks and excludes pipe markup, GUID shapes and other control characters. The recorder strips leading or trailing ASCII fraction/percent counters and refuses text with a remaining such counter. It caps prose in UTF-8 bytes. Only the required amount is kept. `numFulfilled` and `finished` are never read. The exporter drops invalid rows, retains the first 12 valid rows, and omits an empty `obj`.
 
-`poi` comes from `C_QuestLog.GetQuestsOnMap(uiMapID)` rows for this quest and map, skipping offer markers. When no usable row exists, `C_QuestLog.GetNextWaypointForMap(quest, uiMapID)` can supply one point. Reads require a plain out-of-combat state and the player's map to still be the acceptance map; a quest flagged ready to turn in is skipped when the client supplies that check. There is no UI or map state change. Secret, missing, out-of-range and zero-origin points are omitted. Points are deduplicated after rounding. The exporter also enforces the acceptance map, deduplicates and caps the array, and omits an empty `poi`. These are game quest markers and can represent an objective area or waypoint. They contain no player progress counts. A missing `obj` or `poi` means the recorder had no usable reading.
+`poi` comes only from `C_QuestLog.GetQuestsOnMap(uiMapID)` rows for this quest and map, skipping offer markers. Reads require a plain out-of-combat state and the player's map to still be the acceptance map; a quest flagged ready to turn in is skipped when the client supplies that check. There is no UI or map state change. Secret, missing, out-of-range and zero-origin points are omitted. Points are deduplicated after rounding. The exporter also enforces the acceptance map, deduplicates and caps the array, and omits an empty `poi`. These are game quest markers and can represent an objective area. They contain no player progress counts. A missing `obj` or `poi` means the recorder had no usable reading.
 
 ### NPC summary (3.10.0)
 
@@ -315,7 +318,7 @@ npcs: [ 1-3000 of {                 sorted by npc; the most recently seen kept; 
 
 Labels follow the trainer label rules above (no `|` markup, control characters or GUID-shaped text, at most the limit in characters). **Privacy:** the summary holds no time finer than a day (one `day` per NPC, the last), no player names (`name` and `sub` are the NPC's own, with the guards above), no GUIDs and no ordered trail: cells are unordered counts sorted by place, and nothing older than 180 days is kept. It still says which NPCs this install's characters looked at, the last day for each, and roughly where the player stood beside them. The addon drops an NPC not seen for 180 days when the game loads, and keeps at most 3,000 NPCs (the least recently seen go first: oldest `day`, then fewest counts) and about 500 KB of saved data for them (its own cap, apart from the events' 2 MB, so the summary and the events never push each other out; 3,000 realistic entries with names measured about 440 KB), and at most 40 squares per NPC. Measured with realistic data (every NPC named, most with 0-3 squares, about one in eight with a subtitle), compact JSON is about 140 bytes per NPC (before `svc`, which adds roughly 15 bytes of saved data per service flag, about 10 in compact JSON): 500 NPCs 70 KB (13 KB gzipped), 3,000 NPCs 432 KB (77 KB gzipped); the exporter's indented file is about 1.8 times that (500 NPCs 127 KB, 3,000 NPCs 791 KB; 15 KB and 93 KB gzipped).
 
-No observation field is intended for coin loot, quest/player money, general chat, guild or other players' names/GUIDs. Ordinary inventory, monitor errors and raids have different data and must be reviewed separately. Recording defaults on in new installs since addon 1.13.0; existing off choices persist. `/kinv track drops off` also stops the NPC summary; old retained events and the summary still export after it.
+No observation field is intended for coin loot, quest/player money, player chat, guild data or other players' names/GUIDs. Ordinary inventory, monitor errors and raids have different data and must be reviewed separately. Recording defaults on in new installs since addon 1.13.0; existing off choices persist. `/kinv track drops off` also stops the NPC summary; old retained events and the summary still export after it.
 
 ## Auction scans
 

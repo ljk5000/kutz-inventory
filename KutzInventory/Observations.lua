@@ -7,7 +7,7 @@
 -- only call ns.ObsCommand / ns.ObsNote when they exist). Leave this file and its .toc lines out and the addon is the same.
 --
 -- KutzInventoryObsDB = { v = 1, on = true|false, agreed = true|nil, noted = true|nil,
---                        addon = "1.8.0", prefix = "k1f9c2", n = 17, events = { oldest first }, npcs = { [npcId] = ... } }
+--                        notedGameText = true|nil, addon = "1.8.0", prefix = "k1f9c2", n = 17, events = { oldest first }, npcs = { [npcId] = ... } }
 --   prefix: random, made once per install; the event ids start with it and the export names the npcs summary's install by it.
 --   on: a new table starts true (KutzInventory 1.13.0); an existing one keeps what it holds, only a missing on becomes
 --   true. Recording needs on and agreed.
@@ -54,15 +54,15 @@
 --           PLAYER_CONTROL_GAINED with UnitOnTaxi false; only when the landing position is by "to" (no other node closer),
 --           or, when the position cannot be read, the next taxi window within 2 minutes is at "to". Never a position
 --           trail. One per from/to in 30 days (saved events).
---   gossip NPC or object greeting and dialogue body only, while under half the event size cap.
---   read   one page of game-authored book or object text, only when mail and creator checks pass.
---   line   game speech or emotes from an identified, uncontrolled creature; player names scrubbed.
+--   gossip NPC or object greeting and dialogue body only, while below the half caps.
+--   read   one page from a world object, only when mail and creator checks pass.
+--   line   game speech or emotes from an identified, uncontrolled creature; known player names scrubbed.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
 -- Never recorded: coin loot, quest money (GetRewardMoney, QUEST_TURNED_IN's money), the player's money, a reputation
--- standing, other players' names or GUIDs, chat, guild. (Loot chat is read only for this player's own "You won" line,
--- kept as the won flag; who else rolled or won is never kept.)
+-- standing, player chat, or other players' GUIDs or guild data. The dialogue filters can miss a player name.
+-- (Loot chat is read only for this player's own "You won" line, kept as the won flag.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
 --
 -- npcs (KutzInventory 1.17.0): not events but one summary per install of the creatures this player looked at
@@ -667,17 +667,23 @@ local function Prose(s, max, names, fold)
     if s == "" then return nil end
     if names then
         for _, name in ipairs(names) do s = ReplaceName(s, name, fold) end
-    else
-        local given = Me()
-        if given then s = ReplaceName(s, given) end
     end
-    s = Cut(s, max)
+    if max then s = Cut(s, max) end
     return s ~= "" and s or nil
 end
 
 -- New game prose fields share a half-cap gate and separate, saved FIFO indexes. Each ring holds only
 -- bounded keys, with a session set for constant-time lookups; dropping an event does not forget its key.
-local gameText = { CAP = 2000, indexes = {}, mail = false }
+local gameText = { CAP = 2000, indexes = {}, mail = false, openers = {} }
+-- Before enabling bag pages, confirm in-game that ItemTextGetCreator() prints a creator for a saved
+-- player letter, an NPC-sent letter and an auction letter, and prints nil for a game book.
+local READ_BAG_ITEMS = false
+
+for word in ("A An And Away Back Be But Can Come Do Don't Everyone For Get Go Good Halt Hear Hello Here How If In It "
+    .. "Keep Leave Let Look Move My Never No Now Oh On Our Run See Stand Stay Stop Take That The There These They This "
+    .. "Those To Wait Watch We Welcome Well What When Where Who Why With Yes You Your"):gmatch("%S+") do
+    gameText.openers[word] = true
+end
 
 function gameText.Id(v)
     local id = Int(v, 1)
@@ -685,7 +691,7 @@ function gameText.Id(v)
 end
 
 function gameText.Room(added)
-    return bytes + (added or 0) <= MAX_BYTES / 2
+    return #DB().events < MAX_EVENTS / 2 and bytes + (added or 0) <= MAX_BYTES / 2
 end
 
 function gameText.PlainText(s)
@@ -693,8 +699,13 @@ function gameText.PlainText(s)
     if type(s) == "string" and not s:find("|", 1, true) and not s:find("%a+%-%d+%-%d+") then return s end
 end
 
-function gameText.Prose(s, max, names)
-    return gameText.PlainText(Prose(gameText.PlainText(s), max, names))
+function gameText.Prose(s, max, names, fold)
+    return gameText.PlainText(Prose(gameText.PlainText(s), max, names, fold))
+end
+
+function gameText.Punctuation(text)
+    return (text:gsub("…", "..."):gsub("’", "'"):gsub("‘", "'"):gsub("“", '"'):gsub("”", '"')
+        :gsub("–", "-"):gsub("—", "-"))
 end
 
 function gameText.OwnNames()
@@ -729,6 +740,14 @@ function gameText.Index(kind)
     return index
 end
 
+function gameText.Remember(index, key)
+    local ring, seen = index.ring, index.seen
+    local i = ring.next
+    local old = ring.keys[i]
+    if old then seen[old] = nil end
+    ring.keys[i], seen[key], ring.next = key, i, i % gameText.CAP + 1
+end
+
 -- Includes the new event in the half-cap check. A refused event does not consume an ID or a dedup key.
 function gameText.Record(kind, key, fields)
     local index = gameText.Index(kind)
@@ -737,11 +756,7 @@ function gameText.Record(kind, key, fields)
     for k, v in pairs(fields) do e[k] = v end
     if not gameText.Room(Size(e)) then d.n = d.n - 1; return end
     Add(e)
-    local ring, seen = index.ring, index.seen
-    local i = ring.next
-    local old = ring.keys[i]
-    if old then seen[old] = nil end
-    ring.keys[i], seen[key], ring.next = key, i, i % gameText.CAP + 1
+    gameText.Remember(index, key)
     return true
 end
 
@@ -768,18 +783,30 @@ function gameText.Gossip(kind)
     else
         s = Try(GetGreetingText)
     end
-    local text = gameText.Prose(s, TEXT_MAX.gossip, names)
+    local text = gameText.Prose(s)
     if not text then return end
+    local lower = gameText.Punctuation(text):lower():gsub(" ", " "):gsub(" ", " ")
+    for _, coin in ipairs({ "gold", "silver", "copper" }) do
+        if lower:find("%d%s*%f[%a]" .. coin .. "%f[%A]") then return end
+    end
+    for _, name in ipairs(names) do text = ReplaceName(text, name, true) end
+    local players = {}
+    if not gameText.AddRoster(players) then return end
+    for _, name in ipairs(players) do
+        if ReplaceName(text, name, true) ~= text then return end
+    end
+    if what == "object" and gameText.HasUnknownName(gameText.Punctuation(text), "npc") then return end
+    text = Cut(text, TEXT_MAX.gossip)
     local key = what .. ":" .. id .. ":" .. gameText.Checksum(text)
     gameText.Record("gossip", key, { [what] = id, text = text, kind = kind })
 end
 
 -- Read the creator before any title or page body. Try() alone cannot distinguish a nil creator (game
--- text) from a failed call. A creator or a mail-like material also blocks a saved letter used from a bag.
+-- text) from a failed call. An empty creator is ambiguous, as is a material used for mail.
 function gameText.BookMaterial()
     if type(ItemTextGetCreator) ~= "function" or type(ItemTextGetMaterial) ~= "function" then return nil, false end
     local ok, creator = pcall(ItemTextGetCreator)
-    if not ok or Secret(creator) or (creator ~= nil and creator ~= "") then return nil, false end
+    if not ok or Secret(creator) or creator ~= nil then return nil, false end
     local got, raw = pcall(ItemTextGetMaterial)
     if not got or Secret(raw) then return nil, false end
     if raw == nil or raw == "" then return nil, true end
@@ -794,28 +821,36 @@ end
 
 function gameText.BookBegin()
     local used = gameText.bookUse
-    gameText.bookUse, gameText.book = nil, nil
+    gameText.book = nil
     if not gameText.Room() or gameText.InMail() then return end
+    local clock = used and Num(Try(GetTime))
+    if not READ_BAG_ITEMS and used and (not clock or not used.at or clock - used.at <= 1) then return end
+    gameText.bookUse = nil
+    local ok, guid = pcall(UnitGUID, "npc")
+    if not ok or Secret(guid) or (guid ~= nil and type(guid) ~= "string") then return end
+    local what, id = FromGuid(guid)
+    local object = what == "object" and gameText.Id(id) or nil
+    if not READ_BAG_ITEMS and not object then return end
+    local recentUse = used and clock and used.at and clock >= used.at and clock - used.at <= 1
     local _, safe = gameText.BookMaterial()
     if not safe then return end
     local title = gameText.PlainText(Try(ItemTextGetItem))
-    local guid = Try(UnitGUID, "npc")
-    if not Label(title, 200) or Secret(guid) then return end
-    local what, id = FromGuid(Plain(guid))
-    local object = what == "object" and gameText.Id(id) or nil
+    if not Label(title, 200) then return end
     local item
-    local clock = Num(Try(GetTime))
-    if used and clock and clock >= used.at and clock - used.at <= 1 and used.title == title then
+    if READ_BAG_ITEMS and recentUse and used.title == title then
         if object then object = nil            -- both sources are plausible: keep the title only
         elseif guid == nil then item = used.id end
     end
-    gameText.book = { rawTitle = title, item = item, object = object }
+    gameText.book = { rawTitle = title, item = item, object = object, guid = object and guid or nil }
 end
 
 function gameText.BookPage()
     local book = gameText.book
     if not book or not gameText.Room() then return end
-    if gameText.InMail() then gameText.book = nil; return end
+    if gameText.InMail() or (book.guid and Plain(Try(UnitGUID, "npc")) ~= book.guid) then
+        gameText.book = nil
+        return
+    end
     local material, safe = gameText.BookMaterial()
     local rawTitle = safe and gameText.PlainText(Try(ItemTextGetItem))
     if rawTitle ~= book.rawTitle then gameText.book = nil; return end
@@ -836,12 +871,17 @@ function gameText.BookPage()
                                    last = last and true or nil, material = material, text = text })
 end
 
--- Keep a candidate only from a secure post-hook, using the item ID and a cached item name. A
--- synchronous BEGIN before this post-hook, a stale use or a different title can still record by title.
+-- The secure bag post-hook can run before or after BEGIN. With bag recording off, reject an
+-- overlapping read even if the client still has a world object in the "npc" unit.
 function gameText.BookUse(id, info)
     gameText.bookUse = nil
     local d = DB()
-    if not (d and d.on and d.agreed and id and not gameText.book and gameText.Room()) or gameText.InMail() then return end
+    if not (d and d.on and d.agreed) then return end
+    if not READ_BAG_ITEMS then
+        gameText.book, gameText.bookUse = nil, { at = Num(Try(GetTime)) }
+        return
+    end
+    if not id or gameText.book or not gameText.Room() or gameText.InMail() then return end
     if Plain(info.isReadable) ~= true then return end
     local title = gameText.PlainText(info.itemName)
     local clock = Num(Try(GetTime))
@@ -854,19 +894,22 @@ local function QuestId(...)                     -- QUEST_ACCEPTED is (index, que
 end
 
 local function QuestText(fields)                -- { title = GetTitleText, ... } -> { title = "...", ... } or nil
+    if not gameText.Room() then return end
+    local names = gameText.OwnNames()
+    if not names then return end
     local out, any = {}, false
     for key, fn in pairs(fields) do
-        local s = Prose(Try(fn), TEXT_MAX[key])
+        local s = Prose(Try(fn), TEXT_MAX[key], names)
         if s then out[key], any = s, true end
     end
     return any and out or nil
 end
 
 -- A quest's text is kept once per quest and act ("7787|accept") among the saved events, and only while the events are
--- under half the size cap, so prose never pushes drops out.
+-- below the half caps, so prose leaves room for drops.
 local texted
-local function WantsText(quest, act)
-    if bytes > MAX_BYTES / 2 then return false end
+local function WantsText(e, text)
+    if not gameText.Room(Size(e) + Size({ text = text }) - 2) then return false end
     if not texted then
         texted = {}
         for _, e in ipairs(DB().events) do
@@ -875,7 +918,7 @@ local function WantsText(quest, act)
             end
         end
     end
-    local key = quest .. "|" .. act
+    local key = e.quest .. "|" .. e.act
     if texted[key] then return false end
     texted[key] = true
     return true
@@ -902,7 +945,7 @@ local function TurnedIn(questId)
         for _, it in ipairs(p.choices) do choices[#choices + 1] = it.id end
         e.rewards = { items = p.items, choices = choices, chose = p.chose }
         e.xp = p.xp
-        if p.text and WantsText(questId, "turnin") then e.text = p.text end
+        if p.text and WantsText(e, p.text) then e.text = p.text end
     end
     turnin, progress = nil, nil
     Add(e)
@@ -1680,15 +1723,9 @@ end
 local line = { kinds = { CHAT_MSG_MONSTER_SAY = "say", CHAT_MSG_MONSTER_YELL = "yell",
                          CHAT_MSG_MONSTER_WHISPER = "whisper", CHAT_MSG_MONSTER_EMOTE = "emote",
                          CHAT_MSG_RAID_BOSS_EMOTE = "boss" },
-               raw = {}, count = 0, openers = {} }
+               raw = {}, count = 0, dropped = { ring = { next = 1, keys = {} }, seen = {} } }
 
-for word in ("A An And Away Back Be But Can Come Do Don't Everyone For Get Go Good Halt Hear Hello Here How If In It "
-    .. "Keep Leave Let Look Move My Never No Now Oh On Our Run See Stand Stay Stop Take That The There These They This "
-    .. "Those To Wait Watch We Welcome Well What When Where Who Why With Yes You Your"):gmatch("%S+") do
-    line.openers[word] = true
-end
-
-function line.AddName(names, value)
+function gameText.AddName(names, value)
     local name = gameText.PlainText(value)
     if not name or #name < 2 or #name > 96 or name ~= Label(name, 96) then return false end
     names[#names + 1] = name
@@ -1696,81 +1733,107 @@ function line.AddName(names, value)
 end
 
 -- Include the name with its realm/surname before the bare given name, so no tail is left after replacement.
-function line.AddUnit(names, unit)
+function gameText.AddUnit(names, unit)
     local given, realm = Try(UnitName, unit)
-    if Secret(realm) or not line.AddName(names, given) then return false end
+    if Secret(realm) or not gameText.AddName(names, given) then return false end
     if realm ~= nil and realm ~= "" then
-        if type(realm) ~= "string" or not line.AddName(names, given .. "-" .. realm:gsub("%s+", "")) then return false end
+        if type(realm) ~= "string" or not gameText.AddName(names, given .. "-" .. realm:gsub("%s+", "")) then return false end
     end
     if type(GetUnitName) == "function" then
         local full = Plain(Try(GetUnitName, unit, true))
-        if not line.AddName(names, full) then return false end
+        if not gameText.AddName(names, full) then return false end
         local suffix = full:sub(1, #given + 1) == given .. " " and full:sub(#given + 2)
-        if suffix and not suffix:find("^%-") and not line.AddName(names, suffix) then return false end
+        if suffix and not suffix:find("^%-") and not gameText.AddName(names, suffix) then return false end
     end
     return true
 end
 
-function line.Names(recipient)
-    if Secret(recipient) then return nil end
-    local names = {}
-    if recipient ~= nil and recipient ~= "" then
-        if not line.AddName(names, recipient) then return nil end
-        local base = recipient:match("^([^%-]+)%-")
-        if base and not line.AddName(names, base) then return nil end
-    end
-    if not line.AddUnit(names, "player") then return nil end
+function gameText.AddRoster(names)
     local ok, target = pcall(UnitGUID, "target")
-    if not ok or Secret(target) or (target ~= nil and type(target) ~= "string") then return nil end
+    if not ok or Secret(target) or (target ~= nil and type(target) ~= "string") then return false end
     if target then
         local player = Plain(Try(UnitIsPlayer, "target"))
-        if player ~= true and player ~= false then return nil end
-        if (player or target:find("^Player%-")) and not line.AddUnit(names, "target") then return nil end
+        if player ~= true and player ~= false then return false end
+        if (player or target:find("^Player%-")) and not gameText.AddUnit(names, "target") then return false end
     end
     local raid, grouped = Plain(Try(IsInRaid)), Plain(Try(IsInGroup))
-    if type(raid) ~= "boolean" or type(grouped) ~= "boolean" or (raid and not grouped) then return nil end
+    if type(raid) ~= "boolean" or type(grouped) ~= "boolean" or (raid and not grouped) then return false end
     if grouped then
         local count = Int(Try(GetNumGroupMembers), 1)
-        if not count or count > (raid and 40 or 5) then return nil end
+        if not count or count > (raid and 40 or 5) then return false end
         for i = 1, (raid and count or count - 1) do
-            if not line.AddUnit(names, (raid and "raid" or "party") .. i) then return nil end
+            if not gameText.AddUnit(names, (raid and "raid" or "party") .. i) then return false end
         end
     end
-    table.sort(names, function(a, b) return #a > #b end)
-    return names
+    return true
 end
 
--- Game substitutions use character-name capitalization. Once known substitutions are scrubbed,
--- refuse unresolved capitalized words except ordinary sentence openers and the pronoun I.
--- The secondary check is limited to ASCII; names/words in other scripts may not follow these rules.
-function line.HasUnknownName(text)
+local NAME_WORD = "()(%a[%a']*)"
+local I_WORD = { I = true, ["I'd"] = true, ["I'll"] = true, ["I'm"] = true, ["I've"] = true }
+
+function gameText.SentenceStart(text, at)
+    local before = text:sub(1, at - 1)
+    return before:match("^[%s\"'(%[]*$") or before:match("[.!?\n][%s\"'()%[%]]*$")
+end
+
+function gameText.HasMidSentenceCapital(text)
+    text = text:gsub("%$N%f[%A]", "@")
+    for at, word in text:gmatch(NAME_WORD) do
+        if word:find("%u") and not gameText.SentenceStart(text, at) then return true end
+    end
+    return false
+end
+
+function gameText.ContextWords(speaker)
+    local zone = Label(Try(GetRealZoneText), 200) or Label(Try(GetZoneText), 200)
+    local subzone = Label(Try(GetSubZoneText), 200)
+    local name = Label(Try(UnitName, speaker), 200)
+    local words = {}
+    for _, label in ipairs({ zone or "", subzone or "", name or "" }) do
+        for _, word in gameText.Punctuation(label):gmatch(NAME_WORD) do
+            words[word:lower():gsub("'+$", "")] = true
+        end
+    end
+    return words
+end
+
+-- No opener exceptions in substitution-heavy speech: a name can be an ordinary English verb.
+-- Say, yell and object gossip can use game labels and common words, with corroboration on publish.
+function gameText.HasUnknownName(text, speaker, strict)
     if text:find("[\128-\255]") then return true end
-    text = text:gsub("%$N", "@")
-    for at, word in text:gmatch("()([%a']+)") do
-        if word ~= "I" and not word:match("^I'[a-z]+$") and word:find("%u") then
-            if not line.openers[word] then return true end
-            local before = text:sub(1, at - 1)
-            if not before:match("^%s*$") and not before:match("[.!?]%s*$") then return true end
+    local context
+    text = text:gsub("%$N%f[%A]", "@")
+    for at, token in text:gmatch(NAME_WORD) do
+        local word = token:gsub("'+$", "")
+        if word:find("%u") and not I_WORD[word] then
+            if strict then return true end
+            local initial = gameText.SentenceStart(text, at)
+            local common = gameText.openers[word]
+                or (ns.CommonWords and word:match("^%u[%l']*$") and ns.CommonWords[word:lower()])
+            local nextWord = initial and text:match("^[%s,;:'\"()%-]+(%a[%a']*)", at + #word)
+            if not (common and (not initial or (nextWord and not nextWord:find("%u")))) then
+                context = context or gameText.ContextWords(speaker)
+                if not context[word:lower()] then return true end
+            end
         end
     end
     return false
 end
 
-function line.Record(kind, text, recipient, guid)
-    if not gameText.Room() then return end
-    guid, text = Plain(guid), Plain(text)
-    if type(guid) ~= "string" or guid:sub(1, 9) ~= "Creature-" or type(text) ~= "string" or #text > 8000 then return end
-    local _, id = FromGuid(guid)
-    local npc = gameText.Id(id)
-    if not npc then return end
+function line.Names(recipient, roster)
+    local names = {}
+    if recipient and recipient ~= "" then
+        local base = recipient:match("^([^%-]+)%-")
+        if not gameText.AddName(names, recipient) or (base and not gameText.AddName(names, base)) then return nil end
+    end
+    if not gameText.AddUnit(names, "player") or (roster and not gameText.AddRoster(names)) then return nil end
+    table.sort(names, function(a, b) return #a > #b end)
+    return names
+end
 
-    local raw = npc .. ":" .. gameText.Checksum(text)
-    local index = gameText.Index("line")
-    local normalized = line.raw[raw]
-    if index.seen[raw] or (normalized and index.seen[normalized]) then return end
-
-    -- Even a Creature GUID can be a charmed creature or a summoned guardian. Require a current unit
-    -- that the client says is uncontrolled. Sender and recipient names are never saved as metadata.
+function line.Text(kind, text, recipient, guid)
+    -- A creature GUID can be a charmed creature or a summoned guardian. Require a current
+    -- uncontrolled unit. Sender and recipient names are never saved as metadata.
     local speaker = Plain(Try(UnitTokenFromGUID, guid))
     if type(speaker) ~= "string" or Plain(Try(UnitGUID, speaker)) ~= guid
         or Plain(Try(UnitIsPlayer, speaker)) ~= false or Plain(Try(UnitPlayerControlled, speaker)) ~= false then return end
@@ -1779,11 +1842,33 @@ function line.Record(kind, text, recipient, guid)
     if not ct or ct == CT_COMPANION then return end
     text = gameText.PlainText(text)
     if not text then return end
-    local names = line.Names(recipient)
-    text = names and gameText.PlainText(Prose(text, 8000, names, true))
-    if not text or line.HasUnknownName(text) then return end
+    local names = line.Names(recipient, gameText.HasMidSentenceCapital(gameText.Punctuation(text)))
+    text = names and gameText.Prose(text, 8000, names, true)
+    if not text then return end
+    text = gameText.PlainText(gameText.Punctuation(text))
+    if not text or gameText.HasUnknownName(text, speaker, kind ~= "say" and kind ~= "yell") then return end
+    return Cut(text, TEXT_MAX.line)
+end
 
-    text = Cut(text, TEXT_MAX.line)
+function line.Record(kind, text, recipient, guid)
+    if not gameText.Room() then return end
+    guid, text = Plain(guid), Plain(text)
+    if type(guid) ~= "string" or #guid > 128 or guid:sub(1, 9) ~= "Creature-" or type(text) ~= "string" or #text > 8000
+        or Secret(recipient) or (recipient ~= nil and (type(recipient) ~= "string" or #recipient > 96)) then return end
+    local _, id = FromGuid(guid)
+    local npc = gameText.Id(id)
+    if not npc then return end
+
+    local checksum = gameText.Checksum(text)
+    local rejected = kind .. ":" .. guid .. ":" .. checksum .. ":" .. (recipient and gameText.Checksum(recipient) or "")
+    if line.dropped.seen[rejected] then return end
+    local raw = npc .. ":" .. checksum
+    local index = gameText.Index("line")
+    local normalized = line.raw[raw]
+    if index.seen[raw] or (normalized and index.seen[normalized]) then return end
+
+    text = line.Text(kind, text, recipient, guid)
+    if not text then gameText.Remember(line.dropped, rejected); return end
     local key = npc .. ":" .. gameText.Checksum(text)
     if gameText.Record("line", key, { npc = npc, kind = kind, text = text }) and raw ~= key then
         if line.count >= gameText.CAP then line.raw, line.count = {}, 0 end
@@ -1896,7 +1981,6 @@ function qx.Poi(L, map, quest)
             if #rows >= qx.POIS then break end
         end
     end
-    if #rows == 0 then add(Try(L.GetNextWaypointForMap, quest, map)) end
     return #rows > 0 and rows or nil
 end
 
@@ -1905,7 +1989,7 @@ end
 function qx.AcceptData(e)
     local L, map = C_QuestLog, gameText.Id(e.where.uiMap)
     if type(L) ~= "table" then return false end
-    local wantPoi = map and not e.poi and (type(L.GetQuestsOnMap) == "function" or type(L.GetNextWaypointForMap) == "function")
+    local wantPoi = map and not e.poi and type(L.GetQuestsOnMap) == "function"
     local wantObj = not e.obj and type(L.GetQuestObjectives) == "function" and gameText.Room()
     if not wantObj and not wantPoi then return false end
     local fields = {}
@@ -2120,11 +2204,11 @@ function handlers.QUEST_ACCEPTED(...)
     local p = detail
     if p and p.what and (p.quest == quest or (not p.quest and time() - p.at <= 60)) then e[p.what] = p.id end
     if p and p.quest == quest then                                           -- only a sure match
-        if p.text and WantsText(quest, "accept") then e.text = p.text end
         e.startItem = p.startItem
     end
     detail = nil
     local ok, found = pcall(qx.Facts, quest, e)
+    if p and p.quest == quest and p.text and WantsText(e, p.text) then e.text = p.text end
     Add(e)
     if ok and not found then                    -- not in the log yet: once more a second later, added to the saved event
         qx.Later(function() local f = {}; if qx.Facts(quest, f) and next(f) then qx.Amend(e, f) end end)
@@ -2147,7 +2231,8 @@ function handlers.QUEST_REMOVED(quest)
     if quest then qx.waiting[quest] = nil end
 end
 function handlers.QUEST_PROGRESS()
-    progress = { quest = Int(Try(GetQuestID), 1), text = Prose(Try(GetProgressText), TEXT_MAX.progress) }
+    local text = QuestText({ progress = GetProgressText })
+    progress = { quest = Int(Try(GetQuestID), 1), text = text and text.progress }
 end
 function handlers.QUEST_COMPLETE()
     QuestGiverSeen()
@@ -2256,6 +2341,7 @@ local function Disable()
     for _, e in ipairs(RECORDING) do pcall(ev.UnregisterEvent, ev, e) end
     for e in pairs(line.kinds) do pcall(ev.UnregisterEvent, ev, e) end
     line.raw, line.count = {}, 0
+    line.dropped = { ring = { next = 1, keys = {} }, seen = {} }
     lootDone, detail, turnin, progress, merchantOpen = false, nil, nil, nil, false
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
@@ -2273,6 +2359,7 @@ end
 
 function handlers.ADDON_LOADED(name)
     if name ~= ADDON then return end
+    gameText.upgrade = type(KutzInventoryObsDB) == "table"
     local d = DB(true)                          -- start recording on load, without requiring a command
     if not d then return end
     d.addon = AddonVersion() or d.addon
@@ -2337,16 +2424,23 @@ function ns.ObsCommand(msg)
     return true
 end
 
--- the first /kinv after updating: two lines about drop tracking, once (an install that kept it off is told how to start it)
-function ns.ObsNote()
+-- Existing installs get the 1.19.0 notice at login. The first /kinv still explains the tracking preference.
+function ns.ObsNote(atLogin, hadInventory)
     local d = DB(true)
+    if atLogin then
+        if (hadInventory or gameText.upgrade) and not d.notedGameText then
+            Say("1.19.0 adds NPC gossip and spoken lines, book pages from world objects, and quest objectives when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
+        end
+        d.notedGameText = true
+        return
+    end
     if d.noted then return end
     d.noted = true
     if d.on and d.agreed then
         Say("drop, quest, vendor, trainer, NPC and game text tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
-        print("  It never records gold or anything about other players. |cffaaaaaa/kinv track drops off|r stops recording.")
+        print("  It never records gold or player chat. |cffaaaaaa/kinv track drops off|r stops recording.")
     else
         Say("drop, quest, vendor, trainer, NPC and game text tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
-        print("  It never records gold or anything about other players. |cffaaaaaa/kinv track|r shows the status.")
+        print("  It never records gold or player chat. |cffaaaaaa/kinv track|r shows the status.")
     end
 end

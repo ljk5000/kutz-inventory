@@ -1856,7 +1856,7 @@
               "type": "array",
               "minItems": 1,
               "maxItems": 8,
-              "description": "Distinct game quest markers for the acceptance UI map. x and y are map percent.",
+              "description": "Distinct GetQuestsOnMap markers for the acceptance UI map. The exporter rounds x and y to two decimal places of map percent.",
               "items": {
                 "type": "object",
                 "required": [
@@ -1874,14 +1874,12 @@
                   "x": {
                     "type": "number",
                     "minimum": 0,
-                    "maximum": 100,
-                    "multipleOf": 0.01
+                    "maximum": 100
                   },
                   "y": {
                     "type": "number",
                     "minimum": 0,
-                    "maximum": 100,
-                    "multipleOf": 0.01
+                    "maximum": 100
                   }
                 },
                 "not": {
@@ -2497,11 +2495,13 @@
             },
             "item": {
               "type": "integer",
+              "description": "Optional bag item ID supported by the format. Addon 1.19.0 does not record bag items.",
               "minimum": 1,
               "maximum": 2147483647
             },
             "object": {
               "type": "integer",
+              "description": "World game object ID. Addon 1.19.0 requires this source to record a page.",
               "minimum": 1,
               "maximum": 2147483647
             },
@@ -2603,6 +2603,7 @@
               "type": "string",
               "$ref": "#/$defs/recordedProse",
               "maxLength": 2000,
+              "description": "ASCII game dialogue. The addon normalizes curly quotes, en and em dashes, and ellipses before checking the text.",
               "pattern": "^[\\u0000-\\u007f]+$"
             }
           }

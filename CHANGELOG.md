@@ -2,13 +2,15 @@
 
 ## KutzInventory 1.19.0
 
-- Record game-authored gossip and quest greetings for creatures and objects while drop tracking is on and there is room for text. The player's name becomes $N. Gossip options, player chat and mail are excluded.
+- Record gossip and quest greetings for creatures and objects while drop tracking is on. The recorder replaces the character's names with `$N` and drops currency amounts and text with roster or player target names. Object text also passes a capitalized-word check.
 
-- Record pages of game-authored books and readable objects using the title, page number and a source ID when known. The recorder checks for mail and player-written letters before reading a page.
+- Record book pages from identified world objects. The recorder requires a nil creator and checks for mail before reading the page body. Bag items and title-only reads are disabled.
 
-- Record game-authored NPC speech and emotes when the client supplies a creature GUID and the speaker and player names can be checked. Known player names become $N. Ambiguous lines are skipped.
+- Record NPC speech and emotes from identifiable, uncontrolled creatures. Known names become `$N`, and curly quotes, dashes and ellipses become ASCII. Say and yell can use local game labels and a common word list. Whispers and emotes apply a stricter capitalized-word check.
 
-- Include quest objective type, required amount and text on acceptance, along with any quest map markers the client supplies safely for that zone. Player progress counts are excluded.
+- Include quest objective type, required amount and text on acceptance, and quest markers from `GetQuestsOnMap` for that zone. Quest prose and objectives scrub the recorder's given name, surname and full name. Player progress counts are excluded.
+
+- Stop adding text at half the event-count or approximate size cap. Existing installs get one login line about the new recording and `/kinv track drops off`.
 
 Inventory export 3.12.0 (default) adds `gossip`, `read` and `line` observations and optional `obj` and `poi` on quest accepts. The observations section stays `v: 1`.
 

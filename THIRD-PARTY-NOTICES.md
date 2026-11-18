@@ -4,8 +4,11 @@ What in this repository, or in a release download, was not written for this proj
 
 ## In the downloads
 
-- The **KutzInventory** addon contains only this project's code (MIT). It calls the game's API.
-  None of Blizzard's files are copied.
+- The **KutzInventory** addon calls the game's API and includes no copies of Blizzard's files.
+  `KutzInventory/CommonWords.lua` uses the first 4,000 ASCII lowercase entries of Michael Wehar's
+  [5000-more-common.txt](https://github.com/MichaelWehar/Public-Domain-Word-Lists/blob/e2fe9d32eeb86179b464aba0e91fa96904b8e7e8/5000-more-common.txt),
+  sorted and converted into a Lua lookup table. Wehar generated the list using OPTED and
+  [released it into the public domain](https://github.com/MichaelWehar/Public-Domain-Word-Lists/blob/e2fe9d32eeb86179b464aba0e91fa96904b8e7e8/README.md).
 - The **Companion worker**, `KutzInventoryUploader.exe`, embeds the Node.js runtime (MIT and others). `tools/windows/build.js` copies
   Node's licence into the zip as `RUNTIME-LICENSE.txt`, and this project's licence as `LICENSE.txt`.
 - The Companion icon artwork has Lucide-inspired framing. The ISC notice in

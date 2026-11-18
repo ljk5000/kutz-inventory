@@ -16,6 +16,7 @@ local WARBAND_FIRST, WARBAND_LAST = 15, 23   -- Enum.BagIndex.AccountBankTab_1 .
 local BAG_FIRST, BAG_LAST = -1, 5            -- keyring (if this client has one), backpack, bags 1-4, reagent bag
 
 local db, me, meKey                           -- KutzInventoryDB, this character's entry and its stable key
+local hadInventory
 local bankOpen, guildBankOpen = false, false
 local loggedInAt, loggingOut = nil, false
 local worldLeaving = false
@@ -1101,6 +1102,7 @@ ns.CharacterKey = function() return meKey end -- shared attribution (warband and
 
 function handlers.ADDON_LOADED(name)
     if name ~= ADDON then return end
+    hadInventory = type(KutzInventoryDB) == "table"
     KutzInventoryDB = KutzInventoryDB or {}
     db = KutzInventoryDB
     db.version = DB_VERSION
@@ -1110,6 +1112,7 @@ function handlers.ADDON_LOADED(name)
 end
 
 function handlers.PLAYER_LOGIN()
+    if ns.ObsNote then ns.ObsNote(true, hadInventory) end
     meKey = CharacterKey()
     db.chars[meKey] = db.chars[meKey] or {}
     me = db.chars[meKey]
