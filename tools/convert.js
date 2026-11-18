@@ -595,9 +595,13 @@ function obsTameDiet(list) {
   const out = [...new Set(asList(list).map((x) => obsLabel(x, 40)).filter((x) => x !== undefined))].sort();
   return out.length ? out.slice(0, OBS_TAME.diet) : undefined;
 }
-// Objective credit (3.13.0): the objective's type names the one id field it may carry; how the cause was told; "count" is
-// for items only. Never a progress number: those fields are not projected.
-const OBS_CREDIT = { monster: "npc", item: "item", object: "object" }, OBS_CREDIT_BY = ["name", "count", "sole"], OBS_CREDIT_MAX_I = 12;
+// Objective credit (3.13.0): the objective's type names the one id field it may carry; how the cause was told ("sole" for
+// a creature only); rows, how many objectives the client listed (1-40, at least i). Never a progress number: those
+// fields are not projected.
+const OBS_CREDIT = { monster: "npc", item: "item", object: "object" }, OBS_CREDIT_BY = ["name", "sole"], OBS_CREDIT_MAX_I = 12;
+const OBS_OBJECTIVE_ROWS = 40;
+// The tame's locale (GetLocale, "enUS"): the language fam's name and the diet are in.
+const OBS_LOCALE = /^[a-z]{2}[A-Z]{2}$/;
 function observationEvent(e) {
   if (!e || typeof e !== "object" || !obsText(e.id, OBS_ID) || obsInt(e.t, 1) === undefined || e.t > 1e11) return null;
   const base = { id: e.id, t: e.t, ...(obsText(e.b, /^[0-9][0-9.]{0,39}$/) ? { b: e.b } : {}), type: e.type };
@@ -611,7 +615,9 @@ function observationEvent(e) {
     const giver = obsInt(e.npc, 1) !== undefined ? { npc: e.npc } : obsInt(e.object, 1) !== undefined ? { object: e.object } : {};
     const out = { ...base, act: e.act, quest: e.quest, ...giver, ...place() };
     if (e.act === "accept") {
-      Object.assign(out, obsQuestFacts(e), pick({ obj: obsQuestObjectives(e.obj), poi: obsQuestPoi(e.poi, out.where.uiMap) }));
+      const obj = obsQuestObjectives(e.obj), rows = obsInt(e.rows, 1);   // rows: only beside obj, never fewer than its rows
+      Object.assign(out, obsQuestFacts(e), pick({ obj, rows: obj && rows <= OBS_OBJECTIVE_ROWS && rows >= obj.length ? rows : undefined,
+                                                  poi: obsQuestPoi(e.poi, out.where.uiMap) }));
     }
     const text = obsQuestText(e.text, e.act);
     if (text) out.text = text;
@@ -673,14 +679,16 @@ function observationEvent(e) {
     if (npc === undefined) return null;                  // the creature id is never guessed: no id, no event
     const spd = Number.isInteger(e.spd) && e.spd >= 10 && e.spd <= 2000 ? e.spd : undefined;
     return { ...base, npc, ...pick({ lv: lv <= 255 ? lv : undefined, fam: obsNpcKind(e.fam), spells: obsTameSpells(e.spells), spd,
-             spdAura: spd !== undefined && e.spdAura === true ? true : undefined, diet: obsTameDiet(e.diet) }), ...place() };
+             spdAura: spd !== undefined && e.spdAura === true ? true : undefined, diet: obsTameDiet(e.diet),
+             loc: obsText(e.loc, OBS_LOCALE) }), ...place() };
   }
   if (e.type === "credit") {
     const quest = obsInt(e.quest, 1), i = obsInt(e.i, 1), field = Object.keys(OBS_CREDIT).includes(e.ot) ? OBS_CREDIT[e.ot] : undefined;
-    const id = field && obsInt(e[field], 1);
+    const id = field && obsInt(e[field], 1), rows = e.rows == null ? undefined : obsInt(e.rows, 1);
     if (quest === undefined || i === undefined || i > OBS_CREDIT_MAX_I || id === undefined || !OBS_CREDIT_BY.includes(e.by)
-        || (e.by === "count" && e.ot !== "item") || Object.values(OBS_CREDIT).some((k) => k !== field && e[k] != null)) return null;
-    return { ...base, quest, i, ot: e.ot, [field]: id, by: e.by, ...place() };
+        || (e.by === "sole" && e.ot !== "monster") || Object.values(OBS_CREDIT).some((k) => k !== field && e[k] != null)
+        || (e.rows != null && (rows === undefined || rows > OBS_OBJECTIVE_ROWS || rows < i))) return null;
+    return { ...base, quest, i, ...pick({ rows }), ot: e.ot, [field]: id, by: e.by, ...place() };
   }
   if (e.type === "flight") {
     if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;

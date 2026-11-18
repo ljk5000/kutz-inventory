@@ -806,6 +806,7 @@ KutzInventoryObsDB = {
 					["text"] = "Clear the road of raiders.",
 				}, -- [2]
 			},
+			["rows"] = 2,
 			["poi"] = {
 				{
 					["map"] = 1449,
@@ -1111,6 +1112,7 @@ KutzInventoryObsDB = {
 				"Fish", -- [1]
 				"Meat", -- [2]
 			},
+			["loc"] = "enUS",
 			["where"] = {
 				["map"] = 0,
 				["uiMap"] = 1429,
@@ -1132,6 +1134,7 @@ KutzInventoryObsDB = {
 			["type"] = "credit",
 			["quest"] = 7788,
 			["i"] = 1,
+			["rows"] = 1,
 			["ot"] = "monster",
 			["npc"] = 2958,
 			["by"] = "name",

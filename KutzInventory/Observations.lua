@@ -36,7 +36,8 @@
 --           QUEST_COMPLETE and again 1 s after the turn-in, only the changes (never a standing), at most 6, none when
 --           loot, combat or another reward window or turn-in came in between.
 --           1.19.0 also records quest objective definitions (up to 12, with no progress counts) and up to 8 quest POIs
---           on the acceptance map, when the client supplies them safely.
+--           on the acceptance map, when the client supplies them safely; from 1.20.0 with rows, the number of objectives
+--           the client listed before unusable ones were skipped.
 --   vendor  npc, rx, filtered, items = { { id, n, link, price (copper per n, as shown), cost = { { item|currency, n } }, limited } }
 --           read under the merchant window's "all" item filter, put back at once; filtered = true when it could not be
 --           switched (the list then misses the items the class filter hides). The same stock and rx once an hour.
@@ -58,14 +59,17 @@
 --   gossip NPC or object greeting and dialogue body only, while below the half caps.
 --   read   one page from a world object, only when mail and creator checks pass.
 --   line   game speech or emotes from an identified, uncontrolled creature; known player names scrubbed.
---   tame   (1.20.0) a hunter's tame: npc (the creature id from the target's GUID when Tame Beast began; no id, no event),
---          lv and fam (the target's), spells = { { s, name, rank } } (the new pet's spellbook), spd (its attack speed in
---          hundredths of a second, out of combat; spdAura = true when the pet had an aura at every read), diet (labels),
---          where = where the tame began. Never the pet's GUID or name. Once per beast, level, abilities and speed.
---   credit (1.20.0) quest, i (the objective's index in C_QuestLog.GetQuestObjectives), ot = "monster"|"item"|"object" (its
---          type), npc|item|object (what counted for it), by = "name"|"count"|"sole" (how the cause was told): when the
---          objective's numFulfilled rose and this player's own evidence of the last 6 s named one cause. numFulfilled is
---          read in memory to see the rise and never saved; nothing about other players. Once per quest, index and id.
+--   tame   (1.20.0) a hunter's tame: npc (the creature id from the target's GUID when Tame Beast began; no id, no event;
+--          the new pet must bear the target's name, and its level and creature id where readable), lv and fam (the
+--          target's), spells = { { s, name, rank } } (the new pet's spellbook, the same in two reads), spd (its attack
+--          speed in hundredths of a second, out of combat; spdAura = true when the pet had an aura at every read), diet
+--          (labels), loc (GetLocale: the language of the labels), where = where the tame began. Never the pet's GUID or
+--          name, nor the target's name. Once per beast, level, abilities and speed.
+--   credit (1.20.0) quest, i (the objective's index in C_QuestLog.GetQuestObjectives), rows (how many objectives it
+--          listed), ot = "monster"|"item"|"object" (its type), npc|item|object (what counted for it), by = "name"|"sole"
+--          (how the cause was told; sole only for a creature, solo and with no pet out): when the objective's
+--          numFulfilled rose and this player's own evidence of the last 6 s named one cause. numFulfilled is read in
+--          memory to see the rise and never saved; nothing about other players. Once per quest, index and id.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
@@ -316,8 +320,9 @@ local lootDone = false
 local Sighting                                  -- (unit, open): the npcs summary's update, defined below
 -- objective credit (1.20.0), its functions below: WINDOW seconds of this player's own evidence, at most SAW entries;
 -- want = the objective types still open at the last scan (no evidence is kept for a type no objective needs)
-local credit = { WINDOW = 6, SAW = 40, SESSION = 200, DEAD = 500, TYPES = { monster = "npc", item = "item", object = "object" },
-                 saw = {}, dead = {}, ndead = 0, base = nil, want = {}, n = 0, scans = 0, token = 0, pending = false }
+-- petAt: the last time a pet of the player's was known to be out (then no creature is told by "sole")
+local credit = { WINDOW = 6, SAW = 40, SESSION = 200, DEAD = 500, ROWS = 40, TYPES = { monster = "npc", item = "item", object = "object" },
+                 saw = {}, dead = {}, ndead = 0, base = nil, want = {}, n = 0, scans = 0, token = 0, pending = false, petAt = -1000 }
 
 local function SpellName(id)
     if C_Spell and C_Spell.GetSpellName then return Plain(Try(C_Spell.GetSpellName, id)) end
@@ -501,7 +506,6 @@ local function RecordLoot()
         if e.src.guid then e.src.encounter = bossEncounter[e.src.guid] end
         if not (e.src.guid and Opened(e.src.guid .. "|" .. e.src.kind)) then Add(e) end
         if e.src.guid then Windowed(e.src, s.byId) end
-        if e.src.object then pcall(credit.Saw, "object", e.src.object) end   -- an object this player opened
     end
 end
 
@@ -1937,6 +1941,7 @@ end
 
 -- Objectives supply their own required amount and wording. The UI can put progress at the front
 -- or the end, so remove both forms. A counter still inside the wording makes the row unsuitable.
+-- Also returns how many rows the client listed (unusable ones included), 1-40, else nil.
 function qx.Objectives(get, quest)
     local names = gameText.OwnNames()
     if not names then return nil end
@@ -1965,7 +1970,8 @@ function qx.Objectives(get, quest)
         end
         if #rows >= qx.OBJECTIVES then break end
     end
-    return #rows > 0 and rows or nil
+    if #rows == 0 then return nil end
+    return rows, #list <= credit.ROWS and #list or nil
 end
 
 function qx.Poi(L, map, quest)
@@ -2010,8 +2016,8 @@ function qx.AcceptData(e)
     local fields = {}
     if wantPoi then fields.poi = qx.Poi(L, map, e.quest) end
     if wantObj then
-        fields.obj = qx.Objectives(L.GetQuestObjectives, e.quest)
-        if fields.obj and not gameText.Room(Size(fields) - 2) then fields.obj = nil end
+        fields.obj, fields.rows = qx.Objectives(L.GetQuestObjectives, e.quest)
+        if fields.obj and not gameText.Room(Size(fields) - 2) then fields.obj, fields.rows = nil, nil end
     end
     if next(fields) and not qx.Amend(e, fields) then return false end
     return (wantObj and not e.obj) or (wantPoi and not e.poi)
@@ -2138,8 +2144,10 @@ end
 -- the pet it became showed: its spellbook's abilities, its attack speed and its diet. Passive reads only: the hunter's
 -- own Tame Beast cast is watched, never made; the pet's GUID is compared in memory and never kept.
 ---------------------------------------------------------------------------
-local pet = { TAME = 1515, CALL = 883, REVIVE = 982, WINDOW = 30, READ = 60, EVERY = 2, SPELLS = 24, DIET = 8, SESSION = 20,
-              arm = nil, read = nil, n = 0, token = 0 }
+-- arm: the tame being waited for, in memory only (with the target's name, compared with the pet's and never kept);
+-- sent: the cast target's name UNIT_SPELLCAST_SENT gave for the last Tame Beast, also in memory only.
+local pet = { TAME = 1515, CALL = 883, REVIVE = 982, WINDOW = 30, READ = 60, EVERY = 2, STOP = 2, SPELLS = 24, DIET = 8,
+              SESSION = 20, arm = nil, read = nil, sent = nil, n = 0, token = 0 }
 
 function pet.Is(spellId, id)                    -- this spell id, or a spell of the same name in the client's language
     spellId = gameText.Id(spellId)
@@ -2164,33 +2172,65 @@ function pet.Family(unit)                       -- UnitCreatureFamily: the clien
     return Int(id, 1), Label(name, 40)
 end
 
+function pet.Name(unit)                         -- a unit's name, compared in memory only; never kept
+    local name = Plain((Try(UnitName, unit)))
+    return type(name) == "string" and name ~= "" and name or nil
+end
+
+-- UNIT_SPELLCAST_SENT(unit, target, castGUID, spellID): the name of the unit the cast went to, when the client gives one.
+function pet.Sent(unit, target, _, spellId)
+    if unit ~= "player" or not pet.Is(spellId, pet.TAME) then return end
+    target = Plain(target)
+    pet.sent = { name = type(target) == "string" and target ~= "" and target or nil, at = Now() }
+end
+
 -- UNIT_SPELLCAST_START / _CHANNEL_START by the player. Tame Beast by a hunter with no pet arms a tame of the creature in
--- its target; Call Pet or Revive Pet disarms it (a pet that appears then is not a new one).
+-- its target; Call Pet or Revive Pet disarms it (a pet that appears then is not a new one). The id is read from the
+-- target, so a cast that went elsewhere (a mouseover or focus macro: UNIT_SPELLCAST_SENT named another unit) arms nothing.
 function pet.Start(spellId)
     if pet.Is(spellId, pet.CALL) or pet.Is(spellId, pet.REVIVE) then pet.arm = nil; return end
     if not (pet.Is(spellId, pet.TAME) and pet.Hunter()) then return end
     pet.arm = nil
+    local sent = pet.sent
+    pet.sent = nil
     if pet.Guid() then return end               -- a hunter with a pet out cannot tame: nothing to wait for
     local what, npc = FromGuid(Plain(Try(UnitGUID, "target")))
     npc = what == "npc" and gameText.Id(npc)
     if not npc or not (False(UnitIsPlayer, "target") and False(UnitPlayerControlled, "target")) then return end
-    local lv = Int(Try(UnitLevel, "target"), 1)
+    local name = pet.Name("target")
+    if not name or (sent and Now() - sent.at <= pet.STOP and sent.name and sent.name ~= name) then return end
+    local raw = Int(Try(UnitLevel, "target"), 1)
     local famId, famName = pet.Family("target")
-    pet.arm = { npc = npc, lv = lv and lv <= 255 and lv or nil, famId = famId, famName = famName, where = Where(), at = Now() }
+    pet.arm = { npc = npc, lv = raw and raw <= 255 and raw or nil, raw = raw, name = name, famId = famId, famName = famName,
+                where = Where(), at = Now() }
 end
 
 function pet.Stop(spellId)                      -- UNIT_SPELLCAST_INTERRUPTED: that tame is over
     if pet.arm and pet.Is(spellId, pet.TAME) then pet.arm = nil end
 end
 
--- UNIT_PET("player") within 30 s of an armed tame: a pet where there was none, of the beast's family when both are read.
+-- UNIT_SPELLCAST_CHANNEL_STOP: the channel ended, tamed or broken; a pet that has not come STOP seconds later is not this
+-- tame's (pet.Changed refuses it).
+function pet.Ended(spellId)
+    if pet.arm and pet.Is(spellId, pet.TAME) then pet.arm.stopped = pet.arm.stopped or Now() end
+end
+
+-- UNIT_PET("player") within 30 s of an armed tame (and within 2 s of its channel's end): a pet where there was none, with
+-- the beast's name (a fresh tame keeps it), and its level, family and creature id wherever both sides are readable.
 function pet.Changed(unit)
     local a = pet.arm
     if Plain(unit) ~= "player" or not a then return end
-    if Now() - a.at > pet.WINDOW then pet.arm = nil; return end
+    if Now() - a.at > pet.WINDOW or (a.stopped and Now() - a.stopped > pet.STOP) then pet.arm = nil; return end
     local guid = pet.Guid()
     if not guid then return end
     pet.arm = nil
+    if pet.Name("pet") ~= a.name then return end
+    local lv = Int(Try(UnitLevel, "pet"), 1)
+    if a.raw and lv and lv ~= a.raw then return end
+    if type(UnitCreatureID) == "function" then
+        local id = Plain((Try(UnitCreatureID, "pet")))
+        if id ~= nil and gameText.Id(type(id) == "string" and tonumber(id) or id) ~= a.npc then return end
+    end
     local famId, famName = pet.Family("pet")
     if (a.famId and famId and a.famId ~= famId) or (a.famName and famName and a.famName ~= famName) then return end
     pet.token = pet.token + 1
@@ -2266,13 +2306,25 @@ function pet.Speed()
     return v, type(fn) == "function" and False(fn, "pet", 1, "HELPFUL") and False(fn, "pet", 1, "HARMFUL")
 end
 
--- Reads the new pet until its book, an aura-free speed and its diet are in, or 60 s have passed; again every 2 s
--- (again = true) and on PET_BAR_UPDATE / SPELLS_CHANGED. Another pet, or none, ends it without a record.
+function pet.Sig(spells)                        -- "s/rank,..." of a book read, to compare two reads and to key the event
+    local sig = {}
+    for _, x in ipairs(spells or {}) do sig[#sig + 1] = x.s .. (x.rank and ("/" .. x.rank) or "") end
+    return table.concat(sig, ",")
+end
+
+-- Reads the new pet until its book (the same in two reads in a row, so a book still filling is not taken), an aura-free
+-- speed and its diet are in, or 60 s have passed; again every 2 s (again = true) and on PET_BAR_UPDATE / SPELLS_CHANGED.
+-- Another pet, or none, ends it without a record.
 function pet.Read(again)
     local r = pet.read
     if not r then return end
     if pet.Guid() ~= r.guid then pet.read = nil; return end
-    r.spells = r.spells or pet.Spells()
+    if not r.spells then
+        local book = pet.Spells()
+        local sig = book and pet.Sig(book)
+        if sig and sig == r.book then r.spells = book end
+        r.book = sig
+    end
     if r.diet == nil then r.diet = pet.Diet() end
     if not r.bare then
         local v, bare = pet.Speed()
@@ -2285,17 +2337,22 @@ function pet.Read(again)
     end
 end
 
--- type "tame": npc, lv, fam, spells, spd (+ spdAura when the pet had an aura at every read), diet; where = the tame's start.
--- Once per beast, level, abilities and speed per install; at most 20 a session, and nothing past the half caps.
+function pet.Locale()                           -- the client's locale ("enUS"): the language of fam's name and diet
+    local loc = Plain((Try(GetLocale)))
+    return type(loc) == "string" and loc:match("^%l%l%u%u$") and loc or nil
+end
+
+-- type "tame": npc, lv, fam, spells, spd (+ spdAura when the pet had an aura at every read), diet, loc; where = the tame's
+-- start. Once per beast, level, abilities and speed per install (key npc:lv:checksum, so 24 spells cost no more than one);
+-- at most 20 a session, and nothing past the half caps.
 function pet.Record(r)
     pet.read = nil
     local a = r.arm
     if pet.n >= pet.SESSION then return end
-    local sig = {}
-    for _, x in ipairs(r.spells or {}) do sig[#sig + 1] = x.s .. (x.rank and ("/" .. x.rank) or "") end
-    local key = table.concat({ a.npc, a.lv or "", table.concat(sig, ","), r.spd or "", r.spd and not r.bare and "a" or "" }, ":")
+    local rest = table.concat({ pet.Sig(r.spells), r.spd or "", r.spd and not r.bare and "a" or "" }, ":")
+    local key = a.npc .. ":" .. (a.lv or "") .. ":" .. gameText.Checksum(rest)
     local fields = { npc = a.npc, lv = a.lv, fam = a.famId or a.famName, spells = r.spells, spd = r.spd,
-                     spdAura = r.spd and not r.bare or nil, diet = r.diet or nil, where = a.where }
+                     spdAura = r.spd and not r.bare or nil, diet = r.diet or nil, loc = pet.Locale(), where = a.where }
     if gameText.Index("tame").seen[key] then return end
     if gameText.Record("tame", key, fields) then pet.n = pet.n + 1 end
 end
@@ -2305,8 +2362,8 @@ end
 -- numFulfilled goes up (read in memory to see the rise; never saved or exported) and this player's own evidence of the
 -- last 6 seconds names exactly one cause, (quest, objective index, type) -> that id is recorded once per install. The
 -- evidence: creatures that died that no one else had tapped (UNIT_HEALTH with UnitIsDead), items this player's own loot
--- lines named (CHAT_MSG_LOOT "You receive loot / item"), objects this player opened or talked to. Nothing about another
--- player, no counts, no position but the event's usual where.
+-- lines named (CHAT_MSG_LOOT "You receive loot / item"), objects whose window (gossip, greeting, quest, page) this player
+-- opened. Nothing about another player, no counts, no position but the event's usual where.
 ---------------------------------------------------------------------------
 credit.LOOT = { { "LOOT_ITEM_SELF_MULTIPLE", "You receive loot: %sx%d." }, { "LOOT_ITEM_PUSHED_SELF_MULTIPLE", "You receive item: %sx%d." },
                 { "LOOT_ITEM_SELF", "You receive loot: %s." }, { "LOOT_ITEM_PUSHED_SELF", "You receive item: %s." } }
@@ -2316,6 +2373,7 @@ function credit.Saw(kind, id, name)             -- kind is the objective type th
     if not (credit.want[kind] and id) then return end
     name = gameText.PlainText(name)
     if #credit.saw >= credit.SAW then table.remove(credit.saw, 1) end
+    if pet.Guid() then credit.petAt = Now() end
     credit.saw[#credit.saw + 1] = { kind = kind, id = id, at = Now(),
                                     name = type(name) == "string" and #name >= 3 and #name <= 120 and name:lower() or nil }
 end
@@ -2342,11 +2400,10 @@ function credit.Loot(text)                      -- CHAT_MSG_LOOT: only this play
             credit.patterns[#credit.patterns + 1] = FormatPattern(type(fmt) == "string" and fmt ~= "" and fmt or f[2])
         end
     end
-    for _, p in ipairs(credit.patterns) do
-        for _, c in ipairs({ text:match(p) }) do
-            local id = type(c) == "string" and ItemId(c)
-            if id then return credit.Saw("item", id, c:match("|h%[([^%]|]+)%]|h")) end
-        end
+    for _, p in ipairs(credit.patterns) do      -- the link is one of the (at most two) captures; no table per line
+        local a, b = text:match(p)
+        local c = type(a) == "string" and ItemId(a) and a or type(b) == "string" and ItemId(b) and b
+        if c then return credit.Saw("item", ItemId(c), c:match("|h%[([^%]|]+)%]|h")) end
     end
 end
 
@@ -2376,19 +2433,22 @@ function credit.Quests()                        -- the quest ids in the log, hea
     return out
 end
 
-function credit.Named(text, name)               -- the name as whole words in the objective's text, both lower case
+-- The name as whole words in the objective's text, both lower case. A byte of 128 or more (part of a UTF-8 letter) counts
+-- as a word character, so "Kobold" is not found inside "Koboldé" and a name ending in "é" still needs a word end.
+function credit.Named(text, name)
     local pat = name:gsub("(%W)", "%%%1")
-    if name:find("^%w") then pat = "%f[%w]" .. pat end
-    if name:find("%w$") then pat = pat .. "%f[%W]" end
+    if name:find("^[%w\128-\255]") then pat = "%f[%w\128-\255]" .. pat end
+    if name:find("[%w\128-\255]$") then pat = pat .. "%f[^%w\128-\255]" end
     return text:find(pat) ~= nil
 end
 
--- One objective rose from was to f (of need). Its cause, in this order: the one candidate named in the objective's text
--- (by "name"; an item's bag count must also agree when the client gives it); else, for an item, the one candidate whose bag
--- count is the objective's (by "count"); else the only candidate there is (by "sole"), but never a creature while grouped,
--- since a group member's kill out of sight counts too. Candidates: this type's evidence of the window, by id, not yet
--- claimed by an earlier scan.
-function credit.Credit(quest, i, kind, text, f, need, grouped)
+-- One objective rose from was to f (of need), of rows objectives listed. Its cause: the one candidate named in the
+-- objective's text (by "name"; an item's bag count must also agree when the client gives it); else, for a creature only,
+-- the only candidate there is (by "sole"), but never while grouped or while a pet was out (a member's or the pet's kill out
+-- of sight counts too). Items and objects are told by name alone: a quest item can come by trade, mail or a bag with no
+-- loot line, and an object without a window leaves no evidence. Candidates: this type's evidence of the window, by id,
+-- not yet claimed by an earlier scan.
+function credit.Credit(quest, i, kind, text, f, need, rows, solo)
     if credit.n >= credit.SESSION then return end
     local cands, byId = {}, {}
     for _, x in ipairs(credit.saw) do
@@ -2399,11 +2459,9 @@ function credit.Credit(quest, i, kind, text, f, need, grouped)
         end
     end
     if #cands == 0 then return end
-    local counted = false
     if kind == "item" then
         local get = C_Item and C_Item.GetItemCount or GetItemCount
         if type(get) == "function" then
-            counted = true
             local keep = {}
             for _, c in ipairs(cands) do
                 local n = Int((Try(get, c.id)))
@@ -2419,15 +2477,14 @@ function credit.Credit(quest, i, kind, text, f, need, grouped)
         if text and c.name and credit.Named(text, c.name) then named, pick = named + 1, c end
     end
     if named == 1 then by = "name"
-    elseif named == 0 and #cands == 1 then
-        pick = cands[1]
-        if counted then by = "count" elseif kind ~= "monster" or not grouped then by = "sole" end
+    elseif named == 0 and #cands == 1 and kind == "monster" and solo then
+        pick, by = cands[1], "sole"
     end
     if not by then return end
     for _, x in ipairs(credit.saw) do if x.kind == kind and x.id == pick.id then x.used = credit.scans end end
     local key = table.concat({ quest, i, kind, pick.id }, ":")
     if gameText.Index("credit").seen[key] then return end
-    if gameText.Record("credit", key, { quest = quest, i = i, ot = kind, [credit.TYPES[kind]] = pick.id, by = by }) then
+    if gameText.Record("credit", key, { quest = quest, i = i, rows = rows, ot = kind, [credit.TYPES[kind]] = pick.id, by = by }) then
         credit.n = credit.n + 1
     end
 end
@@ -2441,22 +2498,26 @@ function credit.Scan()
     credit.scans = credit.scans + 1
     for _, x in ipairs(credit.saw) do if now - x.at <= credit.WINDOW then fresh[#fresh + 1] = x end end
     credit.saw = fresh
-    local grouped = not False(IsInGroup)
+    if pet.Guid() then credit.petAt = now end
+    local solo = False(IsInGroup) and now - credit.petAt > credit.WINDOW
     for _, quest in ipairs(credit.Quests()) do
         local list = Plain(Try(L.GetQuestObjectives, quest))
         if type(list) == "table" then
-            local rows, was = {}, old and old[quest]
-            for i = 1, math.min(#list, qx.OBJECTIVES) do
+            local counts, was, rows = {}, old and old[quest], #list   -- rows: how many objectives the client listed
+            for i = 1, math.min(rows, qx.OBJECTIVES) do
                 local r = Plain(list[i])
                 local kind = type(r) == "table" and Plain(r.type)
                 local f, need = kind and Int(r.numFulfilled), kind and Int(r.numRequired, 1)
                 if credit.TYPES[kind] and f and need and f <= need then
-                    rows[i] = f
+                    -- a fall (a brief 0 while the client loads, an item gone) keeps no baseline: the next read sets one
+                    if not (was and was[i] and f < was[i]) then counts[i] = f end
                     if f < need then want[kind] = true end
-                    if was and was[i] and f > was[i] then credit.Credit(quest, i, kind, r.text, f, need, grouped) end
+                    if was and was[i] and f > was[i] and rows <= credit.ROWS then
+                        credit.Credit(quest, i, kind, r.text, f, need, rows, solo)
+                    end
                 end
             end
-            base[quest] = rows
+            base[quest] = counts
         end
     end
     credit.base, credit.want = base, want
@@ -2507,7 +2568,12 @@ handlers.UNIT_SPELLCAST_START = Began
 handlers.UNIT_SPELLCAST_CHANNEL_START = Began   -- Tame Beast is channelled
 handlers.UNIT_SPELLCAST_SUCCEEDED = Cast
 function handlers.UNIT_SPELLCAST_INTERRUPTED(unit, _, spellId) if unit == "player" then pet.Stop(spellId) end end
-handlers.UNIT_PET = pet.Changed
+function handlers.UNIT_SPELLCAST_CHANNEL_STOP(unit, _, spellId) if unit == "player" then pet.Ended(spellId) end end
+handlers.UNIT_SPELLCAST_SENT = pet.Sent
+function handlers.UNIT_PET(unit)
+    if unit == "player" then credit.petAt = Now() end   -- a pet came or went: no creature is told by "sole" for a while
+    pet.Changed(unit)
+end
 function handlers.PET_BAR_UPDATE() if pet.read then pet.Read(false) end end
 handlers.SPELLS_CHANGED = handlers.PET_BAR_UPDATE
 local function Engaged(reset)
@@ -2554,16 +2620,17 @@ function handlers.MAIL_SHOW()
     gameText.mail, gameText.book, gameText.bookUse = true, nil, nil
 end
 function handlers.MAIL_CLOSED() gameText.mail = false end
-function handlers.GOSSIP_SHOW() credit.Talked(); gameText.Gossip("gossip") end
-function handlers.QUEST_GREETING() credit.Talked(); gameText.Gossip("greeting") end
+-- credit.Talked runs in its own pcall: an error there must not cost the gossip, greeting, page or quest recording
+function handlers.GOSSIP_SHOW() pcall(credit.Talked); gameText.Gossip("gossip") end
+function handlers.QUEST_GREETING() pcall(credit.Talked); gameText.Gossip("greeting") end
 
-function handlers.ITEM_TEXT_BEGIN() credit.Talked(); gameText.BookBegin() end
+function handlers.ITEM_TEXT_BEGIN() pcall(credit.Talked); gameText.BookBegin() end
 function handlers.ITEM_TEXT_READY() gameText.BookPage() end
 function handlers.ITEM_TEXT_CLOSED() gameText.book = nil end
 
 function handlers.QUEST_DETAIL(startItem)       -- (questStartItemID): the item that started it, 0 when none
     QuestGiverSeen()
-    credit.Talked()
+    pcall(credit.Talked)
     local what, id = Giver("questnpc", "npc")
     detail = { quest = Int(Try(GetQuestID), 1), what = what, id = id, at = time(), startItem = Int(startItem, 1),
                text = QuestText({ title = GetTitleText, details = GetQuestText, objectives = GetObjectiveText }) }
@@ -2689,7 +2756,8 @@ local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
                     "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED",
                     "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_PET", "PET_BAR_UPDATE", "SPELLS_CHANGED",
-                    "UNIT_HEALTH", "QUEST_WATCH_UPDATE", "UNIT_QUEST_LOG_CHANGED" }
+                    "UNIT_HEALTH", "QUEST_WATCH_UPDATE", "UNIT_QUEST_LOG_CHANGED", "UNIT_SPELLCAST_SENT",
+                    "UNIT_SPELLCAST_CHANNEL_STOP" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -2725,7 +2793,7 @@ local function Disable()
     gameText.mail, gameText.book, gameText.bookUse = false, nil, nil
     qx.waiting = {}
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
-    pet.arm, pet.read, pet.token = nil, nil, pet.token + 1   -- a tame still being read is dropped
+    pet.arm, pet.read, pet.sent, pet.token = nil, nil, nil, pet.token + 1   -- a tame still being read is dropped
     credit.Reset()
 end
 
@@ -2750,6 +2818,10 @@ pcall(ev.RegisterEvent, ev, "ADDON_LOADED")
 ev:SetScript("OnEvent", function(_, event, ...)
     local h = handlers[event]
     if not h then return end
+    if event == "UNIT_HEALTH" then              -- many a second in a group: group members and the player are never evidence
+        local unit = ...
+        if type(unit) ~= "string" or unit == "player" or unit == "pet" or unit:find("^party") or unit:find("^raid") then return end
+    end
     local d = DB()
     if event ~= "ADDON_LOADED" and not (d and d.on and d.agreed) then return end
     local ok, err = pcall(h, ...)

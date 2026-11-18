@@ -648,6 +648,7 @@
       "text": "Clear the road of raiders."
      }
     ],
+    "rows": 2,
     "poi": [
      {
       "map": 1449,
@@ -954,6 +955,7 @@
      "Fish",
      "Meat"
     ],
+    "loc": "enUS",
     "where": {
      "map": 0,
      "uiMap": 1429,
@@ -975,6 +977,7 @@
     "type": "credit",
     "quest": 7788,
     "i": 1,
+    "rows": 1,
     "ot": "monster",
     "npc": 2958,
     "by": "name",

@@ -1852,6 +1852,12 @@
                 }
               }
             },
+            "rows": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 40,
+              "description": "Since 3.13.0 (KutzInventory 1.20.0), accept only and only beside obj: how many objectives C_QuestLog.GetQuestObjectives listed when obj was read, unusable rows included (never fewer than obj's length). obj keeps the client's order but skips unusable rows and stops at 12, so obj[k] is the client's k-th objective exactly when obj's length equals rows. Absent on older events and when the client listed more than 40."
+            },
             "poi": {
               "type": "array",
               "minItems": 1,
@@ -1896,6 +1902,11 @@
               "uniqueItems": true
             }
           },
+          "dependentRequired": {
+            "rows": [
+              "obj"
+            ]
+          },
           "allOf": [
             {
               "if": {
@@ -1928,7 +1939,8 @@
                   "timed": false,
                   "startItem": false,
                   "obj": false,
-                  "poi": false
+                  "poi": false,
+                  "rows": false
                 }
               }
             }
@@ -2610,7 +2622,7 @@
         },
         {
           "type": "object",
-          "description": "Since 3.13.0: a hunter tamed a beast. npc, lv and fam are the target's when Tame Beast began; spells, spd and diet are what the new pet showed within 60 s. where is where the tame began. Never the pet's GUID or name.",
+          "description": "Since 3.13.0: a hunter tamed a beast. npc, lv and fam are the target's when Tame Beast began; the new pet bore the target's name (and its level and creature id wherever readable), so a cast that went to another unit is not recorded. spells, spd and diet are what the new pet showed within 60 s. where is where the tame began. Never the pet's GUID or name, nor the target's name.",
           "required": [
             "id",
             "t",
@@ -2665,13 +2677,13 @@
                   "maxLength": 40
                 }
               ],
-              "description": "UnitCreatureFamily on the target: the client's family id, else its localized name (up to 40). The new pet had the same family wherever both were read."
+              "description": "UnitCreatureFamily on the target: the client's family id (the stable value; prefer it), else its name in the client's language (up to 40; see loc). The new pet had the same family wherever both were read."
             },
             "spells": {
               "type": "array",
               "minItems": 1,
               "maxItems": 24,
-              "description": "The new pet's spellbook as the client listed it (C_SpellBook pet bank, else GetSpellBookItemName(i, \"pet\")), sorted by s, each spell id once. Only entries whose id names the spell the book shows; commands such as Attack are left out. Absent when the book listed nothing within 60 s of the tame.",
+              "description": "The new pet's spellbook as the client listed it (C_SpellBook pet bank, else GetSpellBookItemName(i, \"pet\")), sorted by s, each spell id once; the same in two reads in a row. Only entries whose id names the spell the book shows; commands such as Attack are left out. Absent means not read: the book listed nothing, or never the same twice, within 60 s of the tame (or the client has no timer); it does not mean the beast has no abilities.",
               "items": {
                 "type": "object",
                 "additionalProperties": false,
@@ -2715,12 +2727,17 @@
               "minItems": 1,
               "maxItems": 8,
               "uniqueItems": true,
-              "description": "The new pet's diet as the client names it (C_PetInfo.GetPetFoodTypes), sorted.",
+              "description": "The new pet's diet as the client names it (C_PetInfo.GetPetFoodTypes), sorted: display labels in the client's language (see loc), not ids.",
               "items": {
                 "type": "string",
                 "$ref": "#/$defs/observationLabel",
                 "maxLength": 40
               }
+            },
+            "loc": {
+              "type": "string",
+              "pattern": "^[a-z]{2}[A-Z]{2}$",
+              "description": "Since 3.13.0: GetLocale() when the tame was recorded, e.g. enUS: the language of a fam name and of diet. Use those labels only for a locale you know. Absent when the client did not say."
             },
             "where": {
               "$ref": "#/$defs/observationWhere"
@@ -2732,7 +2749,7 @@
         },
         {
           "type": "object",
-          "description": "Since 3.13.0: an objective of a quest in the log counted something. When the objective's numFulfilled rose (read in memory to see the rise; never saved or exported) and the player's own evidence of the 6 s before named exactly one cause: a creature that died untapped by others, an item from the player's own loot line, an object the player opened. Once per quest, objective and id per install. Never the progress numbers or anything about another player.",
+          "description": "Since 3.13.0: an objective of a quest in the log counted something. When the objective's numFulfilled rose (read in memory to see the rise; never saved or exported) and the player's own evidence of the 6 s before named exactly one cause: a creature that died untapped by others, an item from the player's own loot line, an object whose window (gossip, greeting, quest, page) the player opened. Once per quest, objective and id per install. Never the progress numbers or anything about another player.",
           "required": [
             "id",
             "t",
@@ -2775,7 +2792,13 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 12,
-              "description": "The objective's position in C_QuestLog.GetQuestObjectives(quest), from 1. The accept event's obj keeps the same order but skips rows it could not use, so match by ot and position with care."
+              "description": "The objective's position in C_QuestLog.GetQuestObjectives(quest), from 1 (only the first 12 are compared). See rows for when it lines up with the accept event's obj."
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 40,
+              "description": "How many objectives C_QuestLog.GetQuestObjectives listed for the quest when the credit was read (at least i). The addon writes it on every credit; absent only on events from development builds before it. i refers to the accept event's obj[i] (counting from 1) only when that accept's obj length equals its rows and equals this rows."
             },
             "ot": {
               "enum": [
@@ -2806,10 +2829,9 @@
             "by": {
               "enum": [
                 "name",
-                "count",
                 "sole"
               ],
-              "description": "How the cause was told. name: the only candidate named as whole words in the objective's text. count (items only): the only candidate whose bag count matched the objective's. sole: the only candidate of that type in the window (never a creature while grouped). Treat sole as the weakest."
+              "description": "How the cause was told. name: the only candidate named as whole words in the objective's text (for an item, its bag count also agreed whenever the client gave one). sole (ot monster only): the only creature that died in the window, while the player was not grouped and had no pet out for the window. Items and objects are told by name only. Treat sole as the weaker."
             },
             "where": {
               "$ref": "#/$defs/observationWhere"
@@ -2907,14 +2929,14 @@
               "if": {
                 "properties": {
                   "by": {
-                    "const": "count"
+                    "const": "sole"
                   }
                 }
               },
               "then": {
                 "properties": {
                   "ot": {
-                    "const": "item"
+                    "const": "monster"
                   }
                 }
               }

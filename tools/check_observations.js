@@ -614,6 +614,7 @@ do
   h.event("QUEST_ACCEPTED", 7787)
   local e = h.events()[1]
   assert(e and #e.obj == 12 and #e.poi == 8 and e.act == "accept", h.db().lastError)
+  assert(e.rows == 23, "rows: every row the client listed, unusable ones too: " .. tostring(e.rows))
   assert(e.obj[1].text == "Slay northern raiders, $N." and e.obj[1].n == 10 and e.obj[1].t == "monster"
     and e.obj[2].text == "Tools recovered" and e.obj[3].text == "Fill the jar." and e.obj[3].n == 0
     and e.obj[4].text == "Fill the flask" and #e.obj[5].text == 399 and e.obj[12].n == 7, dump(e.obj))
@@ -636,6 +637,7 @@ do
   assert(not saved.obj and late.s.objReads == 1, "only a plain success for this quest can retry")
   late.event("QUEST_DATA_LOAD_RESULT", 7787, true)
   assert(saved.obj and not saved.poi and #late.events() == 1 and late.events()[1] == saved, "late objective amends in place")
+  assert(#saved.obj == 1 and saved.rows == 1, "rows comes with the late obj: " .. tostring(saved.rows))
   late.s.combat = false
   late.s.uiMap = 1430
   late.event("PLAYER_REGEN_ENABLED")
@@ -678,7 +680,13 @@ do
   full.s.objectives, full.s.points = { row }, { { questID = 7787, x = 0.1, y = 0.1 } }
   full.event("QUEST_ACCEPTED", 7787)
   assert(full.s.objReads == 0 and not full.events()[2].obj and full.events()[2].poi, "half cap gates objective prose only")
-  print("OK   objective definitions and places, independent late data, caps, secrets, no progress counts")
+  local big = errands()
+  big.s.objectives = {}
+  for i = 1, 41 do big.s.objectives[i] = { type = "event", numRequired = 1, text = "Hold the line." } end
+  big.event("QUEST_ACCEPTED", 7787)
+  assert(#big.events()[1].obj == 12 and big.events()[1].rows == nil, "more than 40 rows: obj without rows")
+  assert(full.events()[2].rows == nil, "no obj, no rows")
+  print("OK   objective definitions (with rows) and places, independent late data, caps, secrets, no progress counts")
 end
 
 -- 1) on by default for a new install only: a first load makes the table and records without any command; a table
@@ -2064,12 +2072,15 @@ end
 do
   local BEAST = "Creature-0-4170-0-1234-3825-000012AC01"
   local PETG = "Pet-0-4170-0-1234-3825-0100AABBCC"
-  local names = { [1515] = "Tame Beast", [883] = "Call Pet", [982] = "Revive Pet", [17253] = "Bite", [2649] = "Growl", [2] = "Not Attack" }
+  local names = { [1515] = "Tame Beast", [883] = "Call Pet", [982] = "Revive Pet", [17253] = "Bite", [17255] = "Bite", [2649] = "Growl",
+                  [2] = "Not Attack" }
+  local function beast(lv) return { guid = BEAST, level = lv or 12, fam = 1, famName = "Wolf", ct = 1, name = "Example Wolf" } end
   local function hunter(opts)
     local h = fresh(opts)
     local s, G = h.s, h.G
     G.UnitClass = function() return "Hunter", "HUNTER", 3 end
     G.GetSpellInfo = function(id) return names[id] end
+    G.GetLocale = function() return "enUS" end
     -- the pet's book (old API): { name, rank, spell id, pet action id }; Attack is a command, its action id names no spell
     s.book = { { "Bite", "Rank 1", 17253 }, { "Growl", "Rank 1", 2649 }, { "Attack", nil, nil, 0x07000002 } }
     G.HasPetSpells = function() if s.units.pet then return #s.book, "PET" end end
@@ -2078,49 +2089,63 @@ do
     G.C_PetInfo = { GetPetFoodTypes = function() return s.diet end }
     G.UnitAura = function(u, _, f) local x = s.units[u]; return x and x.auras and x.auras[f] or nil end
     s.diet = { "Meat", "Fish" }
-    s.units.target = { guid = BEAST, level = 12, fam = 1, famName = "Wolf", ct = 1, name = "Example Wolf" }
+    s.units.target = beast()
     return h
   end
+  -- a fresh tame keeps the beast's name and level
   local function newPet(extra)
-    local p = { guid = PETG, fam = 1, famName = "Wolf", speed = 1.5 }
+    local p = { guid = PETG, fam = 1, famName = "Wolf", speed = 1.5, name = "Example Wolf", level = 12 }
     for k, v in pairs(extra or {}) do p[k] = v end
     return p
   end
-  local function tame(h, p, spell)
+  -- SENT names the cast's target, the channel starts and ends, and the pet comes; sent = false: SENT gives no name
+  local function tame(h, p, spell, sent)
+    local t = h.s.units.target
+    if sent == nil then sent = t and t.name or "" elseif sent == false then sent = "" end
+    h.event("UNIT_SPELLCAST_SENT", "player", sent, "Cast-3-4170-0-1-1515-0000AAAA", spell or 1515)
     h.event("UNIT_SPELLCAST_CHANNEL_START", "player", "Cast-3-4170-0-1-1515-0000AAAA", spell or 1515)
     h.s.x = 0.9                                      -- the beast's place is where the tame began, not where it ended
     h.s.units.target = nil
+    h.event("UNIT_SPELLCAST_CHANNEL_STOP", "player", "Cast-3-4170-0-1-1515-0000AAAA", spell or 1515)
     h.s.units.pet = p or newPet()
     h.event("UNIT_PET", "player")
   end
+  local function later(h) h.s.clock = h.s.clock + 61; h.drain() end   -- every read the minute allows, then the record
 
   local h = hunter()
   tame(h)
+  assert(#h.events() == 0, "one read of the book is not enough: it waits for a second that agrees")
+  h.drain()
   local e = h.events()[1]
   assert(e and e.type == "tame" and e.npc == 3825 and e.lv == 12 and e.fam == 1 and e.spd == 150 and e.spdAura == nil
-         and e.where.x == 0.4123 and e.who.class == 3, dump(e) .. tostring(h.db().lastError))
+         and e.where.x == 0.4123 and e.who.class == 3 and e.loc == "enUS", dump(e) .. tostring(h.db().lastError))
   assert(dump(e.spells) == "{1={name=Growl,rank=Rank 1,s=2649},2={name=Bite,rank=Rank 1,s=17253}}", dump(e.spells))
   assert(dump(e.diet) == "{1=Fish,2=Meat}", "the diet, sorted")
-  assert(not dump(e):find("Pet%-") and not dump(e):find("Creature%-") and not dump(e):find("Example Wolf"), "no GUID, no pet name")
+  assert(not dump(e):find("Pet%-") and not dump(e):find("Creature%-") and not dump(h.db()):find("Example Wolf"), "no GUID, no name")
+  local key = h.db().textSeen.tame.keys[1]
+  assert(key:match("^3825:12:%x+$") and #key == 24, "the dedup key: npc:lv:checksum " .. key)
   h.s.units.pet = nil
-  h.s.units.target = { guid = BEAST, level = 12, fam = 1, famName = "Wolf" }
-  tame(h)
+  h.s.units.target = beast()
+  tame(h); h.drain()
   assert(#h.events() == 1, "the same beast, level, book and speed once per install")
   h.s.units.pet = nil
-  h.s.units.target = { guid = BEAST, level = 13, fam = 1, famName = "Wolf" }
-  tame(h)
+  h.s.units.target = beast(13)
+  tame(h, newPet({ level = 13 })); h.drain()
   assert(#h.events() == 2 and h.events()[2].lv == 13, "another level is another record")
 
-  -- refusals: not a hunter, no creature id, someone's creature, a pet out, another family, too late, Call Pet, interrupted
+  -- refusals, each given every read the minute allows: not a hunter, no creature id, someone's creature, a pet out,
+  -- another family, too late, Call Pet, interrupted, the cast at another unit, a pet that is not the beast
   local r = fresh()
-  r.s.units.target = { guid = BEAST, level = 12, fam = 1, famName = "Wolf" }
+  r.s.units.target = beast()
   r.G.GetSpellInfo = function(id) return names[id] end
   tame(r)
+  later(r)
   assert(#r.events() == 0 and not r.db().lastError, "a rogue's pet (or anything) is not a tame")
   local function refused(setup, label)
     local x = hunter()
     setup(x)
-    assert(#x.events() == 0 and not x.db().lastError, label .. ": " .. tostring(x.db().lastError))
+    later(x)
+    assert(#x.events() == 0 and not x.db().lastError, label .. ": " .. dump(x.events()[1]) .. " " .. tostring(x.db().lastError))
   end
   refused(function(x) x.s.units.target = nil; tame(x) end, "no target: the creature id is never guessed")
   refused(function(x) x.s.units.target.guid = PLAYER; tame(x) end, "a player's GUID")
@@ -2155,8 +2180,43 @@ do
     x.drain()
   end, "the pet gone before it was read")
   refused(function(x) x.cmd("track drops off"); tame(x) end, "tracking off")
+  -- T1: a mouseover (or focus) macro tamed another wolf while this one was targeted. The client names the cast's target
+  -- in UNIT_SPELLCAST_SENT; without that, the pet's name, level and creature id must still be the target's.
+  refused(function(x) x.G.UnitCreatureID = function(u) if u == "pet" then return 3826 end end
+                      tame(x, newPet({ name = "Other Wolf", level = 14 }), nil, "Other Wolf") end, "T1: a mouseover-macro tame")
+  refused(function(x) tame(x, nil, nil, "Other Wolf") end, "T1: SENT named another unit than the target")
+  refused(function(x) tame(x, newPet({ name = "Other Wolf" }), nil, false) end, "T1: the pet is not named as the target was")
+  refused(function(x) tame(x, newPet({ level = 14 }), nil, false) end, "T1: the pet's level is not the target's")
+  refused(function(x) x.G.UnitCreatureID = function(u) if u == "pet" then return 3826 end end; tame(x, nil, nil, false) end,
+          "T1: the pet's creature id is not the target's")
+  -- T2: a tame broken without INTERRUPTED (only CHANNEL_STOP), then a stabled pet of the same kind taken out 20 s later
+  refused(function(x)
+    x.event("UNIT_SPELLCAST_SENT", "player", "Example Wolf", "c", 1515)
+    x.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 1515)
+    x.event("UNIT_SPELLCAST_CHANNEL_STOP", "player", "c", 1515)
+    x.s.clock = x.s.clock + 20
+    x.s.units.pet = newPet({ guid = PETG .. "1" }); x.event("UNIT_PET", "player")
+  end, "T2: a broken channel, then a stabled pet")
+  refused(function(x)
+    local name = x.G.UnitName
+    x.G.UnitName = function(u) if u == "target" then return nil end; return name(u) end
+    tame(x)
+  end, "no target name to compare with the pet's")
+  -- what may pass: the pet a second after the channel's end; a creature id, as a number or a string, that agrees
+  local slow = hunter()
+  slow.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 1515)
+  slow.event("UNIT_SPELLCAST_CHANNEL_STOP", "player", "c", 1515)
+  slow.s.clock = slow.s.clock + 1
+  slow.s.units.pet = newPet(); slow.event("UNIT_PET", "player"); slow.drain()
+  assert(#slow.events() == 1, "the pet a second after the channel ended")
+  for _, id in ipairs({ 3825, "3825" }) do
+    local same = hunter()
+    same.G.UnitCreatureID = function(u) if u == "pet" then return id end end
+    tame(same, newPet({ level = false })); same.drain()
+    assert(#same.events() == 1 and same.events()[1].lv == 12, "the same creature id; a pet level that cannot be read")
+  end
   local full = hunter({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
-  tame(full)
+  tame(full); later(full)
   assert(#full.events() == 1 and not full.db().lastError, "past the half caps")
 
   -- a book that fills later, a fight, then auras: read again every 2 s, up to 60 s, then recorded with what was read
@@ -2185,6 +2245,22 @@ do
   bare.event("SPELLS_CHANGED")
   e = bare.events()[1]
   assert(e and e.spd == 150 and e.spdAura == nil, dump(e))
+  -- a book still filling: kept only once two reads in a row agree; one that never settles is left out (not read)
+  local filling = hunter()
+  filling.s.book = { { "Bite", "Rank 1", 17253 } }
+  tame(filling)
+  filling.s.book = { { "Bite", "Rank 1", 17253 }, { "Growl", "Rank 1", 2649 } }
+  filling.event("PET_BAR_UPDATE")
+  assert(#filling.events() == 0, "a book that changed between two reads is not in yet")
+  filling.drain()
+  e = filling.events()[1]
+  assert(e and #e.spells == 2, "the book once two reads agree: " .. dump(e))
+  local moving = hunter()
+  local n = 0
+  moving.G.GetSpellBookItemName = function(i) n = n + 1; if i == 1 then return "Bite", "Rank " .. n, 17253 end end
+  tame(moving); later(moving)
+  e = moving.events()[1]
+  assert(e and e.spells == nil and e.spd == 150, "a book that never settles: no spells " .. dump(e))
   -- no speed at all (the pet fought the whole minute), no diet API: still the beast, its level, family and book
   local fight = hunter()
   fight.G.C_PetInfo = nil
@@ -2193,6 +2269,12 @@ do
   fight.drain()
   e = fight.events()[1]
   assert(e and e.npc == 3825 and e.spd == nil and e.spdAura == nil and e.diet == nil and #e.spells == 2, dump(e))
+  -- the player in combat the whole minute, the pet calm: no speed either
+  local busy = hunter()
+  busy.s.units.player = { combat = true }
+  tame(busy); later(busy)
+  e = busy.events()[1]
+  assert(e and e.spd == nil and #e.spells == 2, "the player in combat: no speed " .. dump(e))
   -- without a timer: one read at once
   local now = hunter()
   now.G.C_Timer = nil
@@ -2213,22 +2295,26 @@ do
       return ({ { name = "Bite", subName = "Rank 3", itemType = 3, actionID = 16777216.0 * 129 + 17253 },   -- 0x81 (autocast) in the high byte; a float, as WoW numbers are
                 { name = "Growl", subName = "", itemType = 1, spellID = 2649 },
                 { name = "Attack", itemType = 3, actionID = 0x07000002 },
-                { name = "Bite", subName = "Rank 4", itemType = 2, spellID = 17253 } })[i]
+                { name = "Bite", subName = "Rank 4", itemType = 2, spellID = 17255 } })[i]   -- a future rank, its own id
     end }
   local auras = 0
   m.G.C_UnitAuras = { GetAuraDataByIndex = function(u) auras = auras + 1; assert(u == "pet"); return nil end }
   m.G.UnitAura = function() error("C_UnitAuras first") end
-  tame(m)
+  tame(m); m.drain()
   e = m.events()[1]
   assert(e and dump(e.spells) == "{1={name=Growl,s=2649},2={name=Bite,rank=Rank 3,s=17253}}" and e.spd == 150 and auras == 2, dump(e))
 
-  -- secrets and odd values: a secret GUID or book entry is skipped; a speed or level out of range is left out
+  -- secrets and odd values: a secret GUID, pet name or book entry is skipped; a speed, level or locale out of range is left out
   local secret = {}
   local sx = hunter({ globals = { issecretvalue = function(v) return v == secret end } })
   sx.s.units.target.guid = secret
-  tame(sx)
+  tame(sx); later(sx)
   assert(#sx.events() == 0, "a secret target GUID")
+  local sn = hunter({ globals = { issecretvalue = function(v) return v == secret end } })
+  tame(sn, newPet({ name = secret })); later(sn)
+  assert(#sn.events() == 0, "a secret pet name")
   local so = hunter({ globals = { issecretvalue = function(v) return v == secret end } })
+  so.G.GetLocale = function() return "english" end
   so.s.units.target.level = -1
   so.s.book = { { secret, "Rank 1", 17253 }, { "Growl", secret, 2649 }, { "Bite", "Rank 1", 2649 } }
   so.s.diet = { "Meat", "Me|cffff0000at", secret, "Player-4170-00ABCDEF", "Meat" }
@@ -2236,14 +2322,16 @@ do
   assert(#so.events() == 0, "no usable speed yet: it waits")
   so.s.clock = so.s.clock + 60; so.drain()
   e = so.events()[1]
-  assert(e and e.lv == nil and e.spd == nil and dump(e.spells) == "{1={name=Growl,s=2649}}" and dump(e.diet) == "{1=Meat}", dump(e))
+  assert(e and e.lv == nil and e.spd == nil and e.loc == nil and dump(e.spells) == "{1={name=Growl,s=2649}}" and dump(e.diet) == "{1=Meat}",
+         dump(e))
 
   -- at most 20 a session
   local many = hunter()
   for i = 1, 21 do
     many.s.units.pet = nil
-    many.s.units.target = { guid = "Creature-0-4170-0-1234-" .. (5000 + i) .. "-000012AC01", level = 10, fam = 1, famName = "Wolf" }
-    tame(many)
+    many.s.units.target = { guid = "Creature-0-4170-0-1234-" .. (5000 + i) .. "-000012AC01", level = 10, fam = 1, famName = "Wolf",
+                            name = "Example Wolf" }
+    tame(many, newPet({ level = 10 })); many.drain()
   end
   assert(#many.events() == 20, "20 tames a session")
 
@@ -2254,7 +2342,7 @@ do
   bareApi.s.clock = bareApi.s.clock + 60; bareApi.drain()
   e = bareApi.events()[1]
   assert(e and e.npc == 3825 and not e.spells and not e.spd and not e.diet and not bareApi.db().lastError, dump(e))
-  print("OK   tames: a hunter's beast by the target's GUID at Tame Beast, the pet's book, bare speed and diet; refusals, retries, caps")
+  print("OK   tames: the beast by the target's GUID, a pet with its name, level and id; the book read twice alike, bare speed, diet, locale; refusals, caps")
 end
 
 -- Objective credit (1.20.0): an objective's count rose and this player's own evidence named one cause.
@@ -2300,10 +2388,10 @@ do
   local c = credits(h)
   assert(#c == 1, #c .. " " .. tostring(h.db().lastError))
   local e = c[1]
-  assert(e.quest == 100 and e.i == 1 and e.ot == "monster" and e.npc == 6 and e.by == "name" and e.item == nil and e.where.x == 0.4123
-         and e.who.class == 4, dump(e))
+  assert(e.quest == 100 and e.i == 1 and e.rows == 4 and e.ot == "monster" and e.npc == 6 and e.by == "name" and e.item == nil
+         and e.where.x == 0.4123 and e.who.class == 4, dump(e))
   local keys = {}; for k in pairs(e) do keys[#keys + 1] = k end; table.sort(keys)
-  assert(table.concat(keys, ",") == "b,by,i,id,npc,ot,quest,t,type,where,who", table.concat(keys, ","))
+  assert(table.concat(keys, ",") == "b,by,i,id,npc,ot,quest,rows,t,type,where,who", table.concat(keys, ","))
   assert(not dump(e):find("Creature%-") and not dump(e):find("Kobold") and not dump(e):find("slain"), "no GUID, no name, no text")
   assert(not dump(h.db()):find("numFulfilled") and not dump(h.db()):find("Kobold"), "nothing about progress is saved")
   kill(h, 2); rise(h, 100, 1, 2)
@@ -2315,45 +2403,41 @@ do
   c = credits(h)
   assert(#c == 2 and c[2].npc == 7 and c[2].by == "sole", dump(c[2]))
 
-  -- an item: named, then counted, then a count that disagrees
+  -- an item: named, with the bags agreeing; a named one whose bag count disagrees is not it
   local it = quester()
   it.s.bags[750] = 1
   it.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(750, "Wolf Pelt") .. ".")
   it.event("CHAT_MSG_LOOT", "Someone Else receives loot: " .. pelt(751, "Wolf Pelt") .. ".")
   rise(it, 100, 2, 1)
   c = credits(it)
-  assert(#c == 1 and c[1].ot == "item" and c[1].item == 750 and c[1].by == "name" and c[1].npc == nil, dump(c[1]))
-  it.s.obj[100][2].text = "Pelts of the pack: 1/5"
-  it.s.bags[752] = 2
-  it.event("CHAT_MSG_LOOT", "You receive item: " .. pelt(752, "Grey Pelt") .. "x2.")
-  it.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(2589, "Linen Cloth") .. ".")    -- in the bags, not the count: not it
-  it.s.bags[2589] = 7
-  rise(it, 100, 2, 2)
-  c = credits(it)
-  assert(#c == 2 and c[2].item == 752 and c[2].by == "count", dump(c[2]))
+  assert(#c == 1 and c[1].ot == "item" and c[1].item == 750 and c[1].by == "name" and c[1].npc == nil and c[1].rows == 4, dump(c[1]))
+  it.s.obj[100][2].text = "Old Pelt: 1/5"
   it.s.bags[753] = 9
   it.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(753, "Old Pelt") .. ".")
-  rise(it, 100, 2, 3)
-  assert(#credits(it) == 2, "a bag count that is not the objective's")
+  rise(it, 100, 2, 2)
+  assert(#credits(it) == 1, "a named item whose bag count is not the objective's")
   local full = quester()
   full.s.obj[100][2].numRequired, full.s.bags[750] = 1, 4
   full.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(750, "Wolf Pelt") .. "x4.")
   rise(full, 100, 2, 1)
   assert(#credits(full) == 1 and credits(full)[1].item == 750, "a finished item objective: the bags may hold more")
 
-  -- objects: a window this player opened (gossip), or a loot window on it
+  -- objects: a window this player opened (gossip) that the objective's text names
   local ob = quester()
   ob.s.units.npc = { guid = CRATE, name = "Supply Crate" }
   ob.event("GOSSIP_SHOW")
   rise(ob, 100, 3, 1)
   c = credits(ob)
   assert(#c == 1 and c[1].ot == "object" and c[1].object == 3719 and c[1].by == "name", dump(c[1]))
-  ob.s.obj[100][3].text = "Caches searched: 1/3"
-  ob.s.units.npc = nil
-  ob.loot({ item(4, 1, { NODE, 1 }) })
-  rise(ob, 100, 3, 2)
-  c = credits(ob)
-  assert(#c == 2 and c[2].object == 1617 and c[2].by == "sole", dump(c[2]))
+  -- an error while noting the object costs nothing else: the gossip is still read
+  local oops = quester()
+  oops.s.units.npc = { guid = CRATE, name = "Supply Crate" }
+  local boom = true                             -- the first look at the object's GUID (credit.Talked's) fails
+  oops.G.issecretvalue = function(v) if boom and v == CRATE then boom = false; error("boom") end; return false end
+  local gossipRead = false
+  oops.G.C_GossipInfo = { GetText = function() gossipRead = true end }
+  oops.event("GOSSIP_SHOW")
+  assert(gossipRead and not oops.db().lastError, "credit.Talked in its own pcall: " .. tostring(oops.db().lastError))
 
   -- refusals
   local function none(setup, label)
@@ -2375,12 +2459,44 @@ do
   none(function(x) x.G.IsInGroup = function() return true end; kill(x, 1, "Kobold Tunneler", { id = 7 }); rise(x, 100, 1, 1) end,
        "grouped: a member's kill out of sight counts too, so no sole creature")
   none(function(x) kill(x, 1); x.s.obj[100][4].numFulfilled = 1; rise(x, 100, 4, 1) end, "an event objective")
+  -- the reviewer's wrong-id cases. C1: solo with a pet out, the pet kills the quest mob out of sight while the player's
+  -- own target, another creature, dies; also with the pet dismissed just before
+  local PET = { guid = "Pet-0-4170-0-1234-3825-0100AABBCC", name = "Example Wolf" }
+  none(function(x) x.s.units.pet = PET; kill(x, 1, "Kobold Tunneler", { id = 7 }); rise(x, 100, 1, 1) end,
+       "C1: a pet out: its kill out of sight counts too, so no sole creature")
+  none(function(x) x.s.units.pet = PET; x.s.units.pet = nil; x.event("UNIT_PET", "player")
+                   x.s.clock = x.s.clock + 3; kill(x, 1, "Kobold Tunneler", { id = 7 }); rise(x, 100, 1, 1) end,
+       "C1: a pet dismissed 3 s before")
+  -- C2: the quest item came by trade, mail or the bank (no loot line) while an unrelated item was looted; with or without
+  -- a bag count that happens to match
+  none(function(x) x.G.GetItemCount = nil
+                   x.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(2589, "Linen Cloth") .. "."); rise(x, 100, 2, 1) end,
+       "C2: no bag count: the only item looted is no cause")
+  none(function(x) x.s.bags[751], x.s.bags[2589] = 1, 1
+                   x.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(2589, "Linen Cloth") .. "."); rise(x, 100, 2, 1) end,
+       "C2: an unrelated item's bag count is no cause either")
+  -- C3: a herb node opened (a loot window from an object), then an object objective advanced; and an object window the
+  -- objective's text does not name
+  none(function(x) x.loot({ item(2447, 1, { NODE, 1 }) }); rise(x, 100, 3, 1) end, "C3: a gathered node is no object credit")
+  none(function(x) x.s.units.npc = { guid = CRATE, name = "Old Barrel" }; x.event("GOSSIP_SHOW"); rise(x, 100, 3, 1) end,
+       "C3: an object window the text does not name")
+  none(function(x)
+    x.s.obj[100][5] = nil
+    for i = 5, 41 do x.s.obj[100][i] = { type = "event", numFulfilled = 0, numRequired = 1, text = "Hold" } end
+    x.event("QUEST_LOG_UPDATE"); x.drain()
+    kill(x, 1); rise(x, 100, 1, 1)
+  end, "more than 40 objectives: no rows to give, no credit")
   none(function(x)
     x.s.log[3] = { questID = 101 }
     x.s.obj[101] = { { type = "monster", numFulfilled = 2, numRequired = 10, text = "Kobold Vermin slain: 2/10" } }
     kill(x, 1); rise(x, 101, 1, 3)
   end, "a quest new to the log: its baseline first")
   none(function(x) rise(x, 100, 1, 3); kill(x, 1); rise(x, 100, 1, 2) end, "a fall is no rise")
+  none(function(x) rise(x, 100, 1, 3); rise(x, 100, 1, 0); kill(x, 1); rise(x, 100, 1, 3) end,
+       "a fall makes the next read a baseline: a brief 0 while loading, then the real count, is no rise")
+  local back = quester()                        -- after that baseline, a real rise is credited again
+  rise(back, 100, 1, 3); rise(back, 100, 1, 0); rise(back, 100, 1, 3); kill(back, 1); rise(back, 100, 1, 4)
+  assert(#credits(back) == 1 and credits(back)[1].npc == 6, "a rise after the baseline that followed a fall")
   none(function(x) x.cmd("track drops off"); kill(x, 1); rise(x, 100, 1, 1); x.cmd("track drops on"); kill(x, 2); rise(x, 100, 1, 2) end,
        "tracking off, then on: the first scan is a baseline")
   local used = quester()
@@ -2431,7 +2547,23 @@ do
   bare.event("UNIT_HEALTH", "target"); bare.event("CHAT_MSG_LOOT", "You receive loot: " .. pelt(750, "Wolf Pelt") .. ".")
   bare.event("QUEST_WATCH_UPDATE", 1); bare.drain()
   assert(#bare.events() == 0 and not bare.db().lastError, tostring(bare.db().lastError))
-  print("OK   objective credit: a creature, item or object counted for a quest objective; by name, count or sole; refusals, dedup, caps")
+  -- whole words, with letters past ASCII: a name ending in "é" is not found inside a longer word
+  local acc = quester()
+  acc.s.obj[100][1].text = "Kobolds of Ébène slain: 0/10"
+  kill(acc, 1, "Ébè", { id = 9 }); kill(acc, 2, "Kobold Tunneler", { id = 7 }); rise(acc, 100, 1, 1)
+  assert(#credits(acc) == 0, "a name that is part of a longer accented word")
+  kill(acc, 3, "Ébène", { id = 10 }); kill(acc, 4, "Kobold Tunneler", { id = 11 }); rise(acc, 100, 1, 2)
+  assert(#credits(acc) == 1 and credits(acc)[1].npc == 10 and credits(acc)[1].by == "name", dump(credits(acc)[1]))
+  -- UNIT_HEALTH for the player, the pet and group members is dropped before anything is read
+  local quiet = quester()
+  local reads = 0
+  local dead = quiet.G.UnitIsDead
+  quiet.G.UnitIsDead = function(u) reads = reads + 1; return dead(u) end
+  for _, u in ipairs({ "player", "pet", "party1", "partypet2", "raid12", "raidpet3" }) do quiet.event("UNIT_HEALTH", u) end
+  assert(reads == 0, "group tokens read nothing")
+  quiet.event("UNIT_HEALTH", "nameplate1")
+  assert(reads == 1, "a nameplate is read")
+  print("OK   objective credit: a creature, item or object counted for a quest objective; by name, or sole for a creature alone; rows; refusals, dedup, caps")
 end
 `;
 

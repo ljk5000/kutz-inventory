@@ -325,12 +325,12 @@ test("observations 3.13.0: tame events keep the beast and the pet's facts; no cr
   const who = { level: 12, class: 3, faction: "Alliance", name: "Exampleobserver", surname: "Examplefamily" };
   const event = { id: "abc123-1", t: 100, b: "1.60.1.70888", type: "tame", npc: 3825, lv: 12, fam: 1, spd: 150, spdAura: true,
     spells: [{ s: 17253, name: "Bite", rank: "Rank 1" }, { s: 2649, name: "Growl" }], diet: ["Meat", "Fish"],
-    guid: "Pet-0-4170-0-1234-3825-0100AABBCC", petName: "Discard", where, who };
+    loc: "enUS", guid: "Pet-0-4170-0-1234-3825-0100AABBCC", petName: "Discard", where, who };
   const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
   const good = obs({}).events[0];
   assert.deepEqual(good, { id: "abc123-1", t: 100, b: "1.60.1.70888", type: "tame", npc: 3825, lv: 12, fam: 1,
     spells: [{ s: 2649, name: "Growl" }, { s: 17253, name: "Bite", rank: "Rank 1" }], spd: 150, spdAura: true, diet: ["Fish", "Meat"],
-    where, who });
+    loc: "enUS", where, who });
   assert.ok(!/Pet-|Discard/.test(JSON.stringify(good)), "no pet GUID or name");
   const bytes = Buffer.byteLength(JSON.stringify(good));
   assert.ok(bytes < 450, "one tame event: " + bytes + " bytes");
@@ -338,7 +338,7 @@ test("observations 3.13.0: tame events keep the beast and the pet's facts; no cr
   // each optional field that fails its check goes alone
   const odd = obs({ lv: 256, fam: "Pet-0-1-2", spd: 9, spdAura: "yes",
     spells: [null, { s: 0, name: "Bite" }, { s: 1, name: "|cffBad" }, { s: 2, name: "Ok", rank: "x".repeat(41) }, { s: 2, name: "Again" }, 7],
-    diet: ["Meat", "Meat", "|x", "Creature-0-1-2", 5, "x".repeat(41)] }).events[0];
+    diet: ["Meat", "Meat", "|x", "Creature-0-1-2", 5, "x".repeat(41)], loc: "en-US" }).events[0];
   assert.deepEqual(odd, { id: "abc123-1", t: 100, b: "1.60.1.70888", type: "tame", npc: 3825, spells: [{ s: 2, name: "Ok" }],
     diet: ["Meat"], where, who });
   const bare = obs({ lv: undefined, fam: "Wolf", spells: [], diet: [], spd: 2000, spdAura: false }).events[0];
@@ -351,7 +351,8 @@ test("observations 3.13.0: tame events keep the beast and the pet's facts; no cr
   assert.deepEqual(validateExport(withEvent(good)), []);
   assert.deepEqual(validateExport(withEvent(bare)), []);
   for (const patch of [{ npc: undefined }, { spdAura: false }, { spells: [] }, { spells: [{ s: 1 }] }, { diet: ["a", "a"] },
-                       { guid: "Pet-0-4170-0-1234-3825-0100AABBCC" }, { lv: 0 }, { spd: 2001 }, { fam: "Creature-0-1-2" }]) {
+                       { guid: "Pet-0-4170-0-1234-3825-0100AABBCC" }, { lv: 0 }, { spd: 2001 }, { fam: "Creature-0-1-2" },
+                       { loc: "english" }, { loc: "ENus" }]) {
     assert.ok(validateExport(withEvent({ ...good, ...patch })).length, "schema rejected " + JSON.stringify(patch));
   }
 });
@@ -361,26 +362,32 @@ test("observations 3.13.0: credit events keep quest, objective, type, one id and
   const doc = convert.convertSavedVariables([LUA]).inventory;
   const where = { map: 0, uiMap: 1429, x: 0.4123, y: 0.6543 };
   const who = { level: 12, class: 4, faction: "Alliance", name: "Exampleobserver", surname: "Examplefamily" };
-  const event = { id: "abc123-2", t: 100, b: "1.60.1.70888", type: "credit", quest: 33, i: 1, ot: "monster", npc: 6, by: "name",
+  const event = { id: "abc123-2", t: 100, b: "1.60.1.70888", type: "credit", quest: 33, i: 1, rows: 2, ot: "monster", npc: 6, by: "name",
     numFulfilled: 3, numRequired: 10, text: "Kobold Vermin slain: 3/10", guid: "Creature-0-4170-0-1234-6-0000AB0001", where, who };
   const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
   const good = obs({}).events[0];
-  assert.deepEqual(good, { id: "abc123-2", t: 100, b: "1.60.1.70888", type: "credit", quest: 33, i: 1, ot: "monster", npc: 6, by: "name",
-    where, who });
+  assert.deepEqual(good, { id: "abc123-2", t: 100, b: "1.60.1.70888", type: "credit", quest: 33, i: 1, rows: 2, ot: "monster", npc: 6,
+    by: "name", where, who });
   const bytes = Buffer.byteLength(JSON.stringify(good));
   assert.ok(bytes < 300, "one credit event: " + bytes + " bytes");
-  const item = obs({ ot: "item", npc: undefined, item: 750, by: "count" }).events[0];
-  const object = obs({ ot: "object", npc: undefined, object: 3719, by: "sole", i: 12 }).events[0];
-  assert.deepEqual([item.item, item.by, item.npc, object.object, object.i], [750, "count", undefined, 3719, 12]);
+  const item = obs({ ot: "item", npc: undefined, item: 750 }).events[0];
+  const object = obs({ ot: "object", npc: undefined, object: 3719, i: 12, rows: 40 }).events[0];
+  const sole = obs({ by: "sole" }).events[0];
+  const old = obs({ rows: undefined }).events[0];   // a credit of an earlier development build: no rows
+  assert.deepEqual([item.item, item.by, item.npc, object.object, object.i, object.rows, sole.by, old.rows, "rows" in old],
+    [750, "name", undefined, 3719, 12, 40, "sole", undefined, false]);
   for (const bad of [{ quest: 0 }, { quest: "33" }, { i: 0 }, { i: 13 }, { i: 1.5 }, { ot: "event" }, { ot: "constructor" }, { ot: undefined },
                      { npc: undefined }, { npc: 0 }, { npc: undefined, item: 6 }, { item: 750 }, { object: 3 }, { by: "guess" },
-                     { by: undefined }, { by: "count" }]) {
+                     { by: undefined }, { by: "count" }, { ot: "item", npc: undefined, item: 750, by: "sole" },
+                     { ot: "object", npc: undefined, object: 3719, by: "sole" }, { rows: 0 }, { rows: 41 }, { rows: 1.5 }, { rows: "2" },
+                     { i: 3, rows: 2 }]) {
     assert.equal(obs(bad), null, JSON.stringify(bad));
   }
   const withEvent = (e) => ({ ...doc, observations: { v: 1, addon: "1.20.0", events: [e] } });
-  for (const e of [good, item, object]) assert.deepEqual(validateExport(withEvent(e)), []);
+  for (const e of [good, item, object, sole, old]) assert.deepEqual(validateExport(withEvent(e)), []);
   for (const patch of [{ npc: undefined }, { item: 750 }, { ot: "item" }, { by: "count" }, { i: 13 }, { numFulfilled: 3 }, { ot: "event" },
-                       { by: "guess" }, { quest: 0 }]) {
+                       { by: "guess" }, { quest: 0 }, { rows: 0 }, { rows: 41 }, { rows: 1.5 },
+                       { ot: "item", npc: undefined, item: 750, by: "sole" }, { ot: "object", npc: undefined, object: 3719, by: "sole" }]) {
     assert.ok(validateExport(withEvent({ ...good, ...patch })).length, "schema rejected " + JSON.stringify(patch));
   }
 });
@@ -431,6 +438,20 @@ test("observations 3.12.0: quest accept data is bounded, progress-free and tied 
                      { poi: [{ ...point, x: 100.001 }] }, { poi: [point, point] }, { poi: [{ ...point, x: 0, y: 0 }] },
                      { act: "turnin" }]) {
     assert.ok(validateExport({ ...doc, observations: { v: 1, addon: "1.19.0", events: [{ ...data, ...bad }] } }).length);
+  }
+  // 3.13.0: rows, how many objectives the client listed, only beside obj and never fewer than obj's rows
+  const two = [valid, { ...valid, n: 2 }];
+  assert.equal(obs({ obj: two, rows: 2 }).rows, 2);
+  assert.equal(obs({ obj: two, rows: 40 }).rows, 40);
+  assert.ok(!("rows" in obs({ obj: two })), "an accept of an earlier build has no rows");
+  for (const rows of [0, 1, 41, 2.5, "2"]) assert.ok(!("rows" in obs({ obj: two, rows })), "rows dropped: " + rows);
+  assert.ok(!("rows" in obs({ rows: 2 })), "no rows without obj");
+  assert.ok(!("rows" in obs({ act: "turnin", obj: two, rows: 2 })));
+  const withRows = obs({ obj: two, rows: 3 });
+  assert.deepEqual(validateExport({ ...doc, observations: { v: 1, addon: "1.20.0", events: [withRows] } }), []);
+  for (const bad of [{ rows: 0 }, { rows: 41 }, { rows: 1.5 }, { obj: undefined }, { act: "turnin", obj: undefined }]) {
+    assert.ok(validateExport({ ...doc, observations: { v: 1, addon: "1.20.0", events: [{ ...withRows, ...bad }] } }).length,
+      "schema rejected " + JSON.stringify(bad));
   }
 });
 
