@@ -6,6 +6,8 @@
 
 - Record objective credit while drop tracking is on: which creature, item or object counted for a quest objective. A second after the quest log changes, each monster, item and object objective's `numFulfilled` is compared with the last read, in memory only (never saved or exported). When one rose and the player's own evidence of the 6 seconds before names exactly one cause, `{ quest, i, ot, npc|item|object, by }` is recorded. Evidence is a creature a unit token showed dead that no other player had tapped, an item from the player's own "You receive loot / item" line, or an object whose window the player opened. `by` says how: the only candidate named in the objective's text, the only item whose bag count matches, or the only candidate at all (never a creature while grouped, since a group member's kill counts too). No progress numbers, no text, nothing about other players. Once per quest, objective and id per install, at most 200 a session (about 265 bytes each), under the half caps.
 
+- Fix: the reputation read put the reputation window back only partly. A header collapsed inside another collapsed header was left open, a collapsed header with no faction ID stopped the read with an error and left reputation unread until a reload, and a read that failed part-way left headers open. Each collapsed header is now opened on its own from the top down (so a nested one is found and opened too) and all of them are closed again from the bottom up, also after a failed read.
+
 - Existing installs get one login line about the new recording and `/kinv track drops off`.
 
 Inventory export 3.13.0 (default) adds `tame` and `credit` observations. The observations section stays `v: 1`.

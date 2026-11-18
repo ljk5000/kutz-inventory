@@ -162,6 +162,47 @@ do -- trainers: the class trainer's list; the hunter's Beast Training window (tr
  check(#c.trainers.class==2 and c.trainers.class[1].name=='Frostbolt','Beast Training must not replace the class trainer')
  C_Trainer,GetNumTrainerServices=nil,nil
 end
+do -- reputation: collapsed headers, one nested in another and one with no factionID, are opened for the read and put back
+ local rows={ -- the whole list in order; p = the parent header's row; c = collapsed (headers only)
+  {name='Alliance',id=469,h=true,c=false},{name='Stormwind',id=72,p=1},
+  {name='Alliance Forces',id=891,h=true,child=true,c=true,p=1},{name='Silverwing Sentinels',id=890,p=3},
+  {name='Other',id=1169,h=true,c=true},{name='Inner Circle',h=true,child=true,c=true,p=5},{name='Deep Faction',id=999,p=6},
+  {name='Wintersaber Trainers',id=589,p=5},{name='Misc',h=true,c=false},{name='Ravenholdt',id=349,p=9}}
+ local function shown()
+  local out={}
+  for _,r in ipairs(rows) do
+   local p,ok=r.p,true
+   while p do if rows[p].c then ok=false end; p=rows[p].p end
+   if ok then out[#out+1]=r end
+  end
+  return out
+ end
+ local expandAll=0
+ C_Reputation={GetNumFactions=function() return #shown() end,
+  GetFactionDataByIndex=function(i) local r=shown()[i]; if r then return {name=r.name,factionID=r.id,isHeader=r.h or false,isChild=r.child or false,
+   isCollapsed=r.c or false,reaction=5,currentStanding=r.standing or 100} end end,
+  ExpandFactionHeader=function(i) shown()[i].c=false end,CollapseFactionHeader=function(i) shown()[i].c=true end,
+  ExpandAllFactionHeaders=function() expandAll=expandAll+1; for _,r in ipairs(rows) do if r.h then r.c=false end end end}
+ emit('UPDATE_FACTION');advance(5)
+ local got={}
+ for _,r in ipairs(c.reputation or {}) do got[#got+1]=r.factionID end
+ check(table.concat(got,',')=='72,890,999,589,349','every faction, nested ones too: '..table.concat(got,','))
+ check(c.reputation[3].group=='Other' and c.reputation[3].subGroup=='Inner Circle','groups')
+ check(rows[3].c and rows[5].c and rows[6].c and not rows[1].c and not rows[9].c and expandAll==0,'the window as the player left it')
+ rows[8].standing=250;emit('UPDATE_FACTION');advance(5)
+ check(c.reputation[4].value==250,'read again on the next change')
+ local get=C_Reputation.GetFactionDataByIndex
+ local broken=setmetatable({},{__index=function() error('read failed') end})
+ C_Reputation.GetFactionDataByIndex=function(i) local f=get(i); if f and f.factionID==999 then return broken end; return f end
+ local saved=KutzInventoryDB.lastError
+ emit('UPDATE_FACTION');advance(5)
+ check(tostring(KutzInventoryDB.lastError):find('read failed'),'the failure is reported: '..tostring(KutzInventoryDB.lastError))
+ check(rows[3].c and rows[5].c and rows[6].c and c.reputation[4].value==250,'a read that fails part-way still puts the window back')
+ C_Reputation.GetFactionDataByIndex=get;KutzInventoryDB.lastError=saved
+ rows[8].standing=300;emit('UPDATE_FACTION');advance(5)
+ check(c.reputation[4].value==300,'and the next change is read again')
+ C_Reputation=nil
+end
 rank=7;emit('TRAIT_NODE_CHANGED')
 emit('PLAYER_EQUIPMENT_CHANGED')
 if '${mode}'~='NativeExit' then

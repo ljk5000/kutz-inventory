@@ -721,24 +721,22 @@ end
 
 ---------------------------------------------------------------------------
 -- reputation. Collapsed headers in the reputation window hide their factions from addons too, so they are
--- opened for the moment of the read and closed again afterwards (the window looks exactly as before).
+-- opened for the moment of the read and closed again afterwards (the window looks exactly as before). Each collapsed
+-- header is opened on its own from the top down, so one nested in a collapsed header shows up next and is opened (and
+-- later closed) too; the headers are closed again from the bottom up also when the read fails part-way.
 ---------------------------------------------------------------------------
 local readingReps = false
 
-local function ScanReputation()
-    local R = C_Reputation
-    if not (R and R.GetNumFactions and R.GetFactionDataByIndex) then return end
-    readingReps = true
-    local closed = {}                                         -- factionIDs of headers the player had collapsed
-    for i = 1, (Try(R.GetNumFactions) or 0) do
-        local f = Try(R.GetFactionDataByIndex, i)
-        if f and f.isHeader and f.isCollapsed then closed[f.factionID] = true end
-    end
-    if next(closed) then Try(R.ExpandAllFactionHeaders) end
+local function RepCount(R) return math.min(tonumber(Plain(Try(R.GetNumFactions))) or 0, 1000) end
+local function RepHeaderKey(f)                                -- a header's factionID, else its name; nil: it is left alone
+    local id, name = Plain(f.factionID), Plain(f.name)
+    if type(id) == "number" and id > 0 then return id end
+    if type(name) == "string" and name ~= "" then return "name:" .. name end
+end
 
+local function ReadReputation(R)
     local list, header, subHeader = {}, nil, nil
-    local count = Try(R.GetNumFactions) or 0
-    for i = 1, count do
+    for i = 1, RepCount(R) do
         local f = Try(R.GetFactionDataByIndex, i)
         if f and f.name then
             if f.isHeader and not f.isChild then header, subHeader = Plain(f.name), nil
@@ -765,14 +763,40 @@ local function ScanReputation()
             end
         end
     end
+    return list
+end
 
-    if next(closed) then                                      -- put the window back the way it was
-        for i = count, 1, -1 do                               -- from the bottom up, so indexes don't shift
-            local f = Try(R.GetFactionDataByIndex, i)
-            if f and f.isHeader and closed[f.factionID] and not f.isCollapsed then Try(R.CollapseFactionHeader, i) end
+local function ScanReputation()
+    local R = C_Reputation
+    if not (R and R.GetNumFactions and R.GetFactionDataByIndex) then return end
+    readingReps = true
+    local opened = {}                                         -- keys of the headers the player had collapsed
+    local ok, list = pcall(function()
+        if type(R.ExpandFactionHeader) == "function" then     -- without it, only what the window shows is read
+            local i, n = 1, RepCount(R)
+            while i <= n do
+                local f = Try(R.GetFactionDataByIndex, i)
+                local key = type(f) == "table" and Plain(f.isHeader) == true and Plain(f.isCollapsed) == true and RepHeaderKey(f)
+                if key and not opened[key] then
+                    opened[key] = true
+                    Try(R.ExpandFactionHeader, i)
+                    n = RepCount(R)
+                end
+                i = i + 1
+            end
         end
+        return ReadReputation(R)
+    end)
+    if next(opened) then                                      -- put the window back the way it was
+        local function close(i)
+            local f = Try(R.GetFactionDataByIndex, i)
+            local key = type(f) == "table" and Plain(f.isHeader) == true and Plain(f.isCollapsed) == false and RepHeaderKey(f)
+            if key and opened[key] then Try(R.CollapseFactionHeader, i) end
+        end
+        for i = RepCount(R), 1, -1 do pcall(close, i) end     -- from the bottom up, so indexes don't shift; row by row
     end
     readingReps = false
+    if not ok then error(list, 0) end
     me.reputation = list
     me.updated.reputation = time()
 end
