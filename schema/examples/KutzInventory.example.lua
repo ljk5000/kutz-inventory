@@ -1024,6 +1024,11 @@ KutzInventoryObsDB = {
 			["ct"] = 7,
 			["rxA"] = 5,
 			["sub"] = "Made-up Tailoring Supplies",
+			["svc"] = {
+				["vendor"] = true,
+				["repair"] = true,
+				["gossip"] = true,
+			},
 			["day"] = 20405,
 			["cells"] = {
 				["1453:63:72"] = 4,

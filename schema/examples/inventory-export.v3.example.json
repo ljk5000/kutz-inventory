@@ -865,6 +865,10 @@
     "ct": 7,
     "rxA": 5,
     "sub": "Made-up Tailoring Supplies",
+    "svc": [
+     "repair",
+     "vendor"
+    ],
     "day": 20405,
     "cells": [
      [

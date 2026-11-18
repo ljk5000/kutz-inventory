@@ -167,12 +167,13 @@ KutzInventoryObsDB = {
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },
   -- the npcs summary (1.17.0): a beast with its attack speed (spds is the addon's own tally, not exported), a vendor with
-  -- its subtitle and the squares the player stood in beside it, a world boss seen as a skull, an entry with no day and a
+  -- its subtitle, its services (1.18.0; a value not in the list is left out) and the squares the player stood in beside it, a world boss seen as a skull, an entry with no day and a
   -- cell key that is not a map square (both left out by the exporter)
   npcs = {
     [525] = { name = "Made-up Wolf", lv = { 10, 12 }, cls = "normal", ct = 1, fam = 1, rxA = 2, spd = 200, spds = { [200] = 3, [150] = 1 }, day = 20404,
               cells = { ["1429:41:65"] = 2, ["1429:42:65"] = 1 } },
-    [1346] = { name = "Made-up Tailor", lv = { 30, 30 }, cls = "normal", ct = 7, rxA = 5, sub = "Made-up Tailoring Supplies", day = 20405,
+    [1346] = { name = "Made-up Tailor", lv = { 30, 30 }, cls = "normal", ct = 7, rxA = 5, sub = "Made-up Tailoring Supplies",
+               svc = { vendor = true, repair = true, gossip = true }, day = 20405,
                cells = { ["1453:63:72"] = 4, ["nowhere"] = 9 } },
     [6109] = { name = "Made-up Dragon", boss = true, cls = "worldboss", ct = 2, rxA = 1, day = 20403 },
     [2958] = { lv = { 14, 14 }, cls = "normal" },

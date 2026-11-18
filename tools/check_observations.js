@@ -149,7 +149,11 @@ local function fresh(opts)
     end
     G.C_Trainer = { GetTrainerType = function() return s.trainer.type end }
     G.Enum = { TrainerType = { General = 0, Tradeskills = 2, Pet = 3 }, TooltipDataType = { Item = 0, Spell = 1 },
-               FlightPathState = { Current = 0, Reachable = 1, Unreachable = 2 } }
+               FlightPathState = { Current = 0, Reachable = 1, Unreachable = 2 },
+               PlayerInteractionType = { Merchant = 5, TaxiNode = 6, Trainer = 7, Banker = 8, GuildBanker = 10, Registrar = 11,
+                                         PetitionVendor = 13, GuildTabardVendor = 14, MailInfo = 17, SpiritHealer = 18, Binder = 20,
+                                         Auctioneer = 21, StableMaster = 22, BattleMaster = 23, Transmogrifier = 24 } }
+    G.CanMerchantRepair = function() return s.canRepair end
     -- flight masters: s.taxi.nodes = { { nodeID, name, slotIndex, type (CURRENT|REACHABLE|DISTANT|NONE), state, cost, hops,
     -- x, y, slotName, slot } }: GetAllTaxiNodes gives nodeID, name, state, slotIndex and the position; the slot functions
     -- answer for slot (default slotIndex) with slotName (default name); s.onTaxi is UnitOnTaxi("player")
@@ -914,7 +918,8 @@ do
                        "QUEST_TURNED_IN", "MERCHANT_SHOW", "MERCHANT_CLOSED", "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_START",
                        "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                        "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
-                       "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }) do
+                       "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
+                       "HEARTHSTONE_BOUND" }) do
     h.event(e, 1, 2, 3)
   end
   h.drain()
@@ -1137,6 +1142,70 @@ do
   lt.loot({ item(2589, 1, { WOLF, 1 }) })
   assert(lt.db().npcs[525] and not lt.db().npcs[525].cells and lt.db().npcs[525].spds == nil, "a corpse from afar: no cell, no speed")
   print("OK   npcs: vendor, quest and trainer windows count as near; a loot corpse is seen too")
+
+  -- svc: the services an npc was seen to offer, a set; each window is a near sighting; within the 30 s only the flags
+  local function svc(n) local out = {}; for k in pairs(n and n.svc or {}) do out[#out + 1] = k end; table.sort(out); return table.concat(out, ",") end
+  local sv = fresh(); sv.on()
+  sv.s.units.npc = { guid = TAILOR, level = 30, name = "Example Tailor" }
+  sv.s.merchant = { { id = 4470, n = 1, price = 38, avail = -1 } }; sv.s.canRepair = true
+  sv.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5); sv.event("MERCHANT_SHOW"); sv.drain()
+  assert(svc(npcs(sv)[1346]) == "repair,vendor" and npcs(sv)[1346].cells, "a vendor that repairs: " .. dump(npcs(sv)[1346]))
+  sv.s.clock = sv.s.clock + 5; sv.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 8)
+  sv.s.clock = sv.s.clock + 5; sv.event("CONFIRM_BINDER")
+  assert(svc(npcs(sv)[1346]) == "bank,inn,repair,vendor", "within the 30 s the flags still land: " .. dump(npcs(sv)[1346]))
+  assert(dump(npcs(sv)[1346].cells) == "{1429:41:65=1}", "but no second count: " .. dump(npcs(sv)[1346]))
+  sv.s.units.npc.controlled = true; sv.s.clock = sv.s.clock + 5; sv.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 21)
+  assert(svc(npcs(sv)[1346]) == "bank,inn,repair,vendor", "a player-controlled unit of the same id adds nothing")
+  sv.s.units.npc.controlled = nil
+  -- every interaction type by its Enum name; the reload keeps the set; a vendor that cannot repair is only a vendor
+  local kinds = { [6] = "flight", [7] = "trainer", [8] = "bank", [11] = "guild", [13] = "guild", [14] = "tabard", [18] = "spirit",
+                  [20] = "inn", [21] = "auction", [22] = "stable", [23] = "battlemaster", [5] = "vendor" }
+  for kind, want in pairs(kinds) do
+    local k = fresh(); k.on(); k.s.units.npc = { guid = TAILOR, level = 30 }; k.s.canRepair = false
+    k.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", kind)
+    assert(svc(npcs(k)[1346]) == want and npcs(k)[1346].cells, kind .. ": " .. dump(npcs(k)[1346]))
+  end
+  local r = fresh({ db = sv.db() }); r.on(); r.s.units.npc = { guid = TAILOR, level = 30 }
+  r.event("HEARTHSTONE_BOUND"); r.s.clock = r.s.clock + 40; r.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 22)
+  assert(svc(npcs(r)[1346]) == "bank,inn,repair,stable,vendor", "kept across a reload: " .. dump(npcs(r)[1346]))
+  -- the trainer and flight master windows flag themselves
+  local t2 = fresh(); t2.on(); t2.s.units.npc = { guid = TAILOR, level = 30 }
+  t2.s.trainer.rows = { { name = "Frostbolt", st = "available", cost = 1 } }; t2.event("TRAINER_SHOW"); t2.drain()
+  t2.s.taxi.nodes = { { nodeID = 2, name = "A", slotIndex = 1, type = "CURRENT", cost = 0 } }
+  t2.s.clock = t2.s.clock + 40; t2.event("TAXIMAP_OPENED")
+  assert(svc(npcs(t2)[1346]) == "flight,trainer", dump(npcs(t2)[1346]))
+  -- a saved svc that is not a set is replaced; junk names in it are not exported (see convert.test.js)
+  local j = fresh({ db = { v = 1, on = true, agreed = true, noted = true, prefix = "abcd12", n = 0, events = {},
+                           npcs = { [1346] = { day = DAY, svc = "vendor" } } } })
+  j.s.units.npc = { guid = TAILOR, level = 30 }; j.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 8)
+  assert(svc(npcs(j)[1346]) == "bank" and not j.db().lastError, dump(npcs(j)[1346]))
+  -- nothing: a mailbox or other object, a type with no service, an unknown number, no Enum, no npc unit, a player, a pet,
+  -- inside an instance, while off; a gossip window is no service and its text is never read
+  local function nothing(setup, kind, ev)
+    local x = fresh(); x.on(); x.s.units.npc = { guid = TAILOR, level = 30 }
+    setup(x)
+    x.event(ev or "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", kind)
+    local n = (x.db().npcs or {})[1346]
+    assert(not (n and n.svc) and not x.db().lastError, "no service: " .. dump(x.db().npcs) .. tostring(x.db().lastError))
+    return x
+  end
+  local mail = nothing(function(x) x.s.units.npc = { guid = "GameObject-0-4170-0-1234-143983-0000AAAA02" } end, 17)
+  assert(next(mail.db().npcs) == nil, "an object is never an npc")
+  nothing(function(x) x.s.units.npc = { guid = "GameObject-0-4170-0-1234-187293-0000AAAA03" } end, 10)
+  nothing(function() end, 24)
+  nothing(function() end, 3)
+  nothing(function() end, 99)
+  nothing(function() end, "5")
+  nothing(function(x) x.G.Enum.PlayerInteractionType = nil end, 5)
+  nothing(function(x) x.s.units.npc = nil end, 5)
+  nothing(function(x) x.s.units.npc = { guid = PLAYER, player = true } end, 5)
+  nothing(function(x) x.s.units.npc.controlled = true end, 5)
+  nothing(function(x) x.s.itype, x.s.iid = "party", 36 end, 5)
+  nothing(function(x) x.cmd("track drops off") end, 5)
+  nothing(function(x) x.s.units.npc = nil end, nil, "HEARTHSTONE_BOUND")
+  nothing(function(x) x.cmd("track drops off") end, nil, "CONFIRM_BINDER")
+  nothing(function(x) x.G.CanMerchantRepair = function() return true end end, nil, "GOSSIP_SHOW")
+  print("OK   npcs: svc, the services each npc was seen to offer, from interaction windows, repair, inn binding; never objects or players")
 
   -- privacy: no GUID, no name, no time finer than a day; /kinv track reports how many are held
   local all = dump(h.db().npcs)

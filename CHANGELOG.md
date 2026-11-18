@@ -5,7 +5,9 @@
 - Record flight masters for cr0m's item database (drop tracking, `/kinv track`): when a flight master's map opens, every node you can fly to from its node, by taxi node id, with the price the map shows you (a game price, not your money) and the number of legs. The node ids come from `C_TaxiMap.GetAllTaxiNodes` matched slot by slot to the map; when the client gives no ids, the two disagree or there is not exactly one current node, nothing is recorded. Node names are not kept. The same list and reaction from the same flight master is recorded at most once a week.
 - Record flight times: from which node to which and the whole seconds from boarding (`TakeTaxiNode`, then losing control on the taxi) to landing (control back, off the taxi). Kept only when the landing is known to be at the chosen node (your position on the taxi map is by that node, or the next flight master's map within 2 minutes is at it), once per route in 30 days. No position or route trail, and never your money.
 
-Inventory export 3.11.0 (default) adds the observation types `taxi` and `flight`, strictly validated (a doubtful node list is dropped whole); the observations section stays `v: 1`. 2.1.0 (`--format 2`) and auction scans 1.2.0 are unchanged.
+- The NPC summary records `svc`, the services each NPC was seen to offer (vendor, repair, flight, trainer, bank, guildbank, inn, auction, stable, battlemaster, spirit, guild, tabard), from the interaction window the game opens with it (`PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, matched by the interaction type's name), the vendor, trainer and flight master windows, whether the merchant can repair, and binding your Hearthstone at an inn. Creatures only (never a mailbox or other object); each counts as standing beside it. No gossip text.
+
+Inventory export 3.11.0 (default) adds the observation types `taxi` and `flight`, strictly validated (a doubtful node list is dropped whole), and `svc` on NPC summary entries, a sorted list of the known services; the observations section stays `v: 1`. 2.1.0 (`--format 2`) and auction scans 1.2.0 are unchanged.
 
 ## KutzInventory 1.17.0
 

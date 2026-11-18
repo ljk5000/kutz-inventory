@@ -273,6 +273,7 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] };
     const withNpcs = (patch, extra) => withObs({ ...goodObs, install: "k1f9c2", npcs: [{ ...npc, ...patch }], ...extra });
     const np = [withNpcs({}), withNpcs({ boss: true, lv: undefined, ct: "Beast" }), withNpcs({}, { events: [] }),
+        withNpcs({ svc: ["inn", "repair", "vendor"] }),
         withNpcs({}, { install: "k1f9c2+zz9900" }), withNpcs({ lv: undefined, cls: undefined, ct: undefined, fam: undefined, rxA: undefined,
         rxH: undefined, sub: undefined, spd: undefined, cells: undefined, name: undefined })].flatMap((o) => validateExport(JSON.parse(JSON.stringify(o))));
     if (np.length) fail("3.10.0 npcs do not match the 3.x schema:\n  " + np.join("\n  "));
@@ -287,6 +288,8 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         withNpcs({ name: "|cffff0000Made-up Wolf|r" }), withNpcs({ name: "" }), withNpcs({ unitName: "Made-up Wolf" }), withNpcs({ t: 1762905600 }),
         withNpcs({}, { install: undefined }), withNpcs({}, { install: "K1F9C2" }), withNpcs({}, { install: "k1f9c2+" }),
         withNpcs({}, { npcs: [] }), withObs({ ...goodObs, install: "k1f9c2" }), withNpcs({}, { events: [], npcs: undefined }),
+        withNpcs({ svc: [] }), withNpcs({ svc: ["vendor", "vendor"] }), withNpcs({ svc: ["gossip"] }), withNpcs({ svc: ["Vendor"] }),
+        withNpcs({ svc: "vendor" }), withNpcs({ svc: { vendor: true } }), withNpcs({ svc: [1] }),
     ];
     badNpcs.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(o))).length) fail("the 3.x schema accepted bad npcs #" + n); });
     // 3.11.0: taxi (a flight master's reachable nodes and prices) and flight (how long a flight took; never a where)

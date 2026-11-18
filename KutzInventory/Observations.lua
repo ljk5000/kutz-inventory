@@ -56,8 +56,11 @@
 --
 -- npcs (KutzInventory 1.17.0): not events but one summary per install of the creatures this player looked at
 -- (PLAYER_TARGET_CHANGED, UPDATE_MOUSEOVER_UNIT, and the vendor / quest / trainer window or loot corpse in front of it),
--- updated in place: KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss, cls, ct, fam, rxA, rxH, sub, spd,
--- spds, day, cells = { ["uiMap:cx:cy"] = count } }. Only creatures no player controls (no pets, guardians, totems, companions),
+-- updated in place: KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss, cls, ct, fam, rxA, rxH, sub, svc, spd,
+-- spds, day, cells = { ["uiMap:cx:cy"] = count } }. svc (1.18.0): the services it was seen to offer, a set { vendor = true,
+-- ... } of vendor, repair, flight, trainer, bank, guildbank, inn, auction, stable, battlemaster, spirit, guild, tabard, from
+-- PLAYER_INTERACTION_MANAGER_FRAME_SHOW (Enum.PlayerInteractionType by name), the vendor (CanMerchantRepair: repair),
+-- trainer and taxi windows, and CONFIRM_BINDER / HEARTHSTONE_BOUND (inn); each is a near sighting. No gossip text. Only creatures no player controls (no pets, guardians, totems, companions),
 -- only outside instances, and a value the client keeps secret is left out. Privacy: no time finer than a day (day = the
 -- last day it was seen, days since 1970), no player names and no GUIDs (name is the NPC's own, sub its subtitle, taken only when
 -- the tooltip's lines prove it is one; both refuse the player's name and owner titles), and no trail: cells are unordered counts of the 1% map squares the player stood in
@@ -727,6 +730,12 @@ end
 local vendorSeen = {}                           -- npc id -> { at = time(), sig = ... } this session
 local merchantOpen = false
 
+local function Repairs(svc)                     -- the services list, with "repair" when this merchant window can repair
+    local can = Plain(Try(CanMerchantRepair))
+    if can == true or can == 1 then svc[#svc + 1] = "repair" end
+    return svc
+end
+
 local function Cost(i)
     local cost = {}
     for j = 1, Int((Try(GetMerchantItemCostInfo, i))) or 0 do
@@ -786,7 +795,7 @@ local function RecordVendor()
     if not merchantOpen then return end
     local what, npc = Giver("npc")
     if what ~= "npc" then return end
-    pcall(Sighting, "npc", true)                -- the window is open with it: the player stands at the vendor
+    pcall(Sighting, "npc", true, Repairs({ "vendor" }))   -- the window is open with it: the player stands at the vendor
     local was, filtered = AllMerchantItems()
     local ok, items, sig = pcall(VendorItems)
     if was ~= nil then Try(SetMerchantFilter, was) end
@@ -903,7 +912,7 @@ local function RecordTrainer()
     if type(guid) ~= "string" then return end   -- the npc unit is not there yet: the next TRAINER_UPDATE tries again
     local what, npc = FromGuid(guid)
     if what ~= "npc" then trainer.done = true; return end   -- not a creature: never recorded
-    pcall(Sighting, "npc", true)
+    pcall(Sighting, "npc", true, { "trainer" })
     trainer.reading = true                     -- the filter switches below fire TRAINER_UPDATE: ignored meanwhile
     local off = {}
     if type(GetTrainerServiceTypeFilter) == "function" and type(SetTrainerServiceTypeFilter) == "function" then
@@ -1030,7 +1039,7 @@ function taxi.Opened()
     if landed and w and w.from == landed.to and Now() - landed.at <= TAXI.CONFIRM then taxi.Record(landed) end
     local what, npc = Giver("npc")
     if what ~= "npc" then return end            -- not a creature: never recorded
-    pcall(Sighting, "npc", true)
+    pcall(Sighting, "npc", true, { "flight" })
     if not w then return end
     w.npc = npc
     taxi.window = w
@@ -1140,6 +1149,14 @@ local NPC = { AGAIN = 30, CELL_AGAIN = 600, CELLS = 40, MAX = 3000, BYTES = 5000
 local NPC_CLASS = { normal = true, elite = true, rare = true, rareelite = true, worldboss = true, trivial = true, minus = true }
 local NPC_RX = { Alliance = "rxA", Horde = "rxH" }      -- the reaction is kept per player faction
 local CT_BEAST, CT_COMPANION = 1, 12            -- UnitCreatureType ids: Beast; Non-combat Pet (someone's companion)
+-- svc: the services an NPC was seen to offer (a set, svc = { vendor = true, ... }); INTERACTION: Enum.PlayerInteractionType
+-- names (PLAYER_INTERACTION_MANAGER_FRAME_SHOW) -> svc, under every name a client may use (a name it lacks is skipped)
+NPC.SVC = { vendor = true, repair = true, flight = true, trainer = true, bank = true, guildbank = true, inn = true, auction = true,
+            stable = true, battlemaster = true, spirit = true, guild = true, tabard = true }
+NPC.INTERACTION = { Merchant = "vendor", TaxiNode = "flight", Trainer = "trainer", Banker = "bank", GuildBanker = "guildbank",
+                    Registrar = "guild", PetitionVendor = "guild", GuildTabardVendor = "tabard", TabardVendor = "tabard",
+                    Binder = "inn", Auctioneer = "auction", StableMaster = "stable", Stablemaster = "stable",
+                    BattleMaster = "battlemaster", Battlemaster = "battlemaster", SpiritHealer = "spirit", AreaSpiritHealer = "spirit" }
 -- This session only, never saved: when each npc was last updated (GetTime) and whether the player was near it then,
 -- when each npc and cell was last counted, which npcs' tooltips were read, and each entry's approximate JSON size.
 -- tracked: how many npcs at holds (at, near, cells and asked only ever hold npcs that at holds).
@@ -1222,6 +1239,24 @@ end
 local function Near(unit)                       -- within about 10 yards; restricted in combat on modern clients: not near
     local v = Try(CheckInteractDistance, unit, 3)
     return not Secret(v) and (v == true or v == 1)
+end
+
+-- Adds the services in svc (a list of NPC.SVC names) to entry n; true when one was new
+local function Serve(n, svc)
+    local new = false
+    for _, k in ipairs(type(svc) == "table" and svc or {}) do
+        if NPC.SVC[k] then
+            if type(n.svc) ~= "table" then n.svc = {} end
+            if n.svc[k] ~= true then n.svc[k], new = true, true end
+        end
+    end
+    return new
+end
+
+local function NpcSized(npc, n)                 -- an entry changed: its approximate saved size again
+    local s = Size(n) + 8
+    npcSeen.bytes = npcSeen.bytes - (npcSeen.size[npc] or 0) + s
+    npcSeen.size[npc] = s
 end
 
 local function AtMaxLevel()
@@ -1341,8 +1376,9 @@ local function Cell(n, npc, w, now)
     cells[key] = (Int(cells[key]) or 0) + 1
 end
 
--- unit: "target", "mouseover", "npc", "questnpc" or a loot corpse's unit; open: an interaction window is open with it
-Sighting = function(unit, open)
+-- unit: "target", "mouseover", "npc", "questnpc" or a loot corpse's unit; open: an interaction window is open with it;
+-- svc: the services that window shows it offers (a list), added to its entry even within the 30 s (always a near sighting)
+Sighting = function(unit, open, svc)
     -- Cheap exits first, before any table of ours is made or saved data is touched: a player after one API call, not a
     -- creature after one GUID parse (cached per GUID), this npc within 30 s before any further API call. While tracking is
     -- off the two events are not registered at all, and the on/agreed gate below comes before anything is written.
@@ -1359,7 +1395,13 @@ Sighting = function(unit, open)
     if not npc then return end
     local now, at, near = Now(), npcSeen.at[npc], open and true or nil
     if at and now - at < NPC.AGAIN then
-        if npcSeen.near[npc] then return end
+        if npcSeen.near[npc] then
+            if not svc or not False(UnitPlayerControlled, unit) then return end
+            local d = DB()                      -- a service seen within the 30 s: only the flags, on an entry that exists
+            local n = d and d.on and d.agreed and type(d.npcs) == "table" and d.npcs[npc]
+            if type(n) == "table" and Serve(n, svc) then NpcIndex(d); NpcSized(npc, n) end
+            return
+        end
         near = near or Near(unit)               -- only a first time near it gets through again
         if not near then return end
     end
@@ -1426,11 +1468,10 @@ Sighting = function(unit, open)
         local v = mh and math.floor(mh * 100 + 0.5)
         if v and v >= 10 and v <= 2000 then Speed(n, v) end
     end
+    if svc then Serve(n, svc) end
     n.day = math.floor(time() / 86400)
     if near then Cell(n, npc, w, now) end
-    local s = Size(n) + 8
-    npcSeen.bytes = npcSeen.bytes - (npcSeen.size[npc] or 0) + s
-    npcSeen.size[npc] = s
+    NpcSized(npc, n)
     if npcSeen.count > NPC.MAX or npcSeen.bytes > NPC.BYTES then PruneNpcs(d, true) end
 end
 
@@ -1551,12 +1592,31 @@ function handlers.PLAYER_CONTROL_GAINED() taxi.Land() end
 function handlers.PLAYER_TARGET_CHANGED() Sighting("target", false) end
 function handlers.UPDATE_MOUSEOVER_UNIT() Sighting("mouseover", false) end
 
+-- an interaction window opened with the "npc" unit: the service its type names (Enum.PlayerInteractionType, matched by
+-- name, so a client that numbers them differently or lacks one records nothing wrong); a mailbox or other object is no
+-- creature and Sighting skips it
+function handlers.PLAYER_INTERACTION_MANAGER_FRAME_SHOW(kind)
+    local E = Enum and Enum.PlayerInteractionType
+    kind = Int(kind)
+    if not (kind and type(E) == "table") then return end
+    for name, svc in pairs(NPC.INTERACTION) do
+        if Int(E[name]) == kind then
+            Sighting("npc", true, svc == "vendor" and Repairs({ svc }) or { svc })
+            return
+        end
+    end
+end
+-- an innkeeper: "make this inn your home" asked (CONFIRM_BINDER) or done (HEARTHSTONE_BOUND) while talking to it
+function handlers.CONFIRM_BINDER() Sighting("npc", true, { "inn" }) end
+function handlers.HEARTHSTONE_BOUND() Sighting("npc", true, { "inn" }) end
+
 local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                     "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
-                    "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }
+                    "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
+                    "HEARTHSTONE_BOUND" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false

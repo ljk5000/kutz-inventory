@@ -459,7 +459,8 @@ test("observations 3.10.0: the example's npcs are exported sorted by npc with th
   assert.deepEqual(Object.keys(obs), ["v", "addon", "install", "events", "npcs"]);
   assert.deepEqual(obs.npcs, [
     { npc: 525, name: "Made-up Wolf", lv: [10, 12], cls: "normal", ct: 1, fam: 1, rxA: 2, spd: 200, day: 20404, cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] },
-    { npc: 1346, name: "Made-up Tailor", lv: [30, 30], cls: "normal", ct: 7, rxA: 5, sub: "Made-up Tailoring Supplies", day: 20405, cells: [[1453, 63, 72, 4]] },
+    { npc: 1346, name: "Made-up Tailor", lv: [30, 30], cls: "normal", ct: 7, rxA: 5, sub: "Made-up Tailoring Supplies", svc: ["repair", "vendor"],
+      day: 20405, cells: [[1453, 63, 72, 4]] },
     { npc: 6109, name: "Made-up Dragon", boss: true, cls: "worldboss", ct: 2, rxA: 1, day: 20403 }], "no spds, no entry without a day, no junk cell");
 });
 
@@ -502,6 +503,26 @@ test("observations 3.10.0: several installs merge into one summary named by all 
   const twice = convert.convertSavedVariables([older, a]).inventory.observations;
   assert.equal(twice.install, "zz9900");
   assert.deepEqual(twice.npcs.find((n) => n.npc === 525).cells, [[1429, 41, 65, 2]], "the newest copy, not both added up");
+});
+
+test("observations 3.11.0: svc is a sorted set of the known services; merged installs add theirs up", () => {
+  const obs = convert.convertSavedVariables([npcFile(`{
+    [1] = { svc = { vendor = true, repair = true, inn = true, flight = 1, gossip = true, Vendor = true }, day = 20404 },
+    [2] = { svc = { "trainer", "bank", "trainer", "quest", 7 }, day = 20404 },
+    [3] = { svc = { gossip = true }, day = 20404 }, [4] = { svc = "vendor", day = 20404 }, [5] = { svc = {}, day = 20404 },
+    [6] = { svc = { vendor = true, repair = true, flight = true, trainer = true, bank = true, guildbank = true, inn = true, auction = true,
+                    stable = true, battlemaster = true, spirit = true, guild = true, tabard = true }, day = 20404 },
+  }`)]).inventory.observations;
+  assert.deepEqual(obs.npcs.map((n) => n.svc), [["inn", "repair", "vendor"], undefined, undefined, undefined, undefined,
+    ["auction", "bank", "battlemaster", "flight", "guild", "guildbank", "inn", "repair", "spirit", "stable", "tabard", "trainer", "vendor"]],
+    "only true values of known names in the addon's set (a Lua list is not one), each once, sorted");
+  assert.deepEqual(Object.keys(obs.npcs[0]), ["npc", "svc", "day"], "svc after sub, before spd");
+  const { validateExport } = require("./validate_export");
+  assert.deepEqual(validateExport(convert.convertSavedVariables([npcFile(`{ [6] = { svc = { tabard = true, bank = true }, day = 20404 } }`)]).inventory), []);
+  const a = npcFile(`{ [525] = { svc = { vendor = true }, day = 20404 } }`, `prefix = "zz9900"`);
+  const b = npcFile(`{ [525] = { svc = { inn = true, vendor = true }, day = 20405 } }`, `prefix = "aa1100"`);
+  const c = npcFile(`{ [525] = { day = 20406 } }`, `prefix = "bb2200"`);
+  assert.deepEqual(convert.convertSavedVariables([a, b, c]).inventory.observations.npcs[0].svc, ["inn", "vendor"], "the union, kept when the newest has none");
 });
 
 test("observations 3.10.0: at most 3000 npcs, the most recently seen kept; realistic sizes", () => {

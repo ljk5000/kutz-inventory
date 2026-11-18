@@ -36,7 +36,8 @@ const SCHEMA_VERSION = "2.1.0";
 // range, classification, type, family, reaction per side, subtitle, beast attack speed, last day seen, map squares
 // stood beside it), and install, the id of the install(s) it summarises (KutzInventory 1.17.0). observations.v stays 1.
 // 3.11.0: observations may be of type "taxi" (a flight master's reachable nodes with their prices) and "flight" (how many
-// seconds a flight from one node to another took) (KutzInventory 1.18.0). observations.v stays 1.
+// seconds a flight from one node to another took); npcs entries may carry svc, the services an NPC was seen to offer
+// (KutzInventory 1.18.0). observations.v stays 1.
 const SCHEMA_VERSION_3 = "3.11.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
@@ -588,10 +589,10 @@ function obsTaxiTo(list, own) {
   return out.sort((a, b) => a.node - b.node);
 }
 // ---------------------------------------------------------------------------
-// The npcs summary (3.10.0, KutzInventory 1.17.0): KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss, cls, ct,
-// fam, rxA, rxH, sub, spd, day, cells = { ["uiMap:cx:cy"] = n } }: one entry per creature the player looked at, updated
-// in place (not events), cumulative per install. Exported as observations.npcs = [{ npc, name?, lv?, boss?, cls?, ct?, fam?,
-// rxA?, rxH?, sub?, spd?, day, cells? }] sorted by npc, with observations.install naming the install(s) it summarises
+// The npcs summary (3.10.0, KutzInventory 1.17.0; svc 3.11.0): KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss,
+// cls, ct, fam, rxA, rxH, sub, svc = { [service] = true }, spd, day, cells = { ["uiMap:cx:cy"] = n } }: one entry per creature
+// the player looked at, updated in place (not events), cumulative per install. Exported as observations.npcs = [{ npc, name?,
+// lv?, boss?, cls?, ct?, fam?, rxA?, rxH?, sub?, svc?, spd?, day, cells? }] sorted by npc, with observations.install naming the install(s) it summarises
 // (the saved file's random prefix; several, sorted and joined by "+", when several saved files have one). An entry
 // without a valid npc id or day is dropped; any other field that fails its check is left out. At most 3000 npcs, 40
 // cells each and about 1 MB of JSON, the most recently seen kept.
@@ -603,7 +604,16 @@ const OBS_NPC_CLASSES = ["normal", "elite", "rare", "rareelite", "worldboss", "t
 const OBS_NPC_DAY_MAX = 1157407;                       // 1e11 seconds (the events' time limit) in days
 const OBS_PREFIX = /^[0-9a-z]{4,16}$/;
 const OBS_CELL = /^([0-9]{1,10}):([0-9]{1,2}):([0-9]{1,2})$/;
-const OBS_NPC_KEYS = ["npc", "name", "lv", "boss", "cls", "ct", "fam", "rxA", "rxH", "sub", "spd", "day", "cells"];
+const OBS_NPC_KEYS = ["npc", "name", "lv", "boss", "cls", "ct", "fam", "rxA", "rxH", "sub", "svc", "spd", "day", "cells"];
+// svc (3.11.0): the services the NPC was seen to offer, a set; exported as a sorted list of these values
+const OBS_NPC_SVC = ["vendor", "repair", "flight", "trainer", "bank", "guildbank", "inn", "auction", "stable", "battlemaster", "spirit",
+  "guild", "tabard"];
+// from the addon's { vendor = true, ... } set (only true values count) or an exported list; unknown values left out
+function obsNpcSvc(v) {
+  const list = Array.isArray(v) ? v : v && typeof v === "object" ? Object.entries(v).filter(([, on]) => on === true).map(([k]) => k) : [];
+  const out = [...new Set(list.filter((x) => OBS_NPC_SVC.includes(x)))].sort();
+  return out.length ? out : undefined;
+}
 // a creature type or family: the client's id, or its name when the client gave no id
 const obsNpcKind = (v) => (Number.isInteger(v) ? (v >= 1 && v <= 100000 ? v : undefined) : obsLabel(v, 40));
 const obsCellTotal = (cells) => (cells || []).reduce((n, c) => n + c[3], 0);
@@ -636,16 +646,17 @@ function obsNpc(id, n) {
   const cells = obsNpcCells(n.cells);
   return pick({ npc, name: obsNpcText(n.name), lv: lvOk ? [lv[0], lv[1]] : undefined, boss: n.boss === true ? true : undefined,
                 cls: OBS_NPC_CLASSES.includes(n.cls) ? n.cls : undefined, ct: obsNpcKind(n.ct), fam: obsNpcKind(n.fam),
-                rxA: obsReaction(n.rxA), rxH: obsReaction(n.rxH), sub: obsNpcText(n.sub),
+                rxA: obsReaction(n.rxA), rxH: obsReaction(n.rxH), sub: obsNpcText(n.sub), svc: obsNpcSvc(n.svc),
                 spd: Number.isInteger(n.spd) && n.spd >= 10 && n.spd <= 2000 ? n.spd : undefined, day: n.day,
                 cells: cells.length ? cells : undefined });
 }
-// The same creature in two installs: the level range and cells add up; the rest comes from the one seen last
+// The same creature in two installs: the level range, services and cells add up; the rest comes from the one seen last
 function mergeNpc(a, b) {
   const [newer, older] = b.day > a.day ? [b, a] : [a, b];
   const lv = a.lv && b.lv ? [Math.min(a.lv[0], b.lv[0]), Math.max(a.lv[1], b.lv[1])] : a.lv || b.lv;
   const cells = obsNpcCells([...(a.cells || []), ...(b.cells || [])]);
-  const out = { ...older, ...newer, lv, boss: a.boss || b.boss, day: newer.day, cells: cells.length ? cells : undefined };
+  const out = { ...older, ...newer, lv, boss: a.boss || b.boss, svc: obsNpcSvc([...(a.svc || []), ...(b.svc || [])]), day: newer.day,
+                cells: cells.length ? cells : undefined };
   return pick(Object.fromEntries(OBS_NPC_KEYS.map((k) => [k, out[k]])));
 }
 const byRecent = (a, b) => b.day - a.day || obsCellTotal(b.cells) - obsCellTotal(a.cells) || a.npc - b.npc;
