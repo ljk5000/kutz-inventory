@@ -643,7 +643,7 @@ local progress = nil                            -- { quest, text } from the "do 
 local hookedReward, haveTurnedInEvent = false, false
 -- the extras (1.18.0), filled in further down: facts from the quest log on accept; the reward window's XP and the
 -- reputation a turn-in changed. rep: the watch { quest, before = { [factionID] = standing }, at, turned, spoiled, e }
-local qx = { REP_MAX = 6, REP_D = 100000, STALE = 300, WAIT = 1, FACTIONS = 1000, rep = nil }
+local qx = { REP_MAX = 6, REP_D = 100000, STALE = 300, WAIT = 1, FACTIONS = 1000, GUILD = 1168, rep = nil }
 
 local function QuestId(...)                     -- QUEST_ACCEPTED is (index, questId) in older clients, (questId) in newer
     local a, b = Plain((...)), Plain((select(2, ...)))
@@ -1070,14 +1070,14 @@ function taxi.Record(f)                        -- a flight both ends of which ar
     if taxi.flown[key] and now - taxi.flown[key] < TAXI.FLOWN then return end
     taxi.flown[key] = now
     local e = NewEvent("flight")
-    e.where, e.from, e.to, e.sec = nil, f.from, f.to, f.sec
+    e.where, e.from, e.to, e.sec, e.t = nil, f.from, f.to, f.sec, f.t or e.t   -- t: when it landed, also when confirmed later
     Add(e)
 end
 
 -- TakeTaxiNode(slot), after the game ran it: the destination chosen in the window we read
 function taxi.Take(slot)
     local d, w = DB(), taxi.window
-    if not (d and d.on and d.agreed and w) then return end
+    if not (d and d.on and d.agreed and w) then taxi.pick = nil; return end   -- never an older window's pick
     slot = Int(slot, 1)
     local to = slot and w.slots[slot]
     taxi.pick = to and to ~= w.from and { from = w.from, to = to, at = Now(), map = w.map, pos = w.pos } or nil
@@ -1141,7 +1141,7 @@ function taxi.Land()
         if on ~= false then return end
         local sec = math.floor(at - f.start + 0.5)
         if sec < TAXI.SEC_MIN or sec > TAXI.SEC_MAX then return end
-        local landing, arrived = { from = f.from, to = f.to, sec = sec, at = at }, taxi.Arrived(f)
+        local landing, arrived = { from = f.from, to = f.to, sec = sec, at = at, t = time() }, taxi.Arrived(f)
         if arrived then taxi.Record(landing)
         elseif arrived == nil then taxi.landed = landing end
     end
@@ -1410,7 +1410,10 @@ Sighting = function(unit, open, svc)
             if not svc or not False(UnitPlayerControlled, unit) then return end
             local d = DB()                      -- a service seen within the 30 s: only the flags, on an entry that exists
             local n = d and d.on and d.agreed and type(d.npcs) == "table" and d.npcs[npc]
-            if type(n) == "table" and Serve(n, svc) then NpcIndex(d); NpcSized(npc, n) end
+            if type(n) == "table" and Serve(n, svc) then
+                NpcIndex(d); NpcSized(npc, n)
+                if npcSeen.count > NPC.MAX or npcSeen.bytes > NPC.BYTES then PruneNpcs(d, true) end
+            end
             return
         end
         near = near or Near(unit)               -- only a first time near it gets through again
@@ -1535,9 +1538,11 @@ function qx.Xp()
     return Int((Try(GetRewardXP)), 1)
 end
 
--- Standings by faction id: of the factions in ids (GetFactionDataByID), or of the whole list (headers opened for the
--- read and closed again, from the bottom up, as ScanReputation does). Headers without a standing of their own and,
--- where the client says so, renown factions (their standing restarts each level) are left out. nil when unreadable.
+-- Standings by faction id: of the factions in ids (GetFactionDataByID), or of the whole list. For the whole list each
+-- collapsed header is opened on its own from the top down (so one nested in another shows up next and is opened too),
+-- the list is read, and those headers are closed again from the bottom up, also when the read fails part-way. Left
+-- out: headers without a standing of their own, the Guild faction (not the quest's), and, where the client says so,
+-- renown factions (their standing restarts each level). nil when unreadable or a header would not open.
 function qx.Standings(ids)
     local R = C_Reputation
     if type(R) ~= "table" then return nil end
@@ -1545,7 +1550,7 @@ function qx.Standings(ids)
     local function put(f)
         if type(f) ~= "table" then return end
         local id, s = Int(f.factionID, 1), Int(f.currentStanding, -2147483647)
-        if not (id and s) or (Plain(f.isHeader) ~= false and Plain(f.isHeaderWithRep) ~= true) then return end
+        if not (id and s) or id == qx.GUILD or (Plain(f.isHeader) ~= false and Plain(f.isHeaderWithRep) ~= true) then return end
         if type(R.IsMajorFaction) == "function" and not False(R.IsMajorFaction, id) then return end
         out[id] = s
     end
@@ -1555,30 +1560,43 @@ function qx.Standings(ids)
         return out
     end
     if type(R.GetNumFactions) ~= "function" or type(R.GetFactionDataByIndex) ~= "function" then return nil end
-    local closed = {}
-    for i = 1, math.min(Int((Try(R.GetNumFactions))) or 0, qx.FACTIONS) do
-        local f = Try(R.GetFactionDataByIndex, i)
-        local id = type(f) == "table" and Plain(f.isHeader) == true and Plain(f.isCollapsed) == true and Int(f.factionID, 1)
-        if id then closed[id] = true end
-    end
-    if next(closed) then Try(R.ExpandAllFactionHeaders) end
-    local count = math.min(Int((Try(R.GetNumFactions))) or 0, qx.FACTIONS)
-    for i = 1, count do put(Try(R.GetFactionDataByIndex, i)) end
-    if next(closed) then
-        for i = count, 1, -1 do
+    local closed, opened = {}, false
+    local function count() return math.min(Int((Try(R.GetNumFactions))) or 0, qx.FACTIONS) end
+    local ok, read = pcall(function()
+        local i, n = 1, count()
+        while i <= n do
             local f = Try(R.GetFactionDataByIndex, i)
-            local id = type(f) == "table" and Int(f.factionID, 1)
-            if id and closed[id] and Plain(f.isCollapsed) == false then Try(R.CollapseFactionHeader, i) end
+            local id = type(f) == "table" and Plain(f.isHeader) == true and Plain(f.isCollapsed) == true and Int(f.factionID, 1)
+            if id and not closed[id] then
+                closed[id], opened = true, true
+                if type(R.ExpandFactionHeader) ~= "function" then return false end
+                Try(R.ExpandFactionHeader, i)
+                f = Try(R.GetFactionDataByIndex, i)
+                if not (type(f) == "table" and Plain(f.isCollapsed) == false) then return false end   -- its factions stay hidden
+                n = count()
+            end
+            i = i + 1
         end
+        for j = 1, n do put(Try(R.GetFactionDataByIndex, j)) end
+        return true
+    end)
+    local function close(i)
+        local f = Try(R.GetFactionDataByIndex, i)
+        local id = type(f) == "table" and Int(f.factionID, 1)
+        if id and closed[id] and Plain(f.isCollapsed) == false then Try(R.CollapseFactionHeader, i) end
     end
-    return out
+    if opened then                              -- put the list back the way it was, from the bottom up, row by row
+        for i = count(), 1, -1 do pcall(close, i) end
+    end
+    return ok and read and out or nil
 end
 
 -- The reputation a turn-in changed: every standing read when the reward window opens (QUEST_COMPLETE, out of combat),
 -- the same factions again a second after that quest's turn-in; rep = { { f = factionID, d = change } } of those that
--- changed, sorted by f. Never the standing itself. Nothing when something else could have moved them in between (loot,
--- combat, another reward window or turn-in, more than 5 minutes between the window and the turn-in), when more than 6
--- changed, or when a change is over 100000.
+-- changed, sorted by f. Never the standing itself. d is what this character received: with its reputation bonuses and
+-- any spill-over to other factions, so the same quest may differ between characters. Nothing when something else could
+-- have moved them in between (loot, combat, another reward window or turn-in, more than 5 minutes between the window
+-- and the turn-in), when more than 6 changed, or when a change is over 100000.
 function qx.Spoil() if qx.rep then qx.rep.spoiled = true end end
 
 function qx.Watch(quest)                        -- QUEST_COMPLETE
@@ -1755,7 +1773,8 @@ function handlers.PLAYER_INTERACTION_MANAGER_FRAME_SHOW(kind)
     if not (kind and type(E) == "table") then return end
     for name, svc in pairs(NPC.INTERACTION) do
         if Int(E[name]) == kind then
-            Sighting("npc", true, svc == "vendor" and Repairs({ svc }) or { svc })
+            Sighting("npc", true, { svc })      -- never repair here: CanMerchantRepair may still answer for the last
+                                                -- merchant; RecordVendor adds it with this merchant's window open
             return
         end
     end

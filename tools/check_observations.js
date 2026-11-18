@@ -434,7 +434,7 @@ end
 --     standing. questy() adds the quest log, XP, combat and reputation APIs:
 --     s.log[questID] = info (with index); s.timeAllowed[questID]; s.level / s.maxLevel; s.xp; s.xpOff; s.combat;
 --     s.factions = { { id, st, header, rep (a header with its own standing), collapsed, parent, major } } in list order, a
---     collapsed header hiding its children; s.expands counts ExpandAllFactionHeaders
+--     collapsed header hiding its children; s.expands counts ExpandFactionHeader; bomb = true: reading that row errors
 do
   local QFREQ = { Default = 0, Daily = 1, Weekly = 2, ResetByScheduler = 3 }
   local function questy(opts)
@@ -459,14 +459,16 @@ do
       end
       return out
     end
+    local BOMB = setmetatable({}, { __index = function() error("unreadable faction row") end })
     local function data(f)
+      if f and f.bomb then return BOMB end
       if f then return { factionID = f.id, name = "Faction " .. f.id, currentStanding = f.st, isHeader = f.header or false,
                          isHeaderWithRep = f.rep or false, isCollapsed = f.collapsed or false } end
     end
     G.C_Reputation = { GetNumFactions = function() return #shown() end,
                        GetFactionDataByIndex = function(i) return data(shown()[i]) end,
                        GetFactionDataByID = function(id) for _, f in ipairs(s.factions) do if f.id == id then return data(f) end end end,
-                       ExpandAllFactionHeaders = function() s.expands = s.expands + 1; for _, f in ipairs(s.factions) do f.collapsed = false end end,
+                       ExpandFactionHeader = function(i) local f = shown()[i]; if f then s.expands = s.expands + 1; f.collapsed = false end end,
                        CollapseFactionHeader = function(i) local f = shown()[i]; if f then f.collapsed = true end end,
                        IsMajorFaction = function(id) for _, f in ipairs(s.factions) do if f.id == id then return f.major or false end end; return false end }
     return h
@@ -556,7 +558,7 @@ do
   t.s.quest, t.s.xp = 7787, 6600
   t.s.units.questnpc = { guid = "Creature-0-4170-0-1234-11811-000012AAAB" }
   t.event("QUEST_COMPLETE")
-  assert(t.s.expands == 1 and t.s.factions[1].collapsed and t.s.factions[7].collapsed, "headers opened for the read and closed again")
+  assert(t.s.expands == 2 and t.s.factions[1].collapsed and t.s.factions[7].collapsed, "headers opened for the read and closed again")
   t.event("QUEST_TURNED_IN", 7787, 6600, 123456)
   local e = lastOf(t, "turnin")
   assert(e.xp == 6600 and e.npc == 11811 and not e.rep, "xp now, rep a second later: " .. dump(e))
@@ -613,6 +615,33 @@ do
   local nt = questy(); guild(nt); nt.s.quest = 7787; nt.G.C_Timer = nil
   nt.event("QUEST_COMPLETE"); nt.event("QUEST_TURNED_IN", 7787); standings(nt, { [72] = 250 })
   assert(not quest(nt, 7787).rep and nt.s.expands == 0 and not nt.db().lastError, "no timer: nothing is read")
+  -- a collapsed header inside a collapsed one is opened in turn and closed again; nothing is opened when none is closed
+  local nest = questy(); guild(nest)
+  table.insert(nest.s.factions, 5, { id = 1119, st = 0, header = true, collapsed = true, parent = 1118 })
+  table.insert(nest.s.factions, 6, { id = 930, st = 100, parent = 1119 })
+  nest.s.quest = 7787; nest.event("QUEST_COMPLETE")
+  assert(nest.s.expands == 3 and nest.s.factions[1].collapsed and nest.s.factions[5].collapsed and nest.s.factions[9].collapsed,
+         "nested headers all closed again: " .. dump(nest.s.factions))
+  nest.event("QUEST_TURNED_IN", 7787); standings(nest, { [930] = 25 }); nest.drain()
+  assert(dump(quest(nest, 7787).rep) == "{1={d=25,f=930}}", "a faction under a nested header: " .. dump(quest(nest, 7787)))
+  local open = questy(); guild(open); open.s.factions[1].collapsed, open.s.factions[7].collapsed = false, false
+  open.s.quest = 7787; open.event("QUEST_COMPLETE"); open.event("QUEST_TURNED_IN", 7787); standings(open, { [87] = -5 }); open.drain()
+  assert(open.s.expands == 0 and not open.s.factions[1].collapsed and dump(quest(open, 7787).rep) == "{1={d=-5,f=87}}", "none closed")
+  -- the read fails part-way (after headers were opened): they are still closed again, no rep, no error
+  local bomb = questy(); guild(bomb); bomb.s.factions[8].bomb = true
+  bomb.s.quest = 7787; bomb.event("QUEST_COMPLETE")
+  assert(bomb.s.expands == 2 and bomb.s.factions[1].collapsed and bomb.s.factions[7].collapsed and not bomb.db().lastError,
+         "headers closed again after a failed read: " .. dump(bomb.s.factions) .. tostring(bomb.db().lastError))
+  bomb.event("QUEST_TURNED_IN", 7787); standings(bomb, { [72] = 250 }); bomb.drain()
+  assert(not quest(bomb, 7787).rep and not bomb.db().lastError, "no rep from a failed read")
+  -- a header that will not open: its factions would be missing, so no rep
+  local sh = questy(); guild(sh); sh.G.C_Reputation.ExpandFactionHeader = function() end
+  sh.s.quest = 7787; sh.event("QUEST_COMPLETE"); sh.event("QUEST_TURNED_IN", 7787); standings(sh, { [72] = 250, [1834] = 10 }); sh.drain()
+  assert(not quest(sh, 7787).rep and sh.s.factions[1].collapsed and not sh.db().lastError, "a header that stays closed: no rep, not even for the factions in view")
+  -- the Guild faction is not the quest's
+  local gd = questy(); guild(gd); gd.s.factions[#gd.s.factions + 1] = { id = 1168, st = 1000 }
+  gd.s.quest = 7787; gd.event("QUEST_COMPLETE"); gd.event("QUEST_TURNED_IN", 7787); standings(gd, { [1168] = 50, [72] = 250 }); gd.drain()
+  assert(dump(quest(gd, 7787).rep) == "{1={d=250,f=72}}", "no Guild faction: " .. dump(quest(gd, 7787).rep))
   -- a renown faction (its standing restarts each level) and a secret standing are left out; the rest still counts
   local mj = turn({ [72] = 250, [47] = 9 }, function(x) x.s.factions[3].major = true end)
   assert(dump(mj.rep) == "{1={d=250,f=72}}", "renown left out: " .. dump(mj.rep))
@@ -968,6 +997,19 @@ do
   end
   assert(#unread(4, 30) == 1 and unread(4, 30)[1].to == 4 and unread(4, 30)[1].sec == 100, "the next window is at the destination")
   assert(#unread(5, 30) == 0, "the next window is somewhere else")
+  local lt = airfield(); fly(lt, 2, 100, false)
+  local landedAt = lt.s.now
+  lt.s.clock, lt.s.now = lt.s.clock + 90, lt.s.now + 90
+  for _, n in ipairs(lt.s.taxi.nodes) do if n.nodeID == 4 then n.type = "CURRENT" elseif n.type == "CURRENT" then n.type = "REACHABLE" end end
+  lt.event("TAXIMAP_OPENED")
+  assert(#ofType(lt, "flight") == 1 and ofType(lt, "flight")[1].t == landedAt, "t is when it landed: " .. dump(ofType(lt, "flight")))
+  -- a node picked in a window we could not read never flies on an older window's pick
+  local stale = airfield()
+  stale.event("TAXIMAP_OPENED"); stale.hooks.TakeTaxiNode(2); stale.event("TAXIMAP_CLOSED")
+  stale.s.taxi.nodes[3].slotName = "Somewhere Else"; stale.event("TAXIMAP_OPENED"); stale.hooks.TakeTaxiNode(3); stale.event("TAXIMAP_CLOSED")
+  stale.s.onTaxi = true; stale.event("PLAYER_CONTROL_LOST"); stale.s.clock = stale.s.clock + 95
+  stale.s.onTaxi = false; stale.s.mapPos = { [1415] = { 0.42, 0.40 } }; stale.event("PLAYER_CONTROL_GAINED"); stale.drain()
+  assert(#ofType(stale, "flight") == 0, "an older pick: " .. dump(ofType(stale, "flight")))
   assert(#unread(4, 121) == 0, "the next window came too late")
   -- never: landing by another node or far from any, the flight master's own node, no destination picked, a pick too long
   -- before, UnitOnTaxi never true, a secret or no answer at landing, under 5 s, over an hour, switched off on the way, a
@@ -1392,6 +1434,32 @@ do
   sv.s.units.npc.controlled = true; sv.s.clock = sv.s.clock + 5; sv.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 21)
   assert(svc(npcs(sv)[1346]) == "bank,inn,repair,vendor", "a player-controlled unit of the same id adds nothing")
   sv.s.units.npc.controlled = nil
+  -- repair only from the merchant window itself: when the interaction shows, CanMerchantRepair may still answer for the
+  -- last merchant (here a vendor that repairs, then one that does not)
+  local rp = fresh(); rp.on()
+  rp.s.units.npc = { guid = TAILOR, level = 30 }; rp.s.merchant = { { id = 4470, n = 1, price = 38, avail = -1 } }; rp.s.canRepair = true
+  rp.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5); rp.event("MERCHANT_SHOW"); rp.drain(); rp.event("MERCHANT_CLOSED")
+  rp.s.units.npc = { guid = "Creature-0-4170-0-1234-1347-000012AB03", level = 30 }
+  rp.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5)
+  rp.s.canRepair = false; rp.event("MERCHANT_SHOW"); rp.drain()
+  assert(svc(npcs(rp)[1346]) == "repair,vendor" and svc(npcs(rp)[1347]) == "vendor", "a stale answer: " .. dump(rp.db().npcs))
+  -- the flags alone may cross the ~500 KB cap: they prune like a full sighting (fillers sized so the window lands just under)
+  local function capped(pad)
+    local db = { v = 1, on = true, agreed = true, noted = true, prefix = "abcd12", n = 0, events = {}, npcs = {} }
+    for i = 1, 9 do db.npcs[2000 + i] = { day = DAY - 1, name = string.rep("n", 50000) } end
+    db.npcs[2010] = { day = DAY - 1, name = string.rep("n", pad) }
+    local x = fresh({ db = db }); x.s.units.npc = { guid = TAILOR, level = 30 }
+    x.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 8)
+    local n = 0; for _ in pairs(x.db().npcs) do n = n + 1 end
+    return x, n
+  end
+  local lo, hi = 0, 60000                        -- the largest filler that still leaves all 11 after the window
+  while lo < hi do local mid = math.ceil((lo + hi) / 2); local _, n = capped(mid); if n == 11 then lo = mid else hi = mid - 1 end end
+  local cx, before = capped(lo)
+  assert(before == 11 and svc(npcs(cx)[1346]) == "bank", "calibrated just under the cap: " .. before)
+  cx.s.clock = cx.s.clock + 5; cx.event("CONFIRM_BINDER")
+  local after = 0; for _ in pairs(cx.db().npcs) do after = after + 1 end
+  assert(after < 11 and svc(npcs(cx)[1346]) == "bank,inn", "the flags pushed it over: pruned to " .. after)
   -- every interaction type by its Enum name; the reload keeps the set; a vendor that cannot repair is only a vendor
   local kinds = { [6] = "flight", [7] = "trainer", [8] = "bank", [11] = "guild", [13] = "guild", [14] = "tabard", [18] = "spirit",
                   [20] = "inn", [21] = "auction", [22] = "stable", [23] = "battlemaster", [5] = "vendor" }

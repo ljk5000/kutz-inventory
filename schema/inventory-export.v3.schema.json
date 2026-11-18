@@ -1791,7 +1791,7 @@
               "type": "array",
               "minItems": 1,
               "maxItems": 6,
-              "description": "Since 3.11.0, turnin only: the reputation the turn-in changed, as changes, never a standing. Each faction's standing was read when the reward window opened and again about a second after the turn-in; only factions in both reads that changed, sorted by f, each once. Absent when nothing changed, more than 6 changed, or something else could have moved them in between (loot, combat, another reward window or turn-in, more than 5 minutes from the window to the turn-in).",
+              "description": "Since 3.11.0, turnin only: the reputation the turn-in changed, as changes, never a standing. Each faction's standing was read when the reward window opened and again about a second after the turn-in; only factions in both reads that changed, sorted by f, each once. What this character received, not the quest's listed reward: with its reputation bonuses and any spill-over to other factions, so the same quest can differ between characters. The Guild faction (1168) and renown factions are left out. Absent when nothing changed, more than 6 changed, or something else could have moved them in between (loot, combat, another reward window or turn-in, more than 5 minutes from the window to the turn-in).",
               "items": {
                 "type": "object",
                 "required": [
@@ -1813,7 +1813,7 @@
                     "not": {
                       "const": 0
                     },
-                    "description": "The change in reputation points: positive gained, negative lost. Never 0."
+                    "description": "The change in reputation points this character received (with its reputation bonuses): positive gained, negative lost. Never 0."
                   }
                 }
               }
