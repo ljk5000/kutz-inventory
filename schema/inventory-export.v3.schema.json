@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/inventory-export.v3.schema.json",
   "title": "KutzInventory export 3.x",
-  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took); npcs entries may carry svc, the services an NPC was seen to offer; quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin: the reputation changes, never a standing). 3.12.0: gossip and quest-greeting text game-authored readable pages and NPC spoken lines. Quest accepts may carry objective definitions and points of interest on the player's acceptance map.",
+  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took); npcs entries may carry svc, the services an NPC was seen to offer; quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin: the reputation changes, never a standing). 3.12.0: gossip and quest-greeting text game-authored readable pages and NPC spoken lines. Quest accepts may carry objective definitions and points of interest on the player's acceptance map. 3.13.0: tame observations (a hunter's tamed beast and what its new pet showed).",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -1288,7 +1288,7 @@
     },
     "observations": {
       "type": "object",
-      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Since 3.12.0 also game-authored gossip, quest greetings readable pages and lines spoken by identified NPCs. Never gold (no coin loot, quest money or player money), player chat, mail or guild data. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know.",
+      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Since 3.12.0 also game-authored gossip, quest greetings readable pages and lines spoken by identified NPCs. Since 3.13.0 also hunter tames. Never gold (no coin loot, quest money or player money), player chat, mail or guild data. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know.",
       "required": [
         "v",
         "addon",
@@ -2605,6 +2605,128 @@
               "maxLength": 2000,
               "description": "ASCII game dialogue. The addon normalizes curly quotes, en and em dashes, and ellipses before checking the text.",
               "pattern": "^[\\u0000-\\u007f]+$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Since 3.13.0: a hunter tamed a beast. npc, lv and fam are the target's when Tame Beast began; spells, spd and diet are what the new pet showed within 60 s. where is where the tame began. Never the pet's GUID or name.",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "where",
+            "who",
+            "npc"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "type": {
+              "const": "tame"
+            },
+            "npc": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The tamed creature's NPC id, from the target's GUID when Tame Beast began. Never guessed: a tame without it is not recorded."
+            },
+            "lv": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 255,
+              "description": "The creature's level (UnitLevel on the target when the tame began). Absent for a skull or when unreadable."
+            },
+            "fam": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                {
+                  "type": "string",
+                  "$ref": "#/$defs/observationLabel",
+                  "maxLength": 40
+                }
+              ],
+              "description": "UnitCreatureFamily on the target: the client's family id, else its localized name (up to 40). The new pet had the same family wherever both were read."
+            },
+            "spells": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 24,
+              "description": "The new pet's spellbook as the client listed it (C_SpellBook pet bank, else GetSpellBookItemName(i, \"pet\")), sorted by s, each spell id once. Only entries whose id names the spell the book shows; commands such as Attack are left out. Absent when the book listed nothing within 60 s of the tame.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "s",
+                  "name"
+                ],
+                "properties": {
+                  "s": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "Spell id."
+                  },
+                  "name": {
+                    "type": "string",
+                    "$ref": "#/$defs/observationLabel",
+                    "maxLength": 120
+                  },
+                  "rank": {
+                    "type": "string",
+                    "$ref": "#/$defs/observationLabel",
+                    "maxLength": 40,
+                    "description": "The book's subtext (\"Rank 2\"), when it shows one."
+                  }
+                }
+              }
+            },
+            "spd": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 2000,
+              "description": "The new pet's main-hand attack speed in hundredths of a second (UnitAttackSpeed(\"pet\")), read with the pet alive and neither it nor the player in combat, within 60 s of the tame. Without spdAura the pet had no aura at that read."
+            },
+            "spdAura": {
+              "const": true,
+              "description": "Only with spd: the pet had at least one aura at every read, so spd may include a haste or slow effect."
+            },
+            "diet": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "description": "The new pet's diet as the client names it (C_PetInfo.GetPetFoodTypes), sorted.",
+              "items": {
+                "type": "string",
+                "$ref": "#/$defs/observationLabel",
+                "maxLength": 40
+              }
+            },
+            "where": {
+              "$ref": "#/$defs/observationWhere"
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
             }
           }
         }

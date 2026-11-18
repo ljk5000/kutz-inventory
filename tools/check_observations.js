@@ -726,18 +726,23 @@ do
   assert(#off.printed == 2 and off.printed[1]:find("off here") and off.printed[1]:find("/kinv track drops on")
          and not off.db().on, "an install that kept it off is told how to start it: " .. table.concat(off.printed, " | "))
   h.ns.ObsNote(true)
-  assert(#h.printed == 2 and h.db().notedGameText, "fresh installs skip the upgrade notice")
+  assert(#h.printed == 2 and h.db().notedGameText and h.db().notedPets, "fresh installs skip the upgrade notices")
   for _, on in ipairs({ true, false }) do
     local existing = fresh({ db = { v = 1, on = on, agreed = true, noted = true } })
     existing.ns.ObsNote(true); existing.ns.ObsNote(true); existing.ns.ObsNote()
-    assert(#existing.printed == 1 and existing.last():find("NPC gossip and spoken lines")
-      and existing.last():find("book pages from world objects") and existing.last():find("quest objectives")
-      and existing.last():find("/kinv track drops off") and existing.db().on == on, "one upgrade line at login")
+    local first = existing.printed[1] or ""
+    assert(#existing.printed == 2 and first:find("NPC gossip and spoken lines")
+      and first:find("book pages from world objects") and first:find("quest objectives")
+      and first:find("/kinv track drops off") and existing.db().on == on, "the 1.19.0 line at login")
+    assert(existing.last():find("1%.20%.0 adds hunter tames") and existing.last():find("/kinv track drops off"), "the 1.20.0 line at login")
     local reloaded = fresh({ db = existing.db() })
     reloaded.ns.ObsNote(true)
-    assert(#reloaded.printed == 0, "upgrade notice survives reload")
+    assert(#reloaded.printed == 0, "upgrade notices survive reload")
+    local seen119 = fresh({ db = { v = 1, on = on, agreed = true, noted = true, notedGameText = true } })
+    seen119.ns.ObsNote(true)
+    assert(#seen119.printed == 1 and seen119.last():find("1%.20%.0"), "a 1.19.0 install sees only the 1.20.0 line")
   end
-  print("OK   one-time 1.19.0 login notice for existing installs and the original first /kinv note")
+  print("OK   one-time 1.19.0 and 1.20.0 login notices for existing installs and the original first /kinv note")
 end
 
 -- 3) /kinv track: status, off stops and unregisters, on starts again at once (no prompt), yes is the same as on
@@ -2054,6 +2059,203 @@ do
   end
   print("OK   npcs: the session tables are trimmed past 4000 npcs")
 end
+
+-- Hunter tames (1.20.0): the beast from the target's GUID when Tame Beast began, the new pet's book, speed and diet.
+do
+  local BEAST = "Creature-0-4170-0-1234-3825-000012AC01"
+  local PETG = "Pet-0-4170-0-1234-3825-0100AABBCC"
+  local names = { [1515] = "Tame Beast", [883] = "Call Pet", [982] = "Revive Pet", [17253] = "Bite", [2649] = "Growl", [2] = "Not Attack" }
+  local function hunter(opts)
+    local h = fresh(opts)
+    local s, G = h.s, h.G
+    G.UnitClass = function() return "Hunter", "HUNTER", 3 end
+    G.GetSpellInfo = function(id) return names[id] end
+    -- the pet's book (old API): { name, rank, spell id, pet action id }; Attack is a command, its action id names no spell
+    s.book = { { "Bite", "Rank 1", 17253 }, { "Growl", "Rank 1", 2649 }, { "Attack", nil, nil, 0x07000002 } }
+    G.HasPetSpells = function() if s.units.pet then return #s.book, "PET" end end
+    G.GetSpellBookItemName = function(i, b) assert(b == "pet", "the pet's book"); local x = s.book[i]; if x then return x[1], x[2], x[3] end end
+    G.GetSpellBookItemInfo = function(i) local x = s.book[i]; if x then return x[4] and "PETACTION" or "SPELL", x[4] or x[3] end end
+    G.C_PetInfo = { GetPetFoodTypes = function() return s.diet end }
+    G.UnitAura = function(u, _, f) local x = s.units[u]; return x and x.auras and x.auras[f] or nil end
+    s.diet = { "Meat", "Fish" }
+    s.units.target = { guid = BEAST, level = 12, fam = 1, famName = "Wolf", ct = 1, name = "Example Wolf" }
+    return h
+  end
+  local function newPet(extra)
+    local p = { guid = PETG, fam = 1, famName = "Wolf", speed = 1.5 }
+    for k, v in pairs(extra or {}) do p[k] = v end
+    return p
+  end
+  local function tame(h, p, spell)
+    h.event("UNIT_SPELLCAST_CHANNEL_START", "player", "Cast-3-4170-0-1-1515-0000AAAA", spell or 1515)
+    h.s.x = 0.9                                      -- the beast's place is where the tame began, not where it ended
+    h.s.units.target = nil
+    h.s.units.pet = p or newPet()
+    h.event("UNIT_PET", "player")
+  end
+
+  local h = hunter()
+  tame(h)
+  local e = h.events()[1]
+  assert(e and e.type == "tame" and e.npc == 3825 and e.lv == 12 and e.fam == 1 and e.spd == 150 and e.spdAura == nil
+         and e.where.x == 0.4123 and e.who.class == 3, dump(e) .. tostring(h.db().lastError))
+  assert(dump(e.spells) == "{1={name=Growl,rank=Rank 1,s=2649},2={name=Bite,rank=Rank 1,s=17253}}", dump(e.spells))
+  assert(dump(e.diet) == "{1=Fish,2=Meat}", "the diet, sorted")
+  assert(not dump(e):find("Pet%-") and not dump(e):find("Creature%-") and not dump(e):find("Example Wolf"), "no GUID, no pet name")
+  h.s.units.pet = nil
+  h.s.units.target = { guid = BEAST, level = 12, fam = 1, famName = "Wolf" }
+  tame(h)
+  assert(#h.events() == 1, "the same beast, level, book and speed once per install")
+  h.s.units.pet = nil
+  h.s.units.target = { guid = BEAST, level = 13, fam = 1, famName = "Wolf" }
+  tame(h)
+  assert(#h.events() == 2 and h.events()[2].lv == 13, "another level is another record")
+
+  -- refusals: not a hunter, no creature id, someone's creature, a pet out, another family, too late, Call Pet, interrupted
+  local r = fresh()
+  r.s.units.target = { guid = BEAST, level = 12, fam = 1, famName = "Wolf" }
+  r.G.GetSpellInfo = function(id) return names[id] end
+  tame(r)
+  assert(#r.events() == 0 and not r.db().lastError, "a rogue's pet (or anything) is not a tame")
+  local function refused(setup, label)
+    local x = hunter()
+    setup(x)
+    assert(#x.events() == 0 and not x.db().lastError, label .. ": " .. tostring(x.db().lastError))
+  end
+  refused(function(x) x.s.units.target = nil; tame(x) end, "no target: the creature id is never guessed")
+  refused(function(x) x.s.units.target.guid = PLAYER; tame(x) end, "a player's GUID")
+  refused(function(x) x.s.units.target.guid = "Vignette-0-4170-0-1-3825-0000AAAA"; tame(x) end, "not a creature GUID")
+  refused(function(x) x.s.units.target.controlled = true; tame(x) end, "a creature someone controls")
+  refused(function(x) x.s.units.pet = newPet(); x.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 1515)
+                      x.s.units.pet = newPet({ guid = PETG .. "0" }); x.event("UNIT_PET", "player") end, "a pet already out")
+  refused(function(x) tame(x, newPet({ fam = 2, famName = "Cat" })) end, "a pet of another family")
+  refused(function(x)
+    x.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 1515)
+    x.s.clock = x.s.clock + 31
+    x.s.units.pet = newPet(); x.event("UNIT_PET", "player")
+  end, "a pet more than 30 s later")
+  refused(function(x)
+    x.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 1515)
+    x.event("UNIT_SPELLCAST_START", "player", "c", 883)
+    x.s.units.pet = newPet(); x.event("UNIT_PET", "player")
+  end, "Call Pet in between")
+  refused(function(x)
+    x.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 1515)
+    x.event("UNIT_SPELLCAST_INTERRUPTED", "player", "c", 1515)
+    x.s.units.pet = newPet(); x.event("UNIT_PET", "player")
+  end, "an interrupted tame")
+  refused(function(x) x.event("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 999); x.s.units.pet = newPet(); x.event("UNIT_PET", "player") end,
+          "another spell")
+  refused(function(x) x.event("UNIT_SPELLCAST_CHANNEL_START", "party1", "c", 1515); x.s.units.pet = newPet(); x.event("UNIT_PET", "player") end,
+          "someone else's tame")
+  refused(function(x)
+    x.s.book = {}
+    tame(x)
+    x.s.units.pet = nil; x.event("UNIT_PET", "player")
+    x.drain()
+  end, "the pet gone before it was read")
+  refused(function(x) x.cmd("track drops off"); tame(x) end, "tracking off")
+  local full = hunter({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  tame(full)
+  assert(#full.events() == 1 and not full.db().lastError, "past the half caps")
+
+  -- a book that fills later, a fight, then auras: read again every 2 s, up to 60 s, then recorded with what was read
+  local w = hunter()
+  w.s.book = {}
+  tame(w, newPet({ combat = true }))
+  assert(#w.events() == 0, "waits for the book and a calm speed")
+  w.s.book = { { "Bite", "Rank 2", 17253 } }
+  w.drain()
+  assert(#w.events() == 0, "the book is in, the speed not yet")
+  w.s.units.pet.combat, w.s.units.pet.auras = false, { HELPFUL = "Aspect of the Wild" }
+  w.s.units.pet.speed = 2.0
+  w.drain()
+  assert(#w.events() == 0, "a speed read with an aura waits for a bare one")
+  w.s.clock = w.s.clock + 61
+  w.drain()
+  e = w.events()[1]
+  assert(e and e.spd == 200 and e.spdAura == true and e.spells[1].rank == "Rank 2" and #e.spells == 1, dump(e))
+  local bare = hunter()
+  bare.s.book = {}
+  tame(bare, newPet({ auras = { HARMFUL = "Slow" } }))
+  bare.s.book = { { "Bite", "Rank 2", 17253 } }
+  bare.event("PET_BAR_UPDATE")
+  assert(#bare.events() == 0, "the slowed speed is not kept as bare")
+  bare.s.units.pet.auras = nil
+  bare.event("SPELLS_CHANGED")
+  e = bare.events()[1]
+  assert(e and e.spd == 150 and e.spdAura == nil, dump(e))
+  -- no speed at all (the pet fought the whole minute), no diet API: still the beast, its level, family and book
+  local fight = hunter()
+  fight.G.C_PetInfo = nil
+  tame(fight, newPet({ combat = true }))
+  fight.s.clock = fight.s.clock + 60
+  fight.drain()
+  e = fight.events()[1]
+  assert(e and e.npc == 3825 and e.spd == nil and e.spdAura == nil and e.diet == nil and #e.spells == 2, dump(e))
+  -- without a timer: one read at once
+  local now = hunter()
+  now.G.C_Timer = nil
+  now.s.book = {}
+  tame(now, newPet({ combat = true }))
+  e = now.events()[1]
+  assert(e and e.spells == nil and e.spd == nil and dump(e.diet) == "{1=Fish,2=Meat}", dump(e))
+
+  -- the modern book (C_SpellBook, Enum.SpellBookSpellBank.Pet) and auras (C_UnitAuras); a future spell is not the pet's
+  local m = hunter()
+  m.G.HasPetSpells, m.G.GetSpellBookItemName = nil, nil
+  m.G.Enum.SpellBookSpellBank = { Player = 0, Pet = 1 }
+  m.G.Enum.SpellBookItemType = { None = 0, Spell = 1, FutureSpell = 2, PetAction = 3, Flyout = 4 }
+  m.G.C_SpellBook = {
+    HasPetSpells = function() return 4, "PET" end,
+    GetSpellBookItemInfo = function(i, bank)
+      assert(bank == 1, "the pet's bank")
+      return ({ { name = "Bite", subName = "Rank 3", itemType = 3, actionID = 16777216.0 * 129 + 17253 },   -- 0x81 (autocast) in the high byte; a float, as WoW numbers are
+                { name = "Growl", subName = "", itemType = 1, spellID = 2649 },
+                { name = "Attack", itemType = 3, actionID = 0x07000002 },
+                { name = "Bite", subName = "Rank 4", itemType = 2, spellID = 17253 } })[i]
+    end }
+  local auras = 0
+  m.G.C_UnitAuras = { GetAuraDataByIndex = function(u) auras = auras + 1; assert(u == "pet"); return nil end }
+  m.G.UnitAura = function() error("C_UnitAuras first") end
+  tame(m)
+  e = m.events()[1]
+  assert(e and dump(e.spells) == "{1={name=Growl,s=2649},2={name=Bite,rank=Rank 3,s=17253}}" and e.spd == 150 and auras == 2, dump(e))
+
+  -- secrets and odd values: a secret GUID or book entry is skipped; a speed or level out of range is left out
+  local secret = {}
+  local sx = hunter({ globals = { issecretvalue = function(v) return v == secret end } })
+  sx.s.units.target.guid = secret
+  tame(sx)
+  assert(#sx.events() == 0, "a secret target GUID")
+  local so = hunter({ globals = { issecretvalue = function(v) return v == secret end } })
+  so.s.units.target.level = -1
+  so.s.book = { { secret, "Rank 1", 17253 }, { "Growl", secret, 2649 }, { "Bite", "Rank 1", 2649 } }
+  so.s.diet = { "Meat", "Me|cffff0000at", secret, "Player-4170-00ABCDEF", "Meat" }
+  tame(so, newPet({ speed = 99 }))
+  assert(#so.events() == 0, "no usable speed yet: it waits")
+  so.s.clock = so.s.clock + 60; so.drain()
+  e = so.events()[1]
+  assert(e and e.lv == nil and e.spd == nil and dump(e.spells) == "{1={name=Growl,s=2649}}" and dump(e.diet) == "{1=Meat}", dump(e))
+
+  -- at most 20 a session
+  local many = hunter()
+  for i = 1, 21 do
+    many.s.units.pet = nil
+    many.s.units.target = { guid = "Creature-0-4170-0-1234-" .. (5000 + i) .. "-000012AC01", level = 10, fam = 1, famName = "Wolf" }
+    tame(many)
+  end
+  assert(#many.events() == 20, "20 tames a session")
+
+  -- a client without the pet APIs: the beast alone, and no error
+  local bareApi = hunter()
+  bareApi.G.HasPetSpells, bareApi.G.C_PetInfo, bareApi.G.UnitAura, bareApi.G.UnitAttackSpeed = nil, nil, nil, nil
+  tame(bareApi)
+  bareApi.s.clock = bareApi.s.clock + 60; bareApi.drain()
+  e = bareApi.events()[1]
+  assert(e and e.npc == 3825 and not e.spells and not e.spd and not e.diet and not bareApi.db().lastError, dump(e))
+  print("OK   tames: a hunter's beast by the target's GUID at Tame Beast, the pet's book, bare speed and diet; refusals, retries, caps")
+end
 `;
 
 // The real /kinv: every file the .toc loads, in a fake game where unknown globals are harmless stubs.
@@ -2106,6 +2308,8 @@ end
 assert(KutzInventoryObsDB and KutzInventoryObsDB.on and KutzInventoryObsDB.agreed, "loading the addon turns drop tracking on")
 local _, upgradeLines = table.concat(printed):gsub("1%.19%.0 adds NPC gossip and spoken lines", "")
 assert(upgradeLines == (existing and 1 or 0), "login notice also applies to an install with no old observations table")
+local _, petLines = table.concat(printed):gsub("1%.20%.0 adds hunter tames", "")
+assert(petLines == (existing and 1 or 0), "the 1.20.0 login notice, once, for an existing install")
 SlashCmdList.KUTZINVENTORY("")
 local all = table.concat(printed, "\\n")
 assert(all:find("enabled by default") and all:find("/kinv track|r says whether"), "the note and the help line")

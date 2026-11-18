@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.12.0",
+ "schemaVersion": "3.13.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": null,
  "prices": {
@@ -519,7 +519,7 @@
  ],
  "observations": {
   "v": 1,
-  "addon": "1.19.0",
+  "addon": "1.20.0",
   "install": "k1f9c2",
   "events": [
    {
@@ -924,6 +924,45 @@
     "who": {
      "level": 20,
      "class": 8,
+     "faction": "Alliance",
+     "name": "Exampleobserver",
+     "surname": "Examplefamily"
+    }
+   },
+   {
+    "id": "k1f9c2-000029",
+    "t": 1762906500,
+    "b": "1.60.1.70888",
+    "type": "tame",
+    "npc": 525,
+    "lv": 11,
+    "fam": 1,
+    "spells": [
+     {
+      "s": 2649,
+      "name": "Growl",
+      "rank": "Rank 1"
+     },
+     {
+      "s": 17253,
+      "name": "Bite",
+      "rank": "Rank 1"
+     }
+    ],
+    "spd": 200,
+    "diet": [
+     "Fish",
+     "Meat"
+    ],
+    "where": {
+     "map": 0,
+     "uiMap": 1429,
+     "x": 0.4123,
+     "y": 0.6543
+    },
+    "who": {
+     "level": 12,
+     "class": 3,
      "faction": "Alliance",
      "name": "Exampleobserver",
      "surname": "Examplefamily"

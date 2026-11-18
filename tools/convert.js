@@ -40,7 +40,8 @@ const SCHEMA_VERSION = "2.1.0";
 // quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin, reputation changes
 // only) (KutzInventory 1.18.0). observations.v stays 1.
 // 3.12.0: game text observations and quest objective and map data (KutzInventory 1.19.0). observations.v stays 1.
-const SCHEMA_VERSION_3 = "3.12.0";
+// 3.13.0: hunter tame events (KutzInventory 1.20.0).
+const SCHEMA_VERSION_3 = "3.13.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).
@@ -423,7 +424,7 @@ function exportRaids(dbs) {
 }
 
 // ---------------------------------------------------------------------------
-// Observations (inventory 3.2.0+; trainer events 3.9.0; taxi and flight events 3.11.0):KutzInventoryObsDB.events from Observations.lua, recorded while
+// Observations (inventory 3.2.0+; trainer events 3.9.0; taxi and flight events 3.11.0; tame events 3.13.0): KutzInventoryObsDB.events from Observations.lua, recorded while
 // drop tracking is on (/kinv track; on by default since KutzInventory 1.13.0). Exported as observations = { v: 1, addon, events[] } only when there is
 // at least one usable event. Each event keeps only the fields its type has, with the right types; everything else
 // (anything about money, other players, unknown keys) is dropped. Ids are unique per install, so several saved files
@@ -576,6 +577,24 @@ function obsTrainerRow(r) {
   return pick({ s: obsInt(r.s, 1), name, rank: obsLabel(r.rank, 40), lv: obsInt(r.lv, 1), skill: obsLabel(r.skill, 64),
                 skillReq: obsInt(r.skillReq, 1), needs: needs.length ? needs : undefined, cost, st: r.st });
 }
+// Hunter tames (3.13.0): the new pet's spellbook, [{ s, name, rank? }] by spell id, each id once, at most 24; its diet, the
+// client's labels, each once, sorted, at most 8. A row or label that fails its check is dropped alone; nothing left: absent.
+const OBS_TAME = { spells: 24, diet: 8 };
+function obsTameSpells(list) {
+  const out = [], seen = new Set();
+  for (const r of asList(list)) {
+    if (!r || typeof r !== "object") continue;
+    const s = obsInt(r.s, 1), name = obsLabel(r.name, 120);
+    if (s === undefined || name === undefined || seen.has(s)) continue;
+    seen.add(s);
+    out.push(pick({ s, name, rank: obsLabel(r.rank, 40) }));
+  }
+  return out.length ? out.sort((a, b) => a.s - b.s).slice(0, OBS_TAME.spells) : undefined;
+}
+function obsTameDiet(list) {
+  const out = [...new Set(asList(list).map((x) => obsLabel(x, 40)).filter((x) => x !== undefined))].sort();
+  return out.length ? out.slice(0, OBS_TAME.diet) : undefined;
+}
 function observationEvent(e) {
   if (!e || typeof e !== "object" || !obsText(e.id, OBS_ID) || obsInt(e.t, 1) === undefined || e.t > 1e11) return null;
   const base = { id: e.id, t: e.t, ...(obsText(e.b, /^[0-9][0-9.]{0,39}$/) ? { b: e.b } : {}), type: e.type };
@@ -645,6 +664,13 @@ function observationEvent(e) {
     const npc = obsInt(e.npc, 1), text = obsProse(e.text, 2000);
     if (npc === undefined || !text || /[^\x00-\x7f]/.test(text) || !OBS_LINE_KINDS.includes(e.kind)) return null;
     return { ...base, npc, kind: e.kind, text, ...place() };
+  }
+  if (e.type === "tame") {
+    const npc = obsInt(e.npc, 1), lv = obsInt(e.lv, 1);
+    if (npc === undefined) return null;                  // the creature id is never guessed: no id, no event
+    const spd = Number.isInteger(e.spd) && e.spd >= 10 && e.spd <= 2000 ? e.spd : undefined;
+    return { ...base, npc, ...pick({ lv: lv <= 255 ? lv : undefined, fam: obsNpcKind(e.fam), spells: obsTameSpells(e.spells), spd,
+             spdAura: spd !== undefined && e.spdAura === true ? true : undefined, diet: obsTameDiet(e.diet) }), ...place() };
   }
   if (e.type === "flight") {
     if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;

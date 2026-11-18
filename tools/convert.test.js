@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.12.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.13.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -196,10 +196,10 @@ const WHO = `who = { level = 60, class = 4, faction = "Alliance" }`;
 
 test("observations: the example's events are exported in the documented shape; the broken one is not; 2.x has none", () => {
   const obs = convert.convertSavedVariables([LUA]).inventory.observations;
-  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.19.0");
+  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.20.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -316,6 +316,44 @@ test("observations 3.12.0: line events retain safe fields only and reject malfor
     npc: 352, kind: "emote", text: event.text, where: {}, who: {} });
   for (const bad of [{ npc: 0 }, { kind: "party" }, { text: "" }, { text: "é" }, { text: "Player-1-26" },
                      { text: "x".repeat(2001) }]) assert.equal(obs(bad), null);
+});
+
+test("observations 3.13.0: tame events keep the beast and the pet's facts; no creature id, no event", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([LUA]).inventory;
+  const where = { map: 0, uiMap: 1429, x: 0.4123, y: 0.6543 };
+  const who = { level: 12, class: 3, faction: "Alliance", name: "Exampleobserver", surname: "Examplefamily" };
+  const event = { id: "abc123-1", t: 100, b: "1.60.1.70888", type: "tame", npc: 3825, lv: 12, fam: 1, spd: 150, spdAura: true,
+    spells: [{ s: 17253, name: "Bite", rank: "Rank 1" }, { s: 2649, name: "Growl" }], diet: ["Meat", "Fish"],
+    guid: "Pet-0-4170-0-1234-3825-0100AABBCC", petName: "Discard", where, who };
+  const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
+  const good = obs({}).events[0];
+  assert.deepEqual(good, { id: "abc123-1", t: 100, b: "1.60.1.70888", type: "tame", npc: 3825, lv: 12, fam: 1,
+    spells: [{ s: 2649, name: "Growl" }, { s: 17253, name: "Bite", rank: "Rank 1" }], spd: 150, spdAura: true, diet: ["Fish", "Meat"],
+    where, who });
+  assert.ok(!/Pet-|Discard/.test(JSON.stringify(good)), "no pet GUID or name");
+  const bytes = Buffer.byteLength(JSON.stringify(good));
+  assert.ok(bytes < 450, "one tame event: " + bytes + " bytes");
+  for (const bad of [{ npc: undefined }, { npc: 0 }, { npc: "3825" }, { npc: 1.5 }, { npc: 2147483648 }]) assert.equal(obs(bad), null);
+  // each optional field that fails its check goes alone
+  const odd = obs({ lv: 256, fam: "Pet-0-1-2", spd: 9, spdAura: "yes",
+    spells: [null, { s: 0, name: "Bite" }, { s: 1, name: "|cffBad" }, { s: 2, name: "Ok", rank: "x".repeat(41) }, { s: 2, name: "Again" }, 7],
+    diet: ["Meat", "Meat", "|x", "Creature-0-1-2", 5, "x".repeat(41)] }).events[0];
+  assert.deepEqual(odd, { id: "abc123-1", t: 100, b: "1.60.1.70888", type: "tame", npc: 3825, spells: [{ s: 2, name: "Ok" }],
+    diet: ["Meat"], where, who });
+  const bare = obs({ lv: undefined, fam: "Wolf", spells: [], diet: [], spd: 2000, spdAura: false }).events[0];
+  assert.deepEqual([bare.fam, bare.spells, bare.diet, bare.spd, bare.spdAura], ["Wolf", undefined, undefined, 2000, undefined]);
+  const capped = obs({ spells: Array.from({ length: 30 }, (_, i) => ({ s: 100 - i, name: "S" + i })),
+    diet: Array.from({ length: 10 }, (_, i) => "Food " + i) }).events[0];
+  assert.deepEqual([capped.spells.length, capped.spells[0].s, capped.diet.length], [24, 71, 8]);
+  // the schema: the exported event is valid; anything the exporter never writes is not
+  const withEvent = (e) => ({ ...doc, observations: { v: 1, addon: "1.20.0", events: [e] } });
+  assert.deepEqual(validateExport(withEvent(good)), []);
+  assert.deepEqual(validateExport(withEvent(bare)), []);
+  for (const patch of [{ npc: undefined }, { spdAura: false }, { spells: [] }, { spells: [{ s: 1 }] }, { diet: ["a", "a"] },
+                       { guid: "Pet-0-4170-0-1234-3825-0100AABBCC" }, { lv: 0 }, { spd: 2001 }, { fam: "Creature-0-1-2" }]) {
+    assert.ok(validateExport(withEvent({ ...good, ...patch })).length, "schema rejected " + JSON.stringify(patch));
+  }
 });
 
 test("observations 3.12.0: the schema rejects invalid game text events", () => {
@@ -539,7 +577,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.12.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.13.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });

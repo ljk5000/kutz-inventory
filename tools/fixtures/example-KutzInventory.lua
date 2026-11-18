@@ -122,9 +122,10 @@ KutzInventoryDB = {
 }
 -- /kinv track drops on: made-up observations (ids, GUIDs and timings invented). Includes a coins-only corpse (items = {}),
 -- the same corpse skinned, a quest accepted and turned in (with its level, group size, XP and reputation changes), a
--- vendor, a class trainer, a flight master's map, a flight from it, and one broken event the exporter leaves out.
+-- vendor, a class trainer, a flight master's map, a flight from it, game text, a hunter's tame (1.20.0), and one broken
+-- event the exporter leaves out.
 KutzInventoryObsDB = {
-  v = 1, on = true, agreed = true, noted = true, addon = "1.19.0", prefix = "k1f9c2", n = 28,
+  v = 1, on = true, agreed = true, noted = true, addon = "1.20.0", prefix = "k1f9c2", n = 29,
   events = {
     { id = "k1f9c2-000017", t = 1762905600, b = "1.60.1.70888", type = "loot",
       src = { kind = "boss", npc = 11502, guid = "Creature-0-4170-409-1234-11502-000012ABCD", via = "slot" },
@@ -180,6 +181,10 @@ KutzInventoryObsDB = {
     { id = "k1f9c2-000028", t = 1762906450, b = "1.60.1.70888", type = "line", npc = 352, kind = "say",
       text = "Keep the road clear, $N.", where = { uiMap = 1453, x = 0.7081, y = 0.7254 },
       who = { level = 20, class = 8, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" } },
+    { id = "k1f9c2-000029", t = 1762906500, b = "1.60.1.70888", type = "tame", npc = 525, lv = 11, fam = 1,
+      spells = { { s = 2649, name = "Growl", rank = "Rank 1" }, { s = 17253, name = "Bite", rank = "Rank 1" } },
+      spd = 200, diet = { "Fish", "Meat" }, where = { map = 0, uiMap = 1429, x = 0.4123, y = 0.6543 },
+      who = { level = 12, class = 3, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" } },
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },
   -- the npcs summary (1.17.0): a beast with its attack speed (spds is the addon's own tally, not exported), a vendor with

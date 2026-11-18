@@ -674,9 +674,9 @@ KutzInventoryObsDB = {
 	["on"] = true,
 	["agreed"] = true,
 	["noted"] = true,
-	["addon"] = "1.19.0",
+	["addon"] = "1.20.0",
 	["prefix"] = "k1f9c2",
-	["n"] = 28,
+	["n"] = 29,
 	["events"] = {
 		{
 			["id"] = "k1f9c2-000017",
@@ -1087,6 +1087,45 @@ KutzInventoryObsDB = {
 			},
 		}, -- [12]
 		{
+			["id"] = "k1f9c2-000029",
+			["t"] = 1762906500,
+			["b"] = "1.60.1.70888",
+			["type"] = "tame",
+			["npc"] = 525,
+			["lv"] = 11,
+			["fam"] = 1,
+			["spells"] = {
+				{
+					["s"] = 2649,
+					["name"] = "Growl",
+					["rank"] = "Rank 1",
+				}, -- [1]
+				{
+					["s"] = 17253,
+					["name"] = "Bite",
+					["rank"] = "Rank 1",
+				}, -- [2]
+			},
+			["spd"] = 200,
+			["diet"] = {
+				"Fish", -- [1]
+				"Meat", -- [2]
+			},
+			["where"] = {
+				["map"] = 0,
+				["uiMap"] = 1429,
+				["x"] = 0.4123,
+				["y"] = 0.6543,
+			},
+			["who"] = {
+				["level"] = 12,
+				["class"] = 3,
+				["faction"] = "Alliance",
+				["name"] = "Exampleobserver",
+				["surname"] = "Examplefamily",
+			},
+		}, -- [13]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -1095,7 +1134,7 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [13]
+		}, -- [14]
 	},
 	["npcs"] = {
 		[525] = {

@@ -1,5 +1,13 @@
 # Release notes
 
+## KutzInventory 1.20.0
+
+- Record hunter tames while drop tracking is on. When a hunter's Tame Beast begins, the target's creature ID, level and family are noted from its GUID; when a pet appears within 30 seconds (of the same family), its spellbook's abilities with ranks, its attack speed (out of combat, flagged `spdAura` when the pet had an aura at every read) and its diet are read for up to a minute. A tame without a creature ID in the target is not recorded. Interrupting the tame, or Call Pet or Revive Pet, cancels it. The pet's GUID and name are never kept. Once per beast, level, abilities and speed per install, at most 20 a session, under the half caps.
+
+- Existing installs get one login line about the new recording and `/kinv track drops off`.
+
+Inventory export 3.13.0 (default) adds `tame` observations. The observations section stays `v: 1`.
+
 ## KutzInventory 1.19.0
 
 - Record gossip and quest greetings for creatures and objects while drop tracking is on. The recorder replaces the character's names with `$N` and drops currency amounts and text with roster or player target names. Object text also passes a capitalized-word check.

@@ -7,11 +7,12 @@
 -- only call ns.ObsCommand / ns.ObsNote when they exist). Leave this file and its .toc lines out and the addon is the same.
 --
 -- KutzInventoryObsDB = { v = 1, on = true|false, agreed = true|nil, noted = true|nil,
---                        notedGameText = true|nil, addon = "1.8.0", prefix = "k1f9c2", n = 17, events = { oldest first }, npcs = { [npcId] = ... } }
+--                        notedGameText = true|nil, notedPets = true|nil, addon = "1.8.0", prefix = "k1f9c2", n = 17,
+--                        events = { oldest first }, npcs = { [npcId] = ... }, textSeen = { [kind] = { next, keys } } }
 --   prefix: random, made once per install; the event ids start with it and the export names the npcs summary's install by it.
 --   on: a new table starts true (KutzInventory 1.13.0); an existing one keeps what it holds, only a missing on becomes
 --   true. Recording needs on and agreed.
--- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor"|"trainer"|"taxi"|"flight",
+-- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor"|"trainer"|"taxi"|"flight"|...,
 --               where = { map, uiMap, itype, difficulty, x, y }, who = { level, class, faction, name, surname }, ... }
 --   who.name / who.surname: this character's own name (never anyone else's), so cr0m can credit the right character.
 --   items carry link = "|cffa335ee|Hitem:19019|h[Name]|h|r": only the item's quality colour, id and name, so cr0m can name
@@ -57,6 +58,10 @@
 --   gossip NPC or object greeting and dialogue body only, while below the half caps.
 --   read   one page from a world object, only when mail and creator checks pass.
 --   line   game speech or emotes from an identified, uncontrolled creature; known player names scrubbed.
+--   tame   (1.20.0) a hunter's tame: npc (the creature id from the target's GUID when Tame Beast began; no id, no event),
+--          lv and fam (the target's), spells = { { s, name, rank } } (the new pet's spellbook), spd (its attack speed in
+--          hundredths of a second, out of combat; spdAura = true when the pet had an aura at every read), diet (labels),
+--          where = where the tame began. Never the pet's GUID or name. Once per beast, level, abilities and speed.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
@@ -2119,6 +2124,173 @@ function qx.TurnedIn(quest, e)
 end
 
 ---------------------------------------------------------------------------
+-- hunter tames (1.20.0): the beast a hunter tamed (its creature id from the target's GUID when the tame began) and what
+-- the pet it became showed: its spellbook's abilities, its attack speed and its diet. Passive reads only: the hunter's
+-- own Tame Beast cast is watched, never made; the pet's GUID is compared in memory and never kept.
+---------------------------------------------------------------------------
+local pet = { TAME = 1515, CALL = 883, REVIVE = 982, WINDOW = 30, READ = 60, EVERY = 2, SPELLS = 24, DIET = 8, SESSION = 20,
+              arm = nil, read = nil, n = 0, token = 0 }
+
+function pet.Is(spellId, id)                    -- this spell id, or a spell of the same name in the client's language
+    spellId = gameText.Id(spellId)
+    if not spellId then return false end
+    if spellId == id then return true end
+    local name, want = SpellName(spellId), SpellName(id)
+    return type(name) == "string" and name ~= "" and name == want
+end
+
+function pet.Hunter()
+    local _, file, id = Try(UnitClass, "player")
+    return Plain(file) == "HUNTER" or Int(id) == 3
+end
+
+function pet.Guid()                             -- the pet's GUID now, to tell this pet from another; never stored
+    local guid = Plain(Try(UnitGUID, "pet"))
+    return type(guid) == "string" and guid ~= "" and guid or nil
+end
+
+function pet.Family(unit)                       -- UnitCreatureFamily: the client's id when it gives one, and the name
+    local name, id = Try(UnitCreatureFamily, unit)
+    return Int(id, 1), Label(name, 40)
+end
+
+-- UNIT_SPELLCAST_START / _CHANNEL_START by the player. Tame Beast by a hunter with no pet arms a tame of the creature in
+-- its target; Call Pet or Revive Pet disarms it (a pet that appears then is not a new one).
+function pet.Start(spellId)
+    if pet.Is(spellId, pet.CALL) or pet.Is(spellId, pet.REVIVE) then pet.arm = nil; return end
+    if not (pet.Is(spellId, pet.TAME) and pet.Hunter()) then return end
+    pet.arm = nil
+    if pet.Guid() then return end               -- a hunter with a pet out cannot tame: nothing to wait for
+    local what, npc = FromGuid(Plain(Try(UnitGUID, "target")))
+    npc = what == "npc" and gameText.Id(npc)
+    if not npc or not (False(UnitIsPlayer, "target") and False(UnitPlayerControlled, "target")) then return end
+    local lv = Int(Try(UnitLevel, "target"), 1)
+    local famId, famName = pet.Family("target")
+    pet.arm = { npc = npc, lv = lv and lv <= 255 and lv or nil, famId = famId, famName = famName, where = Where(), at = Now() }
+end
+
+function pet.Stop(spellId)                      -- UNIT_SPELLCAST_INTERRUPTED: that tame is over
+    if pet.arm and pet.Is(spellId, pet.TAME) then pet.arm = nil end
+end
+
+-- UNIT_PET("player") within 30 s of an armed tame: a pet where there was none, of the beast's family when both are read.
+function pet.Changed(unit)
+    local a = pet.arm
+    if Plain(unit) ~= "player" or not a then return end
+    if Now() - a.at > pet.WINDOW then pet.arm = nil; return end
+    local guid = pet.Guid()
+    if not guid then return end
+    pet.arm = nil
+    local famId, famName = pet.Family("pet")
+    if (a.famId and famId and a.famId ~= famId) or (a.famName and famName and a.famName ~= famName) then return end
+    pet.token = pet.token + 1
+    pet.read = { arm = a, guid = guid, at = Now(), token = pet.token }
+    pet.Read(true)
+end
+
+local function ActionSpell(v)                   -- a pet book action id: its low 24 bits are the spell id
+    v = Int(v, 1)
+    return v and math.floor(v % 16777216) or nil
+end
+
+-- The pet's spellbook: { { s, name, rank? } } sorted by s, or nil while it lists nothing. Each id must name the spell the
+-- book shows (SpellName(s) == name), which leaves out the pet bar's commands without any list of ids.
+function pet.Spells()
+    local out, seen = {}, {}
+    local function add(id, name, rank)
+        id, name = gameText.Id(Plain(id)), Label(name, 120)
+        if not (id and name) or seen[id] or SpellName(id) ~= name then return end
+        seen[id] = true
+        out[#out + 1] = { s = id, name = name, rank = Label(rank, 40) }
+    end
+    local B, E = C_SpellBook, type(Enum) == "table" and Enum or {}
+    local bank = type(E.SpellBookSpellBank) == "table" and E.SpellBookSpellBank.Pet
+    local T = type(E.SpellBookItemType) == "table" and E.SpellBookItemType or {}
+    if type(B) == "table" and type(B.HasPetSpells) == "function" and type(B.GetSpellBookItemInfo) == "function" and bank ~= nil then
+        for i = 1, math.min(Int((Try(B.HasPetSpells))) or 0, 100) do
+            local info = Plain(Try(B.GetSpellBookItemInfo, i, bank))
+            local kind = type(info) == "table" and Plain(info.itemType)
+            if kind ~= false and (kind == nil or (kind ~= T.FutureSpell and kind ~= T.Flyout)) then
+                add(Plain(info.spellID) or ActionSpell(info.actionID), info.name, info.subName)
+            end
+        end
+    elseif type(HasPetSpells) == "function" and type(GetSpellBookItemName) == "function" then
+        for i = 1, math.min(Int((Try(HasPetSpells))) or 0, 100) do
+            local name, rank, id = Try(GetSpellBookItemName, i, "pet")
+            if not gameText.Id(Plain(id)) then id = ActionSpell(select(2, Try(GetSpellBookItemInfo, i, "pet"))) end
+            add(id, name, rank)
+        end
+    end
+    table.sort(out, function(a, b) return a.s < b.s end)
+    while #out > pet.SPELLS do out[#out] = nil end
+    return #out > 0 and out or nil
+end
+
+-- The pet's diet as the client names it (C_PetInfo.GetPetFoodTypes, else GetPetFoodTypes): sorted labels, at most 8.
+-- false without either API, nil while it names none.
+function pet.Diet()
+    local P, list = C_PetInfo, nil
+    if type(P) == "table" and type(P.GetPetFoodTypes) == "function" then list = { Try(P.GetPetFoodTypes) }
+    elseif type(GetPetFoodTypes) == "function" then list = { Try(GetPetFoodTypes) }
+    else return false end
+    if type(Plain(list[1])) == "table" then list = list[1] end
+    local out, seen = {}, {}
+    for _, v in ipairs(list) do
+        local s = Label(v, 40)
+        if s and not seen[s] and not s:find("%a+%-%d+%-%d+") then seen[s] = true; out[#out + 1] = s end
+    end
+    table.sort(out)
+    while #out > pet.DIET do out[#out] = nil end
+    return #out > 0 and out or nil
+end
+
+-- The pet's main-hand attack speed in hundredths of a second, only with the pet alive and neither it nor the player in
+-- combat; and true when the pet had no aura at all (so nothing could have hastened or slowed it). nil when unreadable.
+function pet.Speed()
+    if not (False(UnitIsDead, "pet") and False(UnitAffectingCombat, "pet") and False(UnitAffectingCombat, "player")) then return nil end
+    local mh = Num((Try(UnitAttackSpeed, "pet")))
+    local v = mh and math.floor(mh * 100 + 0.5)
+    if not (v and v >= 10 and v <= 2000) then return nil end
+    local A, fn = C_UnitAuras, UnitAura
+    if type(A) == "table" and type(A.GetAuraDataByIndex) == "function" then fn = A.GetAuraDataByIndex end
+    return v, type(fn) == "function" and False(fn, "pet", 1, "HELPFUL") and False(fn, "pet", 1, "HARMFUL")
+end
+
+-- Reads the new pet until its book, an aura-free speed and its diet are in, or 60 s have passed; again every 2 s
+-- (again = true) and on PET_BAR_UPDATE / SPELLS_CHANGED. Another pet, or none, ends it without a record.
+function pet.Read(again)
+    local r = pet.read
+    if not r then return end
+    if pet.Guid() ~= r.guid then pet.read = nil; return end
+    r.spells = r.spells or pet.Spells()
+    if r.diet == nil then r.diet = pet.Diet() end
+    if not r.bare then
+        local v, bare = pet.Speed()
+        if v then r.spd, r.bare = v, bare end
+    end
+    local timer = C_Timer and type(C_Timer.After) == "function"
+    if (r.spells and r.bare and r.diet ~= nil) or Now() - r.at >= pet.READ or not timer then return pet.Record(r) end
+    if again then
+        C_Timer.After(pet.EVERY, function() if pet.read == r and r.token == pet.token then pcall(pet.Read, true) end end)
+    end
+end
+
+-- type "tame": npc, lv, fam, spells, spd (+ spdAura when the pet had an aura at every read), diet; where = the tame's start.
+-- Once per beast, level, abilities and speed per install; at most 20 a session, and nothing past the half caps.
+function pet.Record(r)
+    pet.read = nil
+    local a = r.arm
+    if pet.n >= pet.SESSION then return end
+    local sig = {}
+    for _, x in ipairs(r.spells or {}) do sig[#sig + 1] = x.s .. (x.rank and ("/" .. x.rank) or "") end
+    local key = table.concat({ a.npc, a.lv or "", table.concat(sig, ","), r.spd or "", r.spd and not r.bare and "a" or "" }, ":")
+    local fields = { npc = a.npc, lv = a.lv, fam = a.famId or a.famName, spells = r.spells, spd = r.spd,
+                     spdAura = r.spd and not r.bare or nil, diet = r.diet or nil, where = a.where }
+    if gameText.Index("tame").seen[key] then return end
+    if gameText.Record("tame", key, fields) then pet.n = pet.n + 1 end
+end
+
+---------------------------------------------------------------------------
 -- events: only registered while recording is on
 ---------------------------------------------------------------------------
 local handlers = {}
@@ -2138,8 +2310,17 @@ local function Cast(unit, _, spellId)
     local kind = GatherKind(spellId)
     if kind then lastCast.kind, lastCast.at = kind, Now() end
 end
-handlers.UNIT_SPELLCAST_START = Cast
+local function Began(unit, castGUID, spellId)
+    Cast(unit, castGUID, spellId)
+    if unit == "player" then pet.Start(spellId) end
+end
+handlers.UNIT_SPELLCAST_START = Began
+handlers.UNIT_SPELLCAST_CHANNEL_START = Began   -- Tame Beast is channelled
 handlers.UNIT_SPELLCAST_SUCCEEDED = Cast
+function handlers.UNIT_SPELLCAST_INTERRUPTED(unit, _, spellId) if unit == "player" then pet.Stop(spellId) end end
+handlers.UNIT_PET = pet.Changed
+function handlers.PET_BAR_UPDATE() if pet.read then pet.Read(false) end end
+handlers.SPELLS_CHANGED = handlers.PET_BAR_UPDATE
 local function Engaged(reset)
     for i = 1, 5 do
         local what, id = FromGuid(Plain(Try(UnitGUID, "boss" .. i)))
@@ -2313,7 +2494,8 @@ local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                     "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
-                    "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED" }
+                    "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED",
+                    "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_PET", "PET_BAR_UPDATE", "SPELLS_CHANGED" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -2349,6 +2531,7 @@ local function Disable()
     gameText.mail, gameText.book, gameText.bookUse = false, nil, nil
     qx.waiting = {}
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
+    pet.arm, pet.read, pet.token = nil, nil, pet.token + 1   -- a tame still being read is dropped
 end
 
 local function AddonVersion()
@@ -2424,14 +2607,18 @@ function ns.ObsCommand(msg)
     return true
 end
 
--- Existing installs get the 1.19.0 notice at login. The first /kinv still explains the tracking preference.
+-- Existing installs get each release's notice they have not seen yet at login (1.19.0, 1.20.0). The first /kinv still
+-- explains the tracking preference.
 function ns.ObsNote(atLogin, hadInventory)
     local d = DB(true)
     if atLogin then
         if (hadInventory or gameText.upgrade) and not d.notedGameText then
             Say("1.19.0 adds NPC gossip and spoken lines, book pages from world objects, and quest objectives when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
         end
-        d.notedGameText = true
+        if (hadInventory or gameText.upgrade) and not d.notedPets then
+            Say("1.20.0 adds hunter tames (the beast, and its pet's abilities, attack speed and diet) when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
+        end
+        d.notedGameText, d.notedPets = true, true
         return
     end
     if d.noted then return end

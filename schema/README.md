@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.12.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
+| `inventory-export.v3.schema.json` | **3.13.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -69,7 +69,7 @@ Optional `characters[].hearth` is the bind-location name from `GetBindLocation`,
 
 Events have ISO `t` and `kind`: `start` (instance ID/name/type/difficulty, `by`), `end` (instance ID/name), `encounter_start`/`encounter_end` (encounter ID/name, difficulty, group size, plus success on end), `loot` (item ID/link/count, `looter`) or `roster` (`members`). Missing API values are omitted. Account files tracking the same raid string merge their events. The addon records only during the two-hours-before/eight-hours-after window while grouped in an instance; exact matching instance IDs are preferred, with a window fallback. It retains at most 20 raids, 2,000 events each, pruning raids more than 14 days after start on load/add.
 
-### Observations (3.2.0–3.12.0)
+### Observations (3.2.0–3.13.0)
 
 `observations: { v: 1, addon, install?, events: [...], npcs? }` comes from the **same saved file's** `KutzInventoryObsDB` table. The addon retains up to 5,000 events, 30 days and roughly 2 MB; export deduplicates by event ID, sorts by time/ID and caps count/serialized size. IDs combine a random install prefix and counter; they are not cryptographic identities or guaranteed globally unique.
 
@@ -85,6 +85,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `gossip` (3.12.0): game-authored NPC or object gossip and quest greetings ([below](#game-text-3120)).
 - `read` (3.12.0): game-authored pages from world objects ([below](#game-text-3120)).
 - `line` (3.12.0): game-authored creature speech and emotes ([below](#game-text-3120)).
+- `tame` (3.13.0): a hunter's tamed beast and what its new pet showed ([below](#hunter-tames-3130)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -252,6 +253,38 @@ poi?: [ 1-8 of {                 first distinct usable quest points in API order
 `obj` is recorded only if it fits under the count and size half caps. Text retains line breaks and excludes pipe markup, GUID shapes and other control characters. The recorder strips leading or trailing ASCII fraction/percent counters and refuses text with a remaining such counter. It caps prose in UTF-8 bytes. Only the required amount is kept. `numFulfilled` and `finished` are never read. The exporter drops invalid rows, retains the first 12 valid rows, and omits an empty `obj`.
 
 `poi` comes only from `C_QuestLog.GetQuestsOnMap(uiMapID)` rows for this quest and map, skipping offer markers. Reads require a plain out-of-combat state and the player's map to still be the acceptance map; a quest flagged ready to turn in is skipped when the client supplies that check. There is no UI or map state change. Secret, missing, out-of-range and zero-origin points are omitted. Points are deduplicated after rounding. The exporter also enforces the acceptance map, deduplicates and caps the array, and omits an empty `poi`. These are game quest markers and can represent an objective area. They contain no player progress counts. A missing `obj` or `poi` means the recorder had no usable reading.
+
+### Hunter tames (3.13.0)
+
+From 3.13.0 (KutzInventory 1.20.0) observations may be of type `tame`; `observations.v` stays `1` (an older reader skips the type). Only a hunter's own tames are recorded, from passive reads: the addon watches the player's own Tame Beast cast and never casts, targets or clicks anything.
+
+**How a tame is recognised.** `UNIT_SPELLCAST_START` or `UNIT_SPELLCAST_CHANNEL_START` for `"player"` with Tame Beast (spell 1515, or a spell with the same name in the client's language), while `UnitClass("player")` says hunter and the player has no pet (`UnitGUID("pet")` empty), arms a tame. At that moment the target must be a creature: `UnitGUID("target")` a plain `Creature-`/`Vehicle-` GUID, `UnitIsPlayer` and `UnitPlayerControlled` a plain `false`. The NPC id is taken from that GUID, with `UnitLevel("target")`, `UnitCreatureFamily("target")` and `where`. `UNIT_SPELLCAST_INTERRUPTED` of Tame Beast, or a Call Pet or Revive Pet cast, disarms it. The tame is confirmed by `UNIT_PET("player")` within 30 seconds with a pet present whose family equals the target's whenever both were read. The pet is then read again every 2 seconds, and on `PET_BAR_UPDATE` and `SPELLS_CHANGED`, until its book, an aura-free attack speed and its diet are in, or 60 seconds have passed; the event is then recorded with what was read. A pet that is dismissed, dies or is replaced before that ends the tame without a record. The pet's GUID is compared in memory only; it and the pet's name are never kept.
+
+**No creature id, no event.** Without a creature GUID in the target when Tame Beast began (no target, a secret value, a player), nothing is recorded, and the id is never taken from the pet's GUID or guessed from a name. A pet of unknown origin is not a fact about any creature: a reader could not tell its natural abilities, level or speed from a trained pet's.
+
+```text
+{ id, t, b?, type: "tame", where, who,      where: where the tame began
+  npc:      integer 1-2147483647     the tamed creature's NPC ID, from UnitGUID("target") at the cast's start (required)
+  lv?:      integer 1-255            UnitLevel("target") then; absent for a skull or when unreadable
+  fam?:     integer 1-100000 | label 1-40   UnitCreatureFamily("target"): the family id, else the localized name
+  spells?:  [ 1-24 of {              the new pet's spellbook, sorted by s, each spell ID once; absent when it listed nothing
+    s:      integer 1-2147483647     spell ID: C_SpellBook.GetSpellBookItemInfo(i, Enum.SpellBookSpellBank.Pet).spellID,
+                                     else the low 24 bits of its actionID (the old API: GetSpellBookItemName(i, "pet"),
+                                     then GetSpellBookItemInfo); kept only when the spell's own name is the book's name
+    name:   label 1-120              the book's name for it
+    rank?:  label 1-40               its subtext ("Rank 2")
+  } ]
+  spd?:     integer 10-2000          UnitAttackSpeed("pet") main hand, in hundredths of a second, with the pet alive and
+                                     neither the pet nor the player in combat
+  spdAura?: true                     only with spd: the pet had at least one aura (C_UnitAuras.GetAuraDataByIndex, else
+                                     UnitAura, HELPFUL and HARMFUL) at every read, so spd may include a haste or slow
+  diet?:    [ 1-8 labels 1-40 ]      C_PetInfo.GetPetFoodTypes() (else GetPetFoodTypes()), sorted, each once
+}
+```
+
+Future spells and flyouts in the book are skipped; the pet bar's commands (Attack, Follow, Stay) and reactions drop out because their action ids name no spell of that name, so no id list or id range is used. The exporter drops the event without a valid `npc` and leaves out each other field that fails its check (a row of `spells` or a `diet` label alone). The addon records the same `npc`, `lv`, spells with ranks and `spd` (with its aura flag) at most once per install (a saved index of the last 2,000 keys, as for game text), at most 20 tames a session, and only under the half caps. Measured as compact JSON with a named `who`: about 380 bytes with two abilities and two foods; about 650 with six abilities and six foods. A hunter tames a few beasts a session at most, so the cost is about 1 to 2 KB a session and at most about 13 KB.
+
+**Consumer guidance.** `npc`, `lv` and `fam` are the creature's. `spells` are what the pet's book listed right after the tame, which for a new pet are the beast's natural abilities; a reader should still prefer two agreeing tames of the same `npc` before it publishes them. Treat `spd` without `spdAura` as the beast's attack speed; with `spdAura`, as a hint only. `diet` is the family's diet as the client words it, in the recorder's language.
 
 ### NPC summary (3.10.0)
 
