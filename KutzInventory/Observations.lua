@@ -1,12 +1,14 @@
 -- KutzInventory / Observations: default-on recording of what drops, what quests give, what vendors sell and what
--- trainers teach, for cr0m's item database. On from the first load of a new install; an install from the opt-in days keeps
--- its choice (off stays off). /kinv track drops off stops it and stays off across reloads; /kinv track shows the status.
+-- trainers teach, plus a summary of the NPCs seen, for cr0m's item database. On from the first load of a new install; an
+-- install from the opt-in days keeps its choice (off stays off). /kinv track drops off stops all of it (the NPC summary too)
+-- and stays off across reloads; /kinv track shows the status.
 --
 -- A module on its own: its own saved table, KutzInventoryObsDB, and nothing in the other files depends on it (they
 -- only call ns.ObsCommand / ns.ObsNote when they exist). Leave this file and its .toc lines out and the addon is the same.
 --
 -- KutzInventoryObsDB = { v = 1, on = true|false, agreed = true|nil, noted = true|nil,
---                        addon = "1.8.0", prefix = "k1f9c2", n = 17, events = { oldest first } }
+--                        addon = "1.8.0", prefix = "k1f9c2", n = 17, events = { oldest first }, npcs = { [npcId] = ... } }
+--   prefix: random, made once per install; the event ids start with it and the export names the npcs summary's install by it.
 --   on: a new table starts true (KutzInventory 1.13.0); an existing one keeps what it holds, only a missing on becomes
 --   true. Recording needs on and agreed.
 -- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor"|"trainer",
@@ -41,6 +43,20 @@
 -- Never recorded: coin loot, quest money, the player's money, other players' names or GUIDs, chat, guild. (Loot chat is
 -- read only for this player's own "You won" line, kept as the won flag; who else rolled or won is never kept.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
+--
+-- npcs (KutzInventory 1.17.0): not events but one summary per install of the creatures this player looked at
+-- (PLAYER_TARGET_CHANGED, UPDATE_MOUSEOVER_UNIT, and the vendor / quest / trainer window or loot corpse in front of it),
+-- updated in place: KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss, cls, ct, fam, rxA, rxH, sub, spd,
+-- spds, day, cells = { ["uiMap:cx:cy"] = count } }. Only creatures no player controls (no pets, guardians, totems, companions),
+-- only outside instances, and a value the client keeps secret is left out. Privacy: no time finer than a day (day = the
+-- last day it was seen, days since 1970), no player names and no GUIDs (name is the NPC's own, sub its subtitle, taken only when
+-- the tooltip's lines prove it is one; both refuse the player's name and owner titles), and no trail: cells are unordered counts of the 1% map squares the player stood in
+-- while within about 10 yards of it (or talking to it), so the player's position stands for the NPC's. An NPC not seen
+-- for 180 days is dropped on load. Its reaction and attack speed are read only while it is alive and out of combat (a
+-- neutral mob reads hostile once fought), its tooltip only while the player is out of combat. At most 3000 NPCs
+-- (the least recently seen go first), 40 cells each and its own ~500 KB cap, apart from the events' 2 MB: the summary
+-- is replaced, not added to, so it must not push drops out of the events' cap, nor drops push it out (3000 realistic
+-- NPCs with names are ~440 KB by Size below). spds is this file's own tally for spd (attack speed -> times seen), not exported.
 
 local ADDON, ns = ...
 
@@ -99,6 +115,7 @@ local function DB(create)
     -- opt-in days keeps its on = false (never turned on, or turned off) until /kinv track drops on.
     if d.on == nil then d.on, d.agreed = true, true end
     if type(d.events) ~= "table" then d.events = {} end
+    if type(d.npcs) ~= "table" then d.npcs = {} end
     return d
 end
 
@@ -152,12 +169,17 @@ end
 ---------------------------------------------------------------------------
 local ALNUM = "0123456789abcdefghijklmnopqrstuvwxyz"
 
-local function NewId(d)
+local function Prefix(d)                        -- the install's random prefix, made on first use
     if type(d.prefix) ~= "string" or d.prefix == "" then
         local p = {}
         for i = 1, 6 do local r = math.random(1, 36); p[i] = ALNUM:sub(r, r) end
         d.prefix = table.concat(p)
     end
+    return d.prefix
+end
+
+local function NewId(d)
+    Prefix(d)
     d.n = (Int(d.n) or 0) + 1
     return d.prefix .. "-" .. string.format("%06d", d.n)
 end
@@ -258,6 +280,7 @@ local lastCast = { kind = nil, at = -1000 }
 local bossNpcs = {}                             -- npc ids seen as boss1..boss5 this session
 local lastUsedItem = { id = nil, at = -1000 }   -- a container item just opened from the bags
 local lootDone = false
+local Sighting                                  -- (unit, open): the npcs summary's update, defined below
 
 local function SpellName(id)
     if C_Spell and C_Spell.GetSpellName then return Plain(Try(C_Spell.GetSpellName, id)) end
@@ -300,6 +323,7 @@ local function Source(guid, via, fishing)
     if fishing then src.kind = "fishing"
     elseif what == "npc" then
         local unit = UnitOf(guid)
+        if unit then pcall(Sighting, unit, false) end    -- the corpse in front of us: near only if CheckInteractDistance says so
         src.kind = cast == "skin" and "skin" or IsBoss(unit, id) and "boss" or "mob"
         src.level = unit and Int(Try(UnitLevel, unit), 1) or nil
     elseif what == "object" then src.kind = (cast == "herb" or cast == "mine") and cast or "chest"
@@ -752,6 +776,7 @@ local function RecordVendor()
     if not merchantOpen then return end
     local what, npc = Giver("npc")
     if what ~= "npc" then return end
+    pcall(Sighting, "npc", true)                -- the window is open with it: the player stands at the vendor
     local was, filtered = AllMerchantItems()
     local ok, items, sig = pcall(VendorItems)
     if was ~= nil then Try(SetMerchantFilter, was) end
@@ -868,7 +893,8 @@ local function RecordTrainer()
     if type(guid) ~= "string" then return end   -- the npc unit is not there yet: the next TRAINER_UPDATE tries again
     local what, npc = FromGuid(guid)
     if what ~= "npc" then trainer.done = true; return end   -- not a creature: never recorded
-    trainer.reading = true                      -- the filter switches below fire TRAINER_UPDATE: ignored meanwhile
+    pcall(Sighting, "npc", true)
+    trainer.reading = true                     -- the filter switches below fire TRAINER_UPDATE: ignored meanwhile
     local off = {}
     if type(GetTrainerServiceTypeFilter) == "function" and type(SetTrainerServiceTypeFilter) == "function" then
         for _, f in ipairs(TRAINER_FILTERS) do
@@ -895,6 +921,308 @@ local function SoonTrainer()                    -- one read about 0.5 s after th
         if not ok and d then d.lastError = "observations trainer: " .. tostring(err) end
     end
     if C_Timer and C_Timer.After then C_Timer.After(0.5, run) else run() end
+end
+
+---------------------------------------------------------------------------
+-- npcs: a summary of the creatures this player looks at, one entry per NPC id, updated in place (see the header)
+---------------------------------------------------------------------------
+-- DAYS: an entry not seen for this long is dropped on load; SESSION: the session tables below are trimmed past this many npcs
+local NPC = { AGAIN = 30, CELL_AGAIN = 600, CELLS = 40, MAX = 3000, BYTES = 500000, SPEEDS = 4, DAYS = 180, SESSION = 4000 }
+local NPC_CLASS = { normal = true, elite = true, rare = true, rareelite = true, worldboss = true, trivial = true, minus = true }
+local NPC_RX = { Alliance = "rxA", Horde = "rxH" }      -- the reaction is kept per player faction
+local CT_BEAST, CT_COMPANION = 1, 12            -- UnitCreatureType ids: Beast; Non-combat Pet (someone's companion)
+-- This session only, never saved: when each npc was last updated (GetTime) and whether the player was near it then,
+-- when each npc and cell was last counted, which npcs' tooltips were read, and each entry's approximate JSON size.
+-- tracked: how many npcs at holds (at, near, cells and asked only ever hold npcs that at holds).
+local npcSeen = { at = {}, near = {}, cells = {}, asked = {}, size = nil, bytes = 0, count = 0, guid = nil, npc = false,
+                  tracked = 0 }
+
+local function Forget(id)                       -- an npc out of the session tables (pruned, or not seen for 10 minutes)
+    if npcSeen.at[id] then npcSeen.tracked = npcSeen.tracked - 1 end
+    npcSeen.at[id], npcSeen.near[id], npcSeen.cells[id], npcSeen.asked[id] = nil, nil, nil, nil
+end
+
+-- Past SESSION npcs: forget those not updated for 10 minutes (their throttle and cell waits are over; at most a tooltip is
+-- read again); if that is not enough, forget them all
+local function TrimSeen(now)
+    local old = {}
+    for id, t in pairs(npcSeen.at) do if now - t >= NPC.CELL_AGAIN then old[#old + 1] = id end end
+    for _, id in ipairs(old) do Forget(id) end
+    if npcSeen.tracked >= NPC.SESSION then
+        npcSeen.at, npcSeen.near, npcSeen.cells, npcSeen.asked, npcSeen.tracked = {}, {}, {}, {}, 0
+    end
+end
+
+local function NpcIndex(d)                      -- the sizes and count of the saved summary, once a session; junk goes
+    if npcSeen.size then return end
+    npcSeen.size, npcSeen.bytes, npcSeen.count = {}, 0, 0
+    for id, n in pairs(d.npcs) do
+        if type(n) ~= "table" or not Int(id, 1) then d.npcs[id] = nil
+        else
+            local s = Size(n) + 8
+            npcSeen.size[id], npcSeen.bytes, npcSeen.count = s, npcSeen.bytes + s, npcSeen.count + 1
+        end
+    end
+end
+
+local function Cells(n)                         -- all the counts in an entry's cells (how often it was stood beside)
+    local w = 0
+    if type(n.cells) == "table" then for _, c in pairs(n.cells) do w = w + (Int(c) or 0) end end
+    return w
+end
+
+local function DropNpc(d, id)
+    npcSeen.bytes, npcSeen.count = npcSeen.bytes - (npcSeen.size[id] or 0), npcSeen.count - 1
+    d.npcs[id], npcSeen.size[id] = nil, nil
+    Forget(id)
+end
+
+-- On load (headroom nil): entries not seen for 180 days (or with no day) go. Over 3000 npcs or ~500 KB: the least
+-- recently seen go first (then the least stood beside), down to 90% of the cap when adding (headroom)
+local function PruneNpcs(d, headroom)
+    NpcIndex(d)
+    if not headroom then
+        local oldest, old = math.floor(time() / 86400) - NPC.DAYS, {}
+        for id, n in pairs(d.npcs) do if (Int(n.day) or 0) < oldest then old[#old + 1] = id end end
+        for _, id in ipairs(old) do DropNpc(d, id) end
+    end
+    local max, bytes = NPC.MAX, NPC.BYTES
+    if headroom then max, bytes = math.floor(max * 0.9), math.floor(bytes * 0.9) end
+    if npcSeen.count <= max and npcSeen.bytes <= bytes then return end
+    local list = {}
+    for id, n in pairs(d.npcs) do list[#list + 1] = { id = id, day = Int(n.day) or 0, w = Cells(n) } end
+    table.sort(list, function(a, b)
+        if a.day ~= b.day then return a.day < b.day end
+        if a.w ~= b.w then return a.w < b.w end
+        return a.id < b.id
+    end)
+    local i = 0
+    while i < #list and (npcSeen.count > max or npcSeen.bytes > bytes) do
+        i = i + 1
+        DropNpc(d, list[i].id)
+    end
+end
+
+-- true only when the client answered "no" (false or nil) in a value it lets us see; a missing API or a secret is no answer
+local function False(fn, ...)
+    if type(fn) ~= "function" then return false end
+    local ok, v = pcall(fn, ...)
+    return ok and not Secret(v) and not v
+end
+
+local function Near(unit)                       -- within about 10 yards; restricted in combat on modern clients: not near
+    local v = Try(CheckInteractDistance, unit, 3)
+    return not Secret(v) and (v == true or v == 1)
+end
+
+local function AtMaxLevel()
+    local max, me = Int(Try(GetMaxPlayerLevel), 1), Int(Try(UnitLevel, "player"), 1)
+    return max ~= nil and me ~= nil and me >= max
+end
+
+-- The subtitle under an NPC's name ("Journeyman Tailor") from its tooltip, only when the lines prove it is one: line 1
+-- is the unit's own name, line 3 is the level line and line 2 is not. Never a title that names an owner ("X's Pet",
+-- "X's Companion"), anything with the player's own name, "'s", markup or more than 80 bytes. nil when unsure.
+local LEVEL_FORMATS = { "TOOLTIP_UNIT_LEVEL", "TOOLTIP_UNIT_LEVEL_TYPE", "TOOLTIP_UNIT_LEVEL_CLASS", "TOOLTIP_UNIT_LEVEL_RACE_CLASS",
+                        "TOOLTIP_UNIT_LEVEL_CLASS_TYPE", "TOOLTIP_UNIT_LEVEL_RACE_CLASS_TYPE", "UNIT_LEVEL_TEMPLATE",
+                        "UNIT_TYPE_LEVEL_TEMPLATE", "UNIT_TYPE_PLUS_LEVEL_TEMPLATE", "UNIT_PLUS_LEVEL_TEMPLATE",
+                        "UNIT_TYPE_LETHAL_LEVEL_TEMPLATE", "UNIT_LETHAL_LEVEL_TEMPLATE" }
+local OWNED_FORMATS = { "UNITNAME_TITLE_PET", "UNITNAME_TITLE_COMPANION", "UNITNAME_TITLE_MINION", "UNITNAME_TITLE_GUARDIAN",
+                        "UNITNAME_TITLE_CREATION", "UNITNAME_TITLE_CHARM", "UNITNAME_TITLE_SQUIRE", "UNITNAME_TITLE_OPPONENT" }
+for i = 1, 20 do OWNED_FORMATS[#OWNED_FORMATS + 1] = "UNITNAME_SUMMON_TITLE" .. i end
+local tipPatterns                               -- { level = { ... }, owned = { ... } }, from the client's own strings
+
+local function TipPatterns()
+    if tipPatterns then return tipPatterns end
+    tipPatterns = { level = {}, owned = {} }
+    for kind, names in pairs({ level = LEVEL_FORMATS, owned = OWNED_FORMATS }) do
+        for _, name in ipairs(names) do
+            local f = Plain(_G[name])
+            if type(f) == "string" and f ~= "" then tipPatterns[kind][#tipPatterns[kind] + 1] = FormatPattern(f) end
+        end
+    end
+    local word = Plain(_G.LEVEL)
+    tipPatterns.word = (type(word) == "string" and word ~= "" and word or "Level") .. " "
+    return tipPatterns
+end
+
+local function Matches(text, list)
+    for _, p in ipairs(list) do if text:find(p) then return true end end
+    return false
+end
+
+local function LevelLine(text)
+    local p = TipPatterns()
+    return Matches(text, p.level) or text:sub(1, #p.word) == p.word
+end
+
+local function TipLine(lines, i)                -- the line's text, or nil; and true when the client kept it secret
+    local line = lines[i]
+    if Secret(line) then return nil, true end
+    local text = type(line) == "table" and line.leftText or nil
+    if Secret(text) then return nil, true end
+    return type(text) == "string" and text or nil, false
+end
+
+-- -> the subtitle or nil, and true when a secret value stood in the way (so it is worth asking again later)
+-- An NPC's own text (its name, its subtitle), or nil: never over 80 bytes, "'s ", an owner title, a GUID shape, the
+-- recording character's given name or markup
+local function NpcText(text)
+    if type(text) ~= "string" or #text > 80 or text:find("'s ", 1, true) or Matches(text, TipPatterns().owned) then return nil end
+    if text:find("%a+%-%d+%-%d+") then return nil end               -- shaped like a GUID
+    local given = Me()
+    if given and text:find(given, 1, true) then return nil end
+    return Label(text, 80)
+end
+
+local function Subtitle(unit)
+    local TI = C_TooltipInfo
+    if not (TI and type(TI.GetUnit) == "function") then return nil end
+    local data = Try(TI.GetUnit, unit)
+    local lines = type(data) == "table" and not Secret(data) and data.lines or nil
+    if Secret(data) or Secret(lines) then return nil, true end
+    if type(lines) ~= "table" then return nil end
+    local name = Try(UnitName, unit)
+    if Secret(name) then return nil, true end
+    local first, s1 = TipLine(lines, 1)
+    local second, s2 = TipLine(lines, 2)
+    local third, s3 = TipLine(lines, 3)
+    if s1 or s2 or s3 then return nil, true end
+    if not (type(name) == "string" and first == name and second and third) then return nil end
+    if LevelLine(second) or not LevelLine(third) then return nil end
+    return NpcText(second:match("^<(.+)>$") or second)
+end
+
+-- The attack speed seen most often (on a tie, the one that got there first), from at most 4 counted values (spds)
+local function Speed(n, v)
+    local c = n.spds
+    if type(c) ~= "table" then c = {}; n.spds = c end
+    if not c[v] then
+        local k, low = 0, nil
+        for x, m in pairs(c) do
+            k = k + 1
+            if x ~= n.spd and (not low or (Int(m) or 0) < (Int(c[low]) or 0)) then low = x end
+        end
+        if k >= NPC.SPEEDS and low then c[low] = nil end
+    end
+    c[v] = (Int(c[v]) or 0) + 1
+    if not n.spd or c[v] > (Int(c[n.spd]) or 0) then n.spd = v end
+end
+
+-- One more count for the 1% map square the player stands in, at most once per npc and square per 10 minutes; at most 40
+-- squares per npc (the least counted goes)
+local function Cell(n, npc, w, now)
+    local cx = math.min(99, math.floor(math.floor(w.x * 10000 + 0.5) / 100))   -- x has 4 places: 0.29 is square 29, not 28
+    local cy = math.min(99, math.floor(math.floor(w.y * 10000 + 0.5) / 100))
+    local key = string.format("%d:%d:%d", w.uiMap, cx, cy)
+    local mine = npcSeen.cells[npc]
+    if not mine then mine = {}; npcSeen.cells[npc] = mine end
+    if mine[key] and now - mine[key] < NPC.CELL_AGAIN then return end
+    mine[key] = now
+    local cells = n.cells
+    if type(cells) ~= "table" then cells = {}; n.cells = cells end
+    if not cells[key] then
+        local k, low, lowN = 0, nil, nil
+        for x, m in pairs(cells) do
+            k, m = k + 1, Int(m) or 0
+            if not lowN or m < lowN or (m == lowN and tostring(x) > tostring(low)) then low, lowN = x, m end
+        end
+        if k >= NPC.CELLS then cells[low] = nil end
+    end
+    cells[key] = (Int(cells[key]) or 0) + 1
+end
+
+-- unit: "target", "mouseover", "npc", "questnpc" or a loot corpse's unit; open: an interaction window is open with it
+Sighting = function(unit, open)
+    -- Cheap exits first, before any table of ours is made or saved data is touched: a player after one API call, not a
+    -- creature after one GUID parse (cached per GUID), this npc within 30 s before any further API call. While tracking is
+    -- off the two events are not registered at all, and the on/agreed gate below comes before anything is written.
+    local p = Try(UnitIsPlayer, unit)
+    if Secret(p) or p then return end
+    local guid = Plain(Try(UnitGUID, unit))
+    if type(guid) ~= "string" then return end
+    local npc = npcSeen.npc
+    if guid ~= npcSeen.guid then                -- the last GUID (in memory only) and its npc id, so a mouseover parses once
+        local what, id = FromGuid(guid)
+        npc = what == "npc" and id or false
+        npcSeen.guid, npcSeen.npc = guid, npc
+    end
+    if not npc then return end
+    local now, at, near = Now(), npcSeen.at[npc], open and true or nil
+    if at and now - at < NPC.AGAIN then
+        if npcSeen.near[npc] then return end
+        near = near or Near(unit)               -- only a first time near it gets through again
+        if not near then return end
+    end
+    if not False(UnitPlayerControlled, unit) then return end   -- pets, guardians, totems, a charmed mob, or no answer
+    local d = DB()
+    if not (d and d.on and d.agreed) then return end
+    if not at then
+        if npcSeen.tracked >= NPC.SESSION then TrimSeen(now) end
+        npcSeen.tracked = npcSeen.tracked + 1
+    end
+    npcSeen.at[npc], npcSeen.near[npc] = now, near or false     -- also a try that stores nothing waits its 30 s
+    local w = Where()
+    if not (w.uiMap and w.x and w.y) then return end            -- inside an instance, or no position
+    local ctName, ctId = Try(UnitCreatureType, unit)
+    ctId, ctName = Int(ctId, 1), Label(ctName, 40)
+    if ctId == CT_COMPANION then return end
+    if near == nil then near = Near(unit) end
+    npcSeen.near[npc] = near
+    NpcIndex(d)
+    Prefix(d)                                   -- the install id the export names this summary by
+    local n = d.npcs[npc]
+    if not n then n = {}; d.npcs[npc] = n; npcSeen.count = npcSeen.count + 1 end
+    local cls = Plain(Try(UnitClassification, unit))
+    cls = type(cls) == "string" and NPC_CLASS[cls] and cls or nil
+    if cls then n.cls = cls end
+    local level = Num(Try(UnitLevel, unit))
+    if level and level >= 1 and level <= 255 and level == math.floor(level) then
+        local lv = n.lv
+        if type(lv) ~= "table" or type(lv[1]) ~= "number" or type(lv[2]) ~= "number" then n.lv = { level, level }
+        else
+            if level < lv[1] then lv[1] = level end
+            if level > lv[2] then lv[2] = level end
+        end
+    elseif level == -1 and (cls == "worldboss" or AtMaxLevel()) then
+        n.boss = true                           -- a skull seen by a lower character only says "10+ levels above": not kept
+    end
+    if ctId then n.ct = ctId elseif ctName and type(n.ct) ~= "number" then n.ct = ctName end
+    local famName, famId = Try(UnitCreatureFamily, unit)
+    famId, famName = Int(famId, 1), Label(famName, 40)
+    if famId then n.fam = famId elseif famName and type(n.fam) ~= "number" then n.fam = famName end
+    -- its name as last seen, under the subtitle's rules; never the client's placeholder for a unit not loaded yet
+    local name = Plain(Try(UnitName, unit))
+    local unknown = Plain(UNKNOWNOBJECT)
+    if type(name) == "string" and name ~= (type(unknown) == "string" and unknown or "Unknown") then
+        name = NpcText(name)
+        if name then n.name = name end
+    end
+    -- alive and out of combat (a plain no to both): a neutral mob reads hostile once fought, and so does its corpse
+    local calm = False(UnitIsDead, unit) and False(UnitAffectingCombat, unit)
+    if calm then
+        local faction = Plain(Try(UnitFactionGroup, "player"))
+        local side, rx = type(faction) == "string" and NPC_RX[faction], Int(Try(UnitReaction, unit, "player"), 1)
+        if side and rx and rx <= 8 then n[side] = rx end
+    end
+    -- the tooltip once a session per npc until it gives a subtitle; not while the player fights, and again later when a
+    -- secret value was in the way
+    if n.sub == nil and not npcSeen.asked[npc] and False(UnitAffectingCombat, "player") then
+        local sub, secret = Subtitle(unit)
+        if not secret then npcSeen.asked[npc] = true end
+        n.sub = sub
+    end
+    if calm and (ctId == CT_BEAST or (not ctId and ctName == "Beast")) then
+        local mh = Num((Try(UnitAttackSpeed, unit)))
+        local v = mh and math.floor(mh * 100 + 0.5)
+        if v and v >= 10 and v <= 2000 then Speed(n, v) end
+    end
+    n.day = math.floor(time() / 86400)
+    if near then Cell(n, npc, w, now) end
+    local s = Size(n) + 8
+    npcSeen.bytes = npcSeen.bytes - (npcSeen.size[npc] or 0) + s
+    npcSeen.size[npc] = s
+    if npcSeen.count > NPC.MAX or npcSeen.bytes > NPC.BYTES then PruneNpcs(d, true) end
 end
 
 ---------------------------------------------------------------------------
@@ -945,7 +1273,13 @@ end
 
 function handlers.CHAT_MSG_LOOT(text) Won(Plain(text)) end
 
+local function QuestGiverSeen()                 -- the quest window is open with it (questnpc, else npc)
+    pcall(Sighting, "questnpc", true)
+    pcall(Sighting, "npc", true)                -- the same creature: the 30 s throttle makes this a no-op
+end
+
 function handlers.QUEST_DETAIL()
+    QuestGiverSeen()
     local what, id = Giver("questnpc", "npc")
     detail = { quest = Int(Try(GetQuestID), 1), what = what, id = id, at = time(),
                text = QuestText({ title = GetTitleText, details = GetQuestText, objectives = GetObjectiveText }) }
@@ -965,6 +1299,7 @@ function handlers.QUEST_PROGRESS()
     progress = { quest = Int(Try(GetQuestID), 1), text = Prose(GetProgressText, TEXT_MAX.progress) }
 end
 function handlers.QUEST_COMPLETE()
+    QuestGiverSeen()
     local what, id = Giver("questnpc", "npc")
     local quest = Int(Try(GetQuestID), 1)
     turnin = { quest = quest, what = what, id = id,
@@ -996,10 +1331,15 @@ end
 function handlers.TRAINER_UPDATE() if not trainer.reading then SoonTrainer() end end
 function handlers.TRAINER_CLOSED() trainer.open = false end
 
+-- the npcs summary: these fire all the time, so Sighting leaves early (players, the same npc within 30 s)
+function handlers.PLAYER_TARGET_CHANGED() Sighting("target", false) end
+function handlers.UPDATE_MOUSEOVER_UNIT() Sighting("mouseover", false) end
+
 local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
-                    "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED" }
+                    "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
+                    "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -1036,6 +1376,7 @@ function handlers.ADDON_LOADED(name)
     if not d then return end
     d.addon = AddonVersion() or d.addon
     Prune(d)
+    PruneNpcs(d)
     if d.on and d.agreed then Enable() end
 end
 
@@ -1057,8 +1398,11 @@ local function When(t) return date("%d %b %Y", t) end
 local function Status()
     local d = DB(true)
     local n, first = #d.events, d.events[1]
+    NpcIndex(d)
+    local npcs = npcSeen.count
     Say("drop tracking is " .. (d.on and d.agreed and "|cff40ff40on|r" or "|cffaaaaaaoff|r") .. ". "
         .. n .. " event" .. (n == 1 and "" or "s") .. " kept" .. (first and type(first.t) == "number" and (" since " .. When(first.t)) or "")
+        .. ", " .. npcs .. " NPC" .. (npcs == 1 and "" or "s") .. " held"
         .. ". |cffaaaaaa/kinv track drops " .. (d.on and d.agreed and "off" or "on") .. "|r to turn it " .. (d.on and d.agreed and "off" or "on") .. ".")
 end
 
@@ -1074,7 +1418,7 @@ local function Stop()
     local d = DB(true)
     d.on = false
     Disable()
-    Say("drop tracking is off. What it already recorded stays (and goes up with your next upload); delete it on cr0m.")
+    Say("drop tracking is off (also the NPC summary). What it already recorded stays (and goes up with your next upload); delete it on cr0m.")
 end
 
 function ns.ObsCommand(msg)
@@ -1098,10 +1442,10 @@ function ns.ObsNote()
     if d.noted then return end
     d.noted = true
     if d.on and d.agreed then
-        Say("drop, quest, vendor and trainer tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
+        Say("drop, quest, vendor, trainer and NPC tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
         print("  It never records gold or anything about other players. |cffaaaaaa/kinv track drops off|r stops recording.")
     else
-        Say("drop, quest, vendor and trainer tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
+        Say("drop, quest, vendor, trainer and NPC tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
         print("  It never records gold or anything about other players. |cffaaaaaa/kinv track|r shows the status.")
     end
 end

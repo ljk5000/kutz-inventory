@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.9.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.10.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -327,7 +327,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.9.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.10.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });
@@ -382,4 +382,73 @@ test("observations: two saved files merge by id, oldest first, the newest addon 
     ({ id: `dddd-${i}`, t: 1000 + i, type: "loot", src: { kind: "other" }, items })) }]);
   assert.ok(JSON.stringify(big).length <= 2000200 && big.events.length < 80 && big.events.at(-1).id === "dddd-79", "about 2 MB");
   assert.equal(big.addon, "unknown");
+});
+
+// The npcs summary (3.10.0): KutzInventoryObsDB.npcs -> observations.npcs + observations.install
+const npcFile = (npcs, extra = `prefix = "k1f9c2"`) =>
+  `KutzInventoryDB = { chars = {} }\nKutzInventoryObsDB = { v = 1, on = true, addon = "1.17.0", ${extra}, events = {}, npcs = ${npcs} }`;
+
+test("observations 3.10.0: the example's npcs are exported sorted by npc with the install id; broken parts left out", () => {
+  const obs = convert.convertSavedVariables([LUA]).inventory.observations;
+  assert.equal(obs.install, "k1f9c2");
+  assert.deepEqual(Object.keys(obs), ["v", "addon", "install", "events", "npcs"]);
+  assert.deepEqual(obs.npcs, [
+    { npc: 525, name: "Made-up Wolf", lv: [10, 12], cls: "normal", ct: 1, fam: 1, rxA: 2, spd: 200, day: 20404, cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] },
+    { npc: 1346, name: "Made-up Tailor", lv: [30, 30], cls: "normal", ct: 7, rxA: 5, sub: "Made-up Tailoring Supplies", day: 20405, cells: [[1453, 63, 72, 4]] },
+    { npc: 6109, name: "Made-up Dragon", boss: true, cls: "worldboss", ct: 2, rxA: 1, day: 20403 }], "no spds, no entry without a day, no junk cell");
+});
+
+test("observations 3.10.0: npcs keep only the documented fields with the right types and ranges", () => {
+  const cells = Array.from({ length: 45 }, (_, i) => `["1429:${i}:7"] = ${i + 1}`).join(", ");
+  const obs = convert.convertSavedVariables([npcFile(`{
+    [1] = { lv = { 12, 10 }, boss = "yes", cls = "boss", ct = 0, fam = "Be|ast", rxA = 9, rxH = 0, sub = "Player-4170-00ABCDEF", spd = 5, day = 20404,
+            guid = "Creature-0-4170-0-1234-1-000012AB01", name = "|cffff0000Made-up Wolf|r", t = 1762905600, cells = { ["1429:100:1"] = 1, ["1429:1:1"] = 0, ["x"] = 2 } },
+    [2] = { lv = { 0, 5 }, ct = "Beast", fam = "Wolf", rxA = 8, rxH = 1, sub = "${"s".repeat(81)}", spd = 3000, day = 20404, cells = { ${cells} } },
+    [3] = { lv = { 7, 9 }, ct = 7, sub = "Stable Master", spd = 150, day = 20404, cells = { ["1429:99:0"] = 3 } },
+    [4] = { day = 0 }, [5] = { day = "20404" }, [6] = { day = 2000000 }, [7] = "junk", [8] = { sub = "Someone's Pet", name = "Someone's Pet", day = 20404 }, [9] = { name = "Made-up Wolf", day = 20404 },
+  }`)]).inventory.observations;
+  assert.deepEqual(obs.npcs.map((n) => n.npc), [1, 2, 3, 8, 9]);
+  assert.deepEqual(obs.npcs[4], { npc: 9, name: "Made-up Wolf", day: 20404 }, "the name, right after npc");
+  assert.deepEqual(obs.npcs[3], { npc: 8, day: 20404 }, "never a subtitle with 's (an owner's title)");
+  assert.deepEqual(obs.npcs[0], { npc: 1, day: 20404 });
+  assert.deepEqual(Object.keys(obs.npcs[1]), ["npc", "ct", "fam", "rxA", "rxH", "day", "cells"]);
+  assert.equal(obs.npcs[1].cells.length, 40);
+  assert.deepEqual(obs.npcs[1].cells[0], [1429, 5, 7, 6], "the 40 most counted squares, sorted by place");
+  assert.deepEqual(obs.npcs[2], { npc: 3, lv: [7, 9], ct: 7, sub: "Stable Master", spd: 150, day: 20404, cells: [[1429, 99, 0, 3]] });
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([npcFile(`{ [3] = { day = 20404 } }`)]).inventory;
+  assert.deepEqual(doc.observations.events, [], "npcs and no events: a section all the same");
+  assert.deepEqual(validateExport(doc), []);
+  assert.ok(!("observations" in convert.convertSavedVariables([npcFile(`{ [3] = { day = 20404 } }`, `n = 0`)]).inventory),
+    "no install prefix: no summary (the site could not tell whose it replaces)");
+  assert.ok(!("observations" in convert.convertSavedVariables([npcFile(`{ [3] = { lv = { 1, 2 } } }`)]).inventory));
+});
+
+test("observations 3.10.0: several installs merge into one summary named by all of them; a copied file counts once", () => {
+  const a = npcFile(`{ [525] = { lv = { 10, 11 }, cls = "normal", rxA = 2, day = 20404, cells = { ["1429:41:65"] = 2 } },
+    [6] = { day = 20400 } }`, `prefix = "zz9900"`);
+  const b = npcFile(`{ [525] = { lv = { 12, 12 }, cls = "elite", rxH = 4, sub = "Made-up Title", day = 20405, cells = { ["1429:41:65"] = 1, ["1429:1:1"] = 5 } } }`,
+    `prefix = "aa1100"`);
+  const obs = convert.convertSavedVariables([a, b]).inventory.observations;
+  assert.equal(obs.install, "aa1100+zz9900");
+  assert.deepEqual(obs.npcs, [{ npc: 6, day: 20400 },
+    { npc: 525, lv: [10, 12], cls: "elite", rxA: 2, rxH: 4, sub: "Made-up Title", day: 20405, cells: [[1429, 1, 1, 5], [1429, 41, 65, 3]] }]);
+  const older = npcFile(`{ [525] = { lv = { 10, 10 }, day = 20401, cells = { ["1429:41:65"] = 1 } } }`, `prefix = "zz9900"`);
+  const twice = convert.convertSavedVariables([older, a]).inventory.observations;
+  assert.equal(twice.install, "zz9900");
+  assert.deepEqual(twice.npcs.find((n) => n.npc === 525).cells, [[1429, 41, 65, 2]], "the newest copy, not both added up");
+});
+
+test("observations 3.10.0: at most 3000 npcs, the most recently seen kept; realistic sizes", () => {
+  const npcs = {};
+  for (let i = 1; i <= 3100; i++) npcs[i] = { lv: { 1: 20, 2: 21 }, cls: "normal", ct: 7, rxA: 2, day: i <= 100 ? 20300 : 20400 + (i % 50),
+    cells: { "1429:41:65": 2 } };
+  const obs = convert.exportObservations([{ addon: "1.17.0", prefix: "k1f9c2", events: [], npcs }]);
+  assert.equal(obs.npcs.length, 3000);
+  assert.ok(obs.npcs.every((n) => n.npc > 100) && obs.npcs.every((n, i) => i === 0 || obs.npcs[i - 1].npc < n.npc), "newest kept, sorted by npc");
+  assert.ok(JSON.stringify(obs.npcs).length < 400000, "3000 plain entries stay well under the 1 MB cap: " + JSON.stringify(obs.npcs).length);
+  const huge = {};
+  for (let i = 1; i <= 3000; i++) huge[i] = { day: 20400, cells: Object.fromEntries(Array.from({ length: 40 }, (_, j) => [`1429:${j}:${i % 100}`, 99])) };
+  const capped = convert.exportObservations([{ prefix: "k1f9c2", npcs: huge }]);
+  assert.ok(JSON.stringify(capped.npcs).length <= 1000000 && capped.npcs.length < 3000, "about 1 MB at most");
 });

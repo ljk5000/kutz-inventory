@@ -126,7 +126,7 @@ test("auction scans go to /api/wow/auctions once per scan; a retry does not re-u
   assert.equal(scans[0].realm, "Realm"); assert.equal(scans[0].house, "horde"); assert.equal(scans[0].items["2589"].p[0], 30);
   assert.ok(!JSON.stringify(scans[0]).includes('"A"'), "the scan names a character");
   // The Companion uploads inventory 3.x (cr0m reads the rest from the Battle.net API).
-  assert.equal(inventory[0].schemaVersion, "3.9.0"); assert.ok(!("crafting" in inventory[0].characters[0]));
+  assert.equal(inventory[0].schemaVersion, "3.10.0"); assert.ok(!("crafting" in inventory[0].characters[0]));
   assert.ok(!("stats" in inventory[0].characters[0]) && !("talents" in inventory[0].characters[0]), "3.x still carries API fields");
   // the game saves again without a new scan: inventory again, the same scan is not resent
   fs.writeFileSync(f.input, auctionDB(1700000000) + "\n");

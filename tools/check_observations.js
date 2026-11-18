@@ -60,7 +60,7 @@ local function fresh(opts)
     G.UnitLevel = function(u) if u == "player" then return 60 end; local x = s.units[u]; return x and x.level end
     G.UnitClass = function() return "Rogue", "ROGUE", 4 end
     G.UnitFactionGroup = function() return "Alliance", "Alliance" end
-    G.UnitName = function(u) if u == "player" then return "Tester", "Example Realm" end; return "Someone Else" end
+    G.UnitName = function(u) if u == "player" then return "Tester", "Example Realm" end; local x = s.units[u]; return x and x.name or "Someone Else" end
     G.GetUnitName = function(u) if u == "player" then return opts.noSurname and "Tester" or "Tester Testwood" end; return "Someone Else" end
     G.UnitGUID = function(u) if u == "player" then return PLAYER end; local x = s.units[u]; return x and x.guid end
     G.UnitIsDead = function(u) local x = s.units[u]; return x and x.dead or false end
@@ -104,7 +104,26 @@ local function fresh(opts)
     if not opts.noSetMerchantFilter then
       G.SetMerchantFilter = function(f) s.filterSets = s.filterSets + 1; if not s.stuckFilter then s.mfilter = f end end
     end
-    G.UnitReaction = function(u, other) if u == "npc" and other == "player" then return s.reaction end end
+    G.UnitReaction = function(u, other)
+      local x = s.units[u]
+      if other == "player" and x and x.rx then return x.rx end
+      if u == "npc" and other == "player" then return s.reaction end
+    end
+    -- the creatures the player looks at (npcs summary): s.units[u] = { guid, level, class, ct, ctName, fam, famName, rx,
+    -- near, combat, dead, speed, tip = { lines }, player, controlled, name }; s.calls counts the API calls made
+    s.calls = setmetatable({}, { __index = function() return 0 end })
+    local function counted(name, fn) return function(...) s.calls[name] = s.calls[name] + 1; return fn(...) end end
+    G.UnitIsPlayer = counted("UnitIsPlayer", function(u) if u == "player" then return true end; local x = s.units[u]; return x and x.player or false end)
+    if not opts.noControlled then
+      G.UnitPlayerControlled = counted("UnitPlayerControlled", function(u) local x = s.units[u]; return x and x.controlled or false end)
+    end
+    G.UnitCreatureType = function(u) local x = s.units[u]; if x then return x.ctName, x.ct end end
+    G.UnitCreatureFamily = function(u) local x = s.units[u]; if x then return x.famName, x.fam end end
+    G.UnitAffectingCombat = function(u) local x = s.units[u]; return x and x.combat or false end
+    G.UnitAttackSpeed = function(u) local x = s.units[u]; return x and x.speed, nil end
+    G.CheckInteractDistance = counted("CheckInteractDistance", function(u, i) local x = s.units[u]; return i == 3 and x and x.near or false end)
+    G.GetMaxPlayerLevel = function() return s.maxLevel or 60 end
+    G.UnitFactionGroup = function(u) if u == "player" then return s.faction or "Alliance", s.faction or "Alliance" end end
     -- trainers: rows { name, st = available|unavailable|used|header, rank, lv, skill, skillReq, needs, cost, s, tipType };
     -- the window's type filters hide rows from addons, and switching one fires TRAINER_UPDATE at once
     local function services()
@@ -129,7 +148,13 @@ local function fresh(opts)
       G.C_TooltipInfo = { GetTrainerService = function(i)
         local r = services()[i]
         if r and r.s then return { type = r.tipType or 1, id = r.s, lines = {} } end
-      end }
+      end, GetUnit = counted("GetUnit", function(u)
+        local x = s.units[u]
+        if not (x and x.tip) then return nil end
+        local lines = {}
+        for i, t in ipairs(x.tip) do lines[i] = { leftText = t } end
+        return { type = 2, lines = lines }
+      end) }
     end
     G.StaticPopupDialogs = {}
     G.StaticPopup_Show = function(name) popups[#popups + 1] = name end
@@ -543,10 +568,11 @@ do
   print("OK   trainers: whole list with filters put back, spell ids, rx, kind; once a week per list; no Beast Training, no GUID, caps")
 end
 
--- 8) never money or other players, anywhere in the saved table; the only name is this character's own, in who
+-- 8) never money or other players, anywhere in the saved table; the only names are this character's own, in who, and
+-- creatures' own names in the npcs summary
 do
   local h = fresh(); h.on()
-  h.s.units.target = { guid = MOB, dead = true, level = 60 }
+  h.s.units.target = { guid = MOB, dead = true, level = 60, name = "Example Mob" }
   h.loot({ COIN, item(1, 1, { MOB, 1, PLAYER, 1 }) })
   h.event("QUEST_TURNED_IN", 1, 1, 98765)
   local all = dump(h.db())
@@ -691,7 +717,8 @@ do
   h.cmd("track drops on"); h.cmd("track drops yes")
   for _, e in ipairs({ "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_SUCCEEDED", "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE",
                        "QUEST_TURNED_IN", "MERCHANT_SHOW", "MERCHANT_CLOSED", "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_START",
-                       "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED" }) do
+                       "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
+                       "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }) do
     h.event(e, 1, 2, 3)
   end
   h.drain()
@@ -699,7 +726,286 @@ do
   local loot = {}
   for _, e in ipairs(h.events()) do if e.type == "loot" then loot[#loot + 1] = e end; assert(not e.b and not next(e.who), dump(e)) end
   assert(#loot == 1 and #loot[1].items == 0 and loot[1].src.kind == "other", dump(loot))
-  print("OK   a client without the loot / quest / merchant / trainer / map APIs raises no error")
+  assert(next(h.db().npcs) == nil, "no npc without the unit APIs: " .. dump(h.db().npcs))
+  print("OK   a client without the loot / quest / merchant / trainer / map / unit APIs raises no error")
+end
+
+-- 12) npcs: a per-install summary of the creatures the player looks at; no GUID, no player name, no time finer than a day
+do
+  local WOLF = "Creature-0-4170-0-1234-525-000012AB01"
+  local TAILOR = "Creature-0-4170-0-1234-1346-000012AB02"
+  local DAY = math.floor(1767225600 / 86400)
+  local function wolf(patch)
+    local u = { guid = WOLF, level = 12, class = "normal", ct = 1, ctName = "Beast", fam = 1, famName = "Wolf", rx = 2, speed = 2.0,
+                name = "Mangy Wolf", tip = { "Mangy Wolf", "Level 12 Beast" } }
+    for k, v in pairs(patch or {}) do u[k] = v end
+    return u
+  end
+  local function npcs(h) return h.db().npcs end
+  local tipGlobals = { TOOLTIP_UNIT_LEVEL_TYPE = "Level %s %s", UNITNAME_TITLE_PET = "%s's Pet", LEVEL = "Level" }
+
+  -- target: level range, classification, type, family, reaction per side, day; no cells from afar; no subtitle line
+  local h = fresh({ globals = tipGlobals }); h.on()
+  assert(h.registered.PLAYER_TARGET_CHANGED and h.registered.UPDATE_MOUSEOVER_UNIT, "npc events registered")
+  h.s.units.target = wolf()
+  h.event("PLAYER_TARGET_CHANGED")
+  local n = npcs(h)[525]
+  assert(dump(n) == "{cls=normal,ct=1,day=" .. DAY .. ",fam=1,lv={1=12,2=12},name=Mangy Wolf,rxA=2,spd=200,spds={200=1}}", dump(n))
+  assert(h.db().prefix and h.db().prefix:match("^[0-9a-z]+$"), "the install prefix exists for the export")
+  -- the same npc within 30 s: nothing is read (not even whether a player controls it); after 30 s the level range grows
+  h.s.units.mouseover = wolf({ level = 13 })
+  local pc = h.s.calls.UnitPlayerControlled
+  h.s.clock = h.s.clock + 10; h.event("UPDATE_MOUSEOVER_UNIT")
+  assert(dump(n.lv) == "{1=12,2=12}" and h.s.calls.UnitPlayerControlled == pc, "throttled: " .. dump(n.lv))
+  h.s.clock = h.s.clock + 21; h.event("UPDATE_MOUSEOVER_UNIT")
+  assert(dump(n.lv) == "{1=12,2=13}" and h.s.calls.GetUnit == 1, "after 30 s, the tooltip asked once a session: " .. dump(n.lv))
+  -- near within the 30 s: a first time near gets through and counts its 1% map square; again within 10 minutes it does not
+  h.s.units.target = wolf({ near = true }); h.s.clock = h.s.clock + 1; h.event("PLAYER_TARGET_CHANGED")
+  assert(dump(n.cells) == "{1429:41:65=1}", "near: " .. dump(n.cells))
+  h.s.clock = h.s.clock + 31; h.event("PLAYER_TARGET_CHANGED")
+  assert(dump(n.cells) == "{1429:41:65=1}", "the same square within 10 minutes: " .. dump(n.cells))
+  h.s.clock = h.s.clock + 600; h.event("PLAYER_TARGET_CHANGED")
+  h.s.x = 0.999; h.s.clock = h.s.clock + 31; h.event("PLAYER_TARGET_CHANGED")
+  assert(dump(n.cells) == "{1429:41:65=2,1429:99:65=1}", "counts per square, clamped to 99: " .. dump(n.cells))
+  -- at most 40 squares: the least counted goes
+  for i = 1, 45 do h.s.x = i / 100; h.s.y = 0.1; h.s.clock = h.s.clock + 31; h.event("PLAYER_TARGET_CHANGED") end
+  local k = 0; for _ in pairs(n.cells) do k = k + 1 end
+  assert(k == 40 and n.cells["1429:41:65"] == 2, "40 squares, the most counted kept: " .. k)
+  -- attack speed: only a live beast out of combat; the value seen most often (a tie keeps the first); 4 values counted
+  local sp = fresh(); sp.on()
+  local function aim(patch) sp.s.units.target = wolf(patch); sp.s.clock = sp.s.clock + 31; sp.event("PLAYER_TARGET_CHANGED") end
+  aim({})
+  local m = sp.db().npcs[525]
+  for _ = 1, 3 do aim({ speed = 1.5, combat = true }); aim({ speed = 1.5, dead = true }) end
+  assert(m.spd == 200 and dump(m.spds) == "{200=1}", "not in combat, not dead: " .. dump(m.spds))
+  aim({ speed = 1.5 })
+  assert(m.spd == 200, "a tie keeps the first")
+  aim({ speed = 1.5 })
+  assert(m.spd == 150 and dump(m.spds) == "{150=2,200=1}", "seen most often: " .. dump(m.spds))
+  for _, x in ipairs({ 1.1, 1.2, 1.3, 1.4, 1.6, 1.7 }) do aim({ speed = x }) end
+  k = 0; for _ in pairs(m.spds) do k = k + 1 end
+  assert(k <= 4 and m.spds[150] == 2 and m.spd == 150, "at most 4 values counted, the chosen one kept: " .. dump(m.spds))
+  -- a new day; Horde sees its own reaction
+  h.s.now = h.s.now + 86400; h.s.faction = "Horde"; h.s.units.target = wolf({ rx = 4 }); h.s.clock = h.s.clock + 31; h.event("PLAYER_TARGET_CHANGED")
+  assert(n.day == DAY + 1 and n.rxA == 2 and n.rxH == 4, dump(n))
+  print("OK   npcs: level range, classification, type, family, reaction per side, day; 30 s throttle; cells only when near, 10 min, 40 max; beast speed")
+
+  -- the reaction only from a live creature out of combat: a neutral mob reads hostile once fought, and so does its corpse
+  do
+    local rr = fresh(); rr.on()
+    local function seen(patch) rr.s.units.target = wolf(patch); rr.s.clock = rr.s.clock + 31; rr.event("PLAYER_TARGET_CHANGED") end
+    seen({ rx = 1, combat = true })
+    assert(rr.db().npcs[525] and rr.db().npcs[525].rxA == nil, "in combat: no reaction " .. dump(rr.db().npcs[525]))
+    seen({ rx = 1, dead = true })
+    assert(rr.db().npcs[525].rxA == nil, "dead: no reaction " .. dump(rr.db().npcs[525]))
+    seen({ rx = 4 }); seen({ rx = 1, combat = true }); seen({ rx = 1, dead = true })
+    assert(rr.db().npcs[525].rxA == 4, "dead or in combat never overwrites it: " .. dump(rr.db().npcs[525]))
+    local lc = fresh(); lc.on(); lc.s.units.target = wolf({ dead = true, rx = 1 })
+    lc.loot({ item(2589, 1, { WOLF, 1 }) })
+    assert(lc.db().npcs[525] and lc.db().npcs[525].rxA == nil, "a loot corpse gives no reaction: " .. dump(lc.db().npcs[525]))
+  end
+  print("OK   npcs: the reaction only from a live creature out of combat (never from a fight or a corpse)")
+
+  -- the subtitle: only when line 1 is the name, line 3 the level line and line 2 not; once a session per npc
+  local function sub(tip, patch, globals)
+    local g = fresh({ globals = globals or tipGlobals }); g.on()
+    local u = { guid = TAILOR, level = 30, ct = 7, ctName = "Humanoid", rx = 5, name = "Example Tailor", tip = tip }
+    for key, v in pairs(patch or {}) do u[key] = v end
+    g.s.units.target = u; g.event("PLAYER_TARGET_CHANGED")
+    return g.db().npcs[1346], g
+  end
+  assert(sub({ "Example Tailor", "Journeyman Tailor", "Level 30 Humanoid" }).sub == "Journeyman Tailor", "a subtitle")
+  assert(sub({ "Example Tailor", "<Banker>", "Level 30 Humanoid", "Stormwind" }).sub == "Banker", "brackets come off")
+  assert(sub({ "Example Tailor", "Journeyman Tailor", "Level 30 Humanoid" }, nil, { LEVEL = "Level" }).sub == "Journeyman Tailor",
+         "no level formats: the LEVEL word")
+  for _, tip in ipairs({ { "Example Tailor", "Level 30 Humanoid", "Stormwind" }, { "Someone", "Journeyman Tailor", "Level 30 Humanoid" },
+                         { "Example Tailor", "Journeyman Tailor", "Stormwind" }, { "Example Tailor", "Journeyman Tailor" },
+                         { "Example Tailor", "Tester's Pet", "Level 30 Humanoid" }, { "Example Tailor", "Friend of Tester", "Level 30 Humanoid" },
+                         { "Example Tailor", "|cffff0000Red|r", "Level 30 Humanoid" }, { "Example Tailor", string.rep("x", 81), "Level 30 Humanoid" },
+                         { "Example Tailor", "Creature-0-1-2", "Level 30 Humanoid" } }) do
+    local e = sub(tip)
+    assert(e and e.sub == nil, "no subtitle from " .. table.concat(tip, " / ") .. ": " .. dump(e))
+  end
+  local e, g = sub({ "Example Tailor", "Level 30 Humanoid" })
+  g.s.units.target.tip = { "Example Tailor", "Journeyman Tailor", "Level 30 Humanoid" }
+  g.s.clock = g.s.clock + 31; g.event("PLAYER_TARGET_CHANGED")
+  assert(e.sub == nil and g.s.calls.GetUnit == 1, "none is remembered for the session: the tooltip is read once")
+  local r = fresh({ db = g.db(), globals = tipGlobals }); r.s.units.target = g.s.units.target; r.event("PLAYER_TARGET_CHANGED")
+  assert(r.db().npcs[1346].sub == "Journeyman Tailor", "asked again in the next session")
+  r.s.clock = r.s.clock + 31; r.event("PLAYER_TARGET_CHANGED")
+  assert(r.s.calls.GetUnit == 1, "a kept subtitle is never asked again")
+  local nt = fresh({ noTooltip = true }); nt.on(); nt.s.units.target = { guid = TAILOR, level = 30, name = "Example Tailor" }
+  nt.event("PLAYER_TARGET_CHANGED")
+  assert(nt.db().npcs[1346] and nt.db().npcs[1346].sub == nil and not nt.db().lastError, "no tooltip API: no subtitle")
+  -- not while the player fights; a secret line is not remembered as none, so it is asked again later
+  do
+    local SECRET = {}
+    local tg = { issecretvalue = function(v) return v == SECRET end }
+    for key, v in pairs(tipGlobals) do tg[key] = v end
+    local g2 = fresh({ globals = tg }); g2.on()
+    g2.s.units.player = { combat = true }
+    g2.s.units.target = { guid = TAILOR, level = 30, ct = 7, rx = 5, name = "Example Tailor", tip = { "Example Tailor", SECRET, "Level 30 Humanoid" } }
+    g2.event("PLAYER_TARGET_CHANGED")
+    assert(g2.s.calls.GetUnit == 0 and g2.db().npcs[1346] and g2.db().npcs[1346].sub == nil, "no tooltip while the player fights")
+    g2.s.units.player = nil; g2.s.clock = g2.s.clock + 31; g2.event("PLAYER_TARGET_CHANGED")
+    assert(g2.s.calls.GetUnit == 1 and g2.db().npcs[1346].sub == nil, "a secret line: no subtitle")
+    g2.s.units.target.tip = { "Example Tailor", "Journeyman Tailor", "Level 30 Humanoid" }
+    g2.s.clock = g2.s.clock + 31; g2.event("PLAYER_TARGET_CHANGED")
+    assert(g2.s.calls.GetUnit == 2 and g2.db().npcs[1346].sub == "Journeyman Tailor", "asked again after a secret: " .. dump(g2.db().npcs[1346]))
+  end
+  print("OK   npcs: no tooltip read while the player fights; a secret tooltip is asked again later")
+
+  -- the name: as last seen, under the subtitle's rules; never the client's "Unknown" for a unit not loaded yet
+  do
+    local function named(name, globals)
+      local g3 = fresh({ globals = globals or tipGlobals }); g3.on()
+      g3.s.units.target = { guid = TAILOR, level = 30, ct = 7, name = name, tip = false }
+      g3.event("PLAYER_TARGET_CHANGED")
+      return g3.db().npcs[1346], g3
+    end
+    local e3, g3 = named("Example Tailor")
+    assert(e3.name == "Example Tailor", "the name: " .. dump(e3))
+    g3.s.units.target.name = "Example Tailor the Second"; g3.s.clock = g3.s.clock + 31; g3.event("PLAYER_TARGET_CHANGED")
+    assert(e3.name == "Example Tailor the Second", "kept as last seen: " .. dump(e3))
+    g3.s.units.target.name = "|cffff0000Red|r"; g3.s.clock = g3.s.clock + 31; g3.event("PLAYER_TARGET_CHANGED")
+    assert(e3.name == "Example Tailor the Second", "a refused name keeps the last good one: " .. dump(e3))
+    for _, bad in ipairs({ "Unknown", "Tester Junior", "Someone's Minion", "|cffff0000Red|r", "Creature-0-1-2", string.rep("x", 81), "" }) do
+      local e4 = named(bad)
+      assert(e4 and e4.name == nil, "no name from " .. bad .. ": " .. dump(e4))
+    end
+    local g5 = { UNKNOWNOBJECT = "Inconnu" }; for key, v in pairs(tipGlobals) do g5[key] = v end
+    assert(named("Inconnu", g5).name == nil and named("Unknown", g5).name == "Unknown", "the client's own UNKNOWNOBJECT")
+    local g6 = { UNITNAME_TITLE_MINION = "Minion of %s" }
+    assert(named("Minion of Someone", g6).name == nil, "never an owner title from the client's formats")
+  end
+  print("OK   npcs: the name as last seen, never a player's, an owner title, markup, a GUID or the client's Unknown")
+  print("OK   npcs: a subtitle only when the tooltip's lines prove it (never owner titles, own name, markup, GUIDs); asked once a session")
+
+  -- never: players, player-controlled units (pets, guardians, totems), companions, pets' GUIDs, objects, instances,
+  -- secrets, a client that cannot say who controls it, or while off; and no extra API call for a player
+  local function none(patch, opts, setup)
+    local g = fresh(opts); g.on()
+    local u = wolf(); for key, v in pairs(patch or {}) do u[key] = v end
+    g.s.units.target = u
+    if setup then setup(g) end
+    g.event("PLAYER_TARGET_CHANGED"); g.event("UPDATE_MOUSEOVER_UNIT")
+    assert(next(g.db().npcs) == nil and not g.db().lastError, "nothing: " .. dump(g.db().npcs) .. " " .. tostring(g.db().lastError))
+    return g
+  end
+  local p = none({ player = true, guid = PLAYER })
+  assert(p.s.calls.UnitPlayerControlled == 0 and p.s.calls.CheckInteractDistance == 0, "a player leaves at once")
+  none({ controlled = true }); none({ ct = 12, ctName = "Non-combat Pet" }); none({ guid = "Pet-0-4170-0-1234-525-000012AB01" })
+  none({ guid = NODE }); none({}, { noControlled = true })
+  none({}, nil, function(g) g.s.itype, g.s.iid = "party", 36 end)
+  none({}, nil, function(g) g.s.x, g.s.y = 0, 0 end)
+  none({}, nil, function(g) g.cmd("track drops off") end)
+  local SECRET = {}
+  local secret = { issecretvalue = function(v) return v == SECRET end }
+  none({ guid = SECRET }, { globals = secret }); none({ player = SECRET }, { globals = secret }); none({ controlled = SECRET }, { globals = secret })
+  -- secret details are left out, the rest is kept
+  local q = fresh({ globals = secret }); q.on()
+  q.s.units.target = wolf({ level = SECRET, class = SECRET, rx = SECRET, near = SECRET, ct = SECRET, ctName = SECRET, speed = SECRET })
+  q.event("PLAYER_TARGET_CHANGED")
+  assert(dump(q.db().npcs[525]) == "{day=" .. DAY .. ",fam=1,name=Mangy Wolf}", "secrets left out: " .. dump(q.db().npcs[525]))
+  local qn = fresh({ globals = secret }); qn.on(); qn.s.units.target = wolf({ name = SECRET }); qn.event("PLAYER_TARGET_CHANGED")
+  assert(qn.db().npcs[525] and qn.db().npcs[525].name == nil, "a secret name is left out: " .. dump(qn.db().npcs[525]))
+  print("OK   npcs: never players, pets, guardians, totems, companions, objects, inside instances, secrets or while off; players leave at once")
+
+  -- a skull: boss only for a world boss or when the player is at the level cap; else nothing about the level
+  local function skull(patch, max)
+    local g = fresh(); g.on(); g.s.maxLevel = max
+    g.s.units.target = wolf(patch); g.event("PLAYER_TARGET_CHANGED")
+    return g.db().npcs[525]
+  end
+  local b = skull({ level = -1, class = "worldboss" }, 70)
+  assert(b.boss == true and b.lv == nil and b.cls == "worldboss", dump(b))
+  assert(skull({ level = -1, class = "elite" }, 60).boss == true, "at the level cap a skull is a boss")
+  b = skull({ level = -1, class = "elite" }, 70)
+  assert(b.boss == nil and b.lv == nil, "a skull seen from below is not kept: " .. dump(b))
+  assert(skull({ class = "sideways" }).cls == nil, "classification only from the list")
+  print("OK   npcs: a skull is a boss for a world boss or at the level cap, else no level")
+
+  -- interaction windows count as near (the player stands there), loot corpses only when near; the throttle holds
+  local v = fresh(); v.on()
+  v.s.units.npc = { guid = TAILOR, level = 30, ct = 7, name = "Example Tailor" }
+  v.s.merchant = { { id = 4470, n = 1, price = 38, avail = -1 } }
+  v.event("MERCHANT_SHOW"); v.drain()
+  assert(dump(v.db().npcs[1346].cells) == "{1429:41:65=1}" and #v.events() == 1, "a vendor: " .. dump(v.db().npcs[1346]))
+  local qg = fresh(); qg.on(); qg.s.units.questnpc = { guid = TAILOR, level = 30 }; qg.s.quest = 7787; qg.event("QUEST_DETAIL")
+  assert(qg.db().npcs[1346].cells, "a quest giver")
+  local tr = fresh(); tr.on(); tr.s.units.npc = { guid = "Creature-0-4170-0-1234-5146-000012AAAD", level = 40 }
+  tr.s.trainer.rows = { { name = "Frostbolt", st = "available", cost = 1 } }
+  tr.event("TRAINER_SHOW"); tr.drain()
+  assert(tr.db().npcs[5146].cells and dump(tr.db().npcs[5146].lv) == "{1=40,2=40}", "a trainer")
+  local lt = fresh(); lt.on(); lt.s.units.target = wolf({ dead = true })
+  lt.loot({ item(2589, 1, { WOLF, 1 }) })
+  assert(lt.db().npcs[525] and not lt.db().npcs[525].cells and lt.db().npcs[525].spds == nil, "a corpse from afar: no cell, no speed")
+  print("OK   npcs: vendor, quest and trainer windows count as near; a loot corpse is seen too")
+
+  -- privacy: no GUID, no name, no time finer than a day; /kinv track reports how many are held
+  local all = dump(h.db().npcs)
+  assert(not all:find("Creature") and not all:find("Tester") and not all:find(tostring(h.s.now))
+         and not all:find("=" .. tostring(h.s.clock)), all)
+  for _, entry in pairs(h.db().npcs) do
+    for key in pairs(entry) do assert(("name lv boss cls ct fam rxA rxH sub spd spds day cells"):find("%f[%w]" .. key .. "%f[%W]"), key) end
+  end
+  h.cmd("track"); assert(h.last():find("1 NPC held"), h.last())
+  print("OK   npcs: no GUID, no player name, no time finer than a day; /kinv track says how many are held")
+
+  -- caps: 3000 npcs (the least recently seen go first, down to 2700), ~500 KB; junk dropped on load
+  local c = fresh(); c.on()
+  for i = 1, 3001 do
+    if i == 101 then c.s.now = c.s.now + 86400 end
+    c.s.units.target = wolf({ guid = "Creature-0-4170-0-1234-" .. (10000 + i) .. "-000012AB01", tip = false })
+    c.event("PLAYER_TARGET_CHANGED")
+  end
+  local count, old = 0, 0
+  for id, entry in pairs(c.db().npcs) do count = count + 1; if id <= 10100 then old = old + 1 end end
+  assert(count == 2700 and old == 0, "3000 cap: " .. count .. " kept, " .. old .. " of the oldest day")
+  c.cmd("track"); assert(c.last():find("2700 NPCs held"), c.last())
+  c.s.units.target = wolf({ guid = "Creature-0-4170-0-1234-10001-000012AB01", tip = false }); c.event("PLAYER_TARGET_CHANGED")
+  assert(c.db().npcs[10001], "a pruned npc leaves the session tables too: seen again at once, it is kept again")
+  local big = { v = 1, on = true, agreed = true, prefix = "abc123", events = {}, npcs = { [1] = "junk", ["x"] = {} } }
+  for i = 1, 800 do
+    local cells = {}
+    for j = 1, 40 do cells["1429:" .. j .. ":" .. (i % 100)] = j end
+    big.npcs[1000 + i] = { lv = { 10, 12 }, cls = "normal", ct = 7, sub = "Journeyman Leatherworker", day = DAY - (i % 7), cells = cells }
+  end
+  local bl = fresh({ db = big })
+  local left = 0; for _ in pairs(bl.db().npcs) do left = left + 1 end
+  assert(left < 800 and left > 400 and bl.db().npcs[1] == nil and bl.db().npcs.x == nil, "~500 KB on load, junk gone: " .. left)
+  print("OK   npcs: at most 3000 (least recently seen first) and ~500 KB; junk entries dropped on load")
+
+  -- 180 days: an entry not seen for longer (or with no day) is dropped on load
+  do
+    local aged = fresh({ db = { v = 1, on = true, agreed = true, prefix = "abc123", events = {},
+                                npcs = { [1] = { day = DAY - 181 }, [2] = { day = DAY - 180 }, [3] = { lv = { 1, 1 } } } } })
+    local a = aged.db().npcs
+    assert(a[1] == nil and a[2] and a[3] == nil, "not seen for 180 days, or no day: dropped on load " .. dump(a))
+  end
+  print("OK   npcs: not seen for 180 days: dropped on load")
+
+  -- the session tables stay small: past 4000 npcs they are trimmed (the ones not updated for 10 minutes, else all)
+  do
+    local st = fresh(); st.on()
+    local x0, y0 = st.s.x, st.s.y
+    local function look(i)
+      st.s.units.target = wolf({ guid = "Creature-0-4170-0-1234-" .. (20000 + i) .. "-000012AB01", tip = false })
+      st.event("PLAYER_TARGET_CHANGED")
+    end
+    st.s.x, st.s.y = 0, 0                          -- no position: nothing kept, but each npc waits its 30 s
+    for i = 1, 4000 do look(i) end
+    st.s.x, st.s.y = x0, y0; look(1)
+    assert(st.db().npcs[20001] == nil, "4000 npcs held in the session: the first still waits its 30 s")
+    st.s.x, st.s.y = 0, 0; look(4001)
+    st.s.x, st.s.y = x0, y0; look(1)
+    assert(st.db().npcs[20001], "the 4001st trims the session tables")
+    st.s.clock = st.s.clock + 600
+    st.s.x, st.s.y = 0, 0; for i = 4002, 8000 do look(i) end   -- the limit again: only those not updated for 10 minutes go
+    st.s.x, st.s.y = x0, y0; look(4001); look(8000)
+    assert(st.db().npcs[24001] and st.db().npcs[28000] == nil, "an old npc is forgotten, a recent one keeps its 30 s wait")
+  end
+  print("OK   npcs: the session tables are trimmed past 4000 npcs")
 end
 `;
 

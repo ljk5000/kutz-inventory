@@ -268,6 +268,27 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         ev(2, { rx: 9 }), ev(2, { filtered: false }), ev(0, { rx: 5 }),
     ];
     badTrainer.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(withObs(o)))).length) fail("the 3.x schema accepted bad trainer/vendor #" + n); });
+    // 3.10.0: the npcs summary with its install id; a section may carry npcs and no events
+    const npc = { npc: 525, name: "Made-up Wolf", lv: [10, 12], cls: "normal", ct: 1, fam: "Wolf", rxA: 2, rxH: 4, sub: "Made-up Supplies", spd: 200, day: 20404,
+        cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] };
+    const withNpcs = (patch, extra) => withObs({ ...goodObs, install: "k1f9c2", npcs: [{ ...npc, ...patch }], ...extra });
+    const np = [withNpcs({}), withNpcs({ boss: true, lv: undefined, ct: "Beast" }), withNpcs({}, { events: [] }),
+        withNpcs({}, { install: "k1f9c2+zz9900" }), withNpcs({ lv: undefined, cls: undefined, ct: undefined, fam: undefined, rxA: undefined,
+        rxH: undefined, sub: undefined, spd: undefined, cells: undefined, name: undefined })].flatMap((o) => validateExport(JSON.parse(JSON.stringify(o))));
+    if (np.length) fail("3.10.0 npcs do not match the 3.x schema:\n  " + np.join("\n  "));
+    const badNpcs = [
+        withNpcs({ npc: 0 }), withNpcs({ day: undefined }), withNpcs({ day: 0 }), withNpcs({ day: 2e6 }), withNpcs({ lv: [12] }), withNpcs({ lv: [0, 5] }),
+        withNpcs({ lv: [5, 6, 7] }), withNpcs({ boss: false }), withNpcs({ cls: "boss" }), withNpcs({ ct: 0 }), withNpcs({ ct: "Be|ast" }),
+        withNpcs({ fam: "Creature-0-1-2" }), withNpcs({ fam: "f".repeat(41) }), withNpcs({ rxA: 9 }), withNpcs({ rxH: 0 }),
+        withNpcs({ sub: "Player-4170-00ABCDEF" }), withNpcs({ sub: "s".repeat(81) }), withNpcs({ sub: "|cffffffffX|r" }), withNpcs({ sub: "Someone's Pet" }), withNpcs({ spd: 5 }),
+        withNpcs({ spd: 1.5 }), withNpcs({ cells: [] }), withNpcs({ cells: [[1429, 100, 1, 1]] }), withNpcs({ cells: [[1429, 1, 1, 0]] }),
+        withNpcs({ cells: [[1429, 1, 1]] }), withNpcs({ cells: Array.from({ length: 41 }, (_, i) => [1429, i, 1, 1]) }),
+        withNpcs({ guid: "Creature-0-4170-0-1234-525-000012AB01" }), withNpcs({ name: "Someone's Pet" }), withNpcs({ name: "Player-4170-00ABCDEF" }), withNpcs({ name: "n".repeat(81) }),
+        withNpcs({ name: "|cffff0000Made-up Wolf|r" }), withNpcs({ name: "" }), withNpcs({ unitName: "Made-up Wolf" }), withNpcs({ t: 1762905600 }),
+        withNpcs({}, { install: undefined }), withNpcs({}, { install: "K1F9C2" }), withNpcs({}, { install: "k1f9c2+" }),
+        withNpcs({}, { npcs: [] }), withObs({ ...goodObs, install: "k1f9c2" }), withNpcs({}, { events: [], npcs: undefined }),
+    ];
+    badNpcs.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(o))).length) fail("the 3.x schema accepted bad npcs #" + n); });
     if (!validateExport({ ...data, schemaVersion: SCHEMA_VERSION_3 }).length) fail("the 3.x schema accepted a 2.x document");
     const eq = run([inv, out3, "--format=3"], { WOW_IMPORT_TOKEN: "", WOW_IMPORT_URL: "" });
     if (eq.status !== 0 || JSON.parse(fs.readFileSync(out3, "utf8")).schemaVersion !== SCHEMA_VERSION_3) fail("--format=3 did not write 3.x");

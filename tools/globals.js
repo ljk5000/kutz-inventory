@@ -33,6 +33,7 @@ const known = new Set(("_G ipairs pairs pcall select type unpack tostring tonumb
  "GetQuestItemInfo GetQuestItemLink GetQuestReward GetNumQuestChoices GetNumQuestRewards GetMerchantItemCostInfo GetMerchantItemCostItem " +
  "C_Trainer C_TooltipInfo GetTrainerServiceNumAbilityReq GetTrainerServiceAbilityReq GetMerchantFilter SetMerchantFilter LE_LOOT_FILTER_ALL " +
  "StaticPopupDialogs StaticPopup_Show YES NO " +
+ "UnitPlayerControlled UNKNOWNOBJECT UnitCreatureType UnitCreatureFamily CheckInteractDistance GetMaxPlayerLevel " +   // Observations.lua npcs
  "SetTrainerServiceTypeFilter UnitArmor UnitAttackPower UnitAttackSpeed UnitDamage UnitDefenseSkill UnitHonor UnitHonorLevel UnitHonorMax UnitRangedAttackPower UnitRangedDamage UnitResistance UnitSex UnitSpellHaste UnitStat").split(" "));
 const odd = [...all].filter(g => !known.has(g)).sort();
 console.log("\nglobals used that are NOT in the expected WoW/Lua list (check for typos):\n  " + (odd.join(", ") || "(none)"));

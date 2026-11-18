@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.9.0",
+ "schemaVersion": "3.10.0",
  "exportedAt": "2025-11-12T00:01:00.000Z",
  "uiHealth": null,
  "prices": {
@@ -520,6 +520,7 @@
  "observations": {
   "v": 1,
   "addon": "1.8.0",
+  "install": "k1f9c2",
   "events": [
    {
     "id": "k1f9c2-000017",
@@ -771,6 +772,66 @@
       "st": "a"
      }
     ]
+   }
+  ],
+  "npcs": [
+   {
+    "npc": 525,
+    "name": "Made-up Wolf",
+    "lv": [
+     10,
+     12
+    ],
+    "cls": "normal",
+    "ct": 1,
+    "fam": 1,
+    "rxA": 2,
+    "spd": 200,
+    "day": 20404,
+    "cells": [
+     [
+      1429,
+      41,
+      65,
+      2
+     ],
+     [
+      1429,
+      42,
+      65,
+      1
+     ]
+    ]
+   },
+   {
+    "npc": 1346,
+    "name": "Made-up Tailor",
+    "lv": [
+     30,
+     30
+    ],
+    "cls": "normal",
+    "ct": 7,
+    "rxA": 5,
+    "sub": "Made-up Tailoring Supplies",
+    "day": 20405,
+    "cells": [
+     [
+      1453,
+      63,
+      72,
+      4
+     ]
+    ]
+   },
+   {
+    "npc": 6109,
+    "name": "Made-up Dragon",
+    "boss": true,
+    "cls": "worldboss",
+    "ct": 2,
+    "rxA": 1,
+    "day": 20403
    }
   ]
  }
