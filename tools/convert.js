@@ -39,7 +39,8 @@ const SCHEMA_VERSION = "2.1.0";
 // seconds a flight from one node to another took); npcs entries may carry svc, the services an NPC was seen to offer;
 // quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin, reputation changes
 // only) (KutzInventory 1.18.0). observations.v stays 1.
-const SCHEMA_VERSION_3 = "3.11.0";
+// 3.12.0: game text observations (KutzInventory 1.19.0). observations.v stays 1.
+const SCHEMA_VERSION_3 = "3.12.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).
@@ -530,6 +531,10 @@ const OBS_LABEL = /^[^|\u0000-\u001f\u007f]+$/;
 const OBS_GUIDISH = /(Player|Creature|Pet|GameObject|Vehicle|Item|Vignette|BattlePet)-[0-9]+-[0-9]+/;
 const obsLabel = (v, max) =>
   (typeof v === "string" && v.length >= 1 && v.length <= max && OBS_LABEL.test(v) && !OBS_GUIDISH.test(v) ? v : undefined);
+const OBS_PROSE_UNSAFE = /[|\u0000-\u0009\u000b-\u001f\u007f]|[a-z]+-[0-9]+-[0-9]+/i;
+const obsProse = (v, max) =>
+  (typeof v === "string" && v.length <= max && v.trim() && !OBS_PROSE_UNSAFE.test(v) ? v : undefined);
+const OBS_GOSSIP_KINDS = ["gossip", "greeting"];
 const OBS_TRAINER_KINDS = ["class", "profession"];
 const OBS_TRAINER_STATES = ["a", "u", "k"];
 const OBS_TRAINER_ROWS = 400;
@@ -589,6 +594,11 @@ function observationEvent(e) {
     if (!to) return null;
     const rx = obsReaction(e.rx);
     return { ...base, npc: e.npc, node: e.node, ...(rx ? { rx } : {}), ...place(), to };
+  }
+  if (e.type === "gossip") {
+    const npc = obsInt(e.npc, 1), object = obsInt(e.object, 1), text = obsProse(e.text, 4000);
+    if ((npc === undefined) === (object === undefined) || !text || !OBS_GOSSIP_KINDS.includes(e.kind)) return null;
+    return { ...base, ...pick({ npc, object }), kind: e.kind, text, ...place() };
   }
   if (e.type === "flight") {
     if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;

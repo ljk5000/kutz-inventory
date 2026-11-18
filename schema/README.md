@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.11.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
+| `inventory-export.v3.schema.json` | **3.12.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -69,7 +69,7 @@ Optional `characters[].hearth` is the bind-location name from `GetBindLocation`,
 
 Events have ISO `t` and `kind`: `start` (instance ID/name/type/difficulty, `by`), `end` (instance ID/name), `encounter_start`/`encounter_end` (encounter ID/name, difficulty, group size, plus success on end), `loot` (item ID/link/count, `looter`) or `roster` (`members`). Missing API values are omitted. Account files tracking the same raid string merge their events. The addon records only during the two-hours-before/eight-hours-after window while grouped in an instance; exact matching instance IDs are preferred, with a window fallback. It retains at most 20 raids, 2,000 events each, pruning raids more than 14 days after start on load/add.
 
-### Observations (3.2.0–3.11.0)
+### Observations (3.2.0–3.12.0)
 
 `observations: { v: 1, addon, install?, events: [...], npcs? }` comes from the **same saved file's** `KutzInventoryObsDB` table. The addon retains up to 5,000 events, 30 days and roughly 2 MB; export deduplicates by event ID, sorts by time/ID and caps count/serialized size. IDs combine a random install prefix and counter; they are not cryptographic identities or guaranteed globally unique.
 
@@ -82,6 +82,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session. From 3.9.0, optional `rx` and `filtered` (below).
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
+- `gossip` (3.12.0): game-authored NPC or object gossip and quest greetings ([below](#game-text-3120)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -117,6 +118,23 @@ From 3.9.0 (KutzInventory 1.16.0), `observations.v` stays `1`: readers ignore ev
 ```
 
 Strings are game labels as shown: the addon trims them and cuts them to the limit in UTF-8 bytes; the exporter and schema refuse (drop) a label with `|` markup, a control character, more than the limit in characters, or anything shaped like a GUID (`Player-1-2`, `Creature-0-…`). Rows keep the window's order with headers left out. The hunter's Beast Training window (trainer type Pet: no trainer NPC, and it costs training points) is never recorded, nor is a window whose `npc` unit has no creature ID. The same `npc` with the same list and `rx` is recorded at most once in 7 days, checked against the retained events, so it holds across sessions while the earlier event is still kept (30 days, or less once the size caps prune it); the comparison uses each row's name, rank, cost, level and skill rank but not `st` (learning a spell does not re-record the list) and not `s`. One realistic 60-row class trainer event is about 5.2 KB of JSON (about 82 bytes per row, 1.1 KB gzipped); 400 rows is about 33 KB.
+
+### Game text (3.12.0)
+
+KutzInventory 1.19.0 records these events with the usual `id`, `t`, `b?`, `where` and `who` while drop tracking is enabled. A new text event must fit within the first 1,000,000 bytes of the approximate 2,000,000-byte saved-event cap. The addon's separate saved FIFO dedup indexes keep the 2,000 most recently inserted distinct keys per event type, across sessions and event pruning. Hits leave insertion order unchanged. An evicted key may be recorded again. Indexes never export. Export deduplicates by event ID as usual.
+
+**Gossip** comes from `C_GossipInfo.GetText()` at `GOSSIP_SHOW` (legacy `GetGossipText()` when the modern read is unavailable) or `GetGreetingText()` at `QUEST_GREETING`. Dedup uses subject type, subject ID and a checksum of the normalized, capped text, shared between both kinds. A secret or invalid subject or text is skipped. The recorder replaces the recording character's name with `$N`; class and race words are preserved as in quest prose. The source is game text. Gossip options, player chat and mail are excluded.
+
+```text
+{ id, t, b?, type: "gossip", where, who,
+  npc:     integer 1-2147483647   creature or vehicle ID from UnitGUID("npc"), exactly one of npc or object
+  object:  integer 1-2147483647   game object ID from UnitGUID("npc"), exactly one of npc or object
+  kind:    "gossip" | "greeting"  the window that supplied the text
+  text:    prose 1-4000           normalized game text, line breaks allowed; no markup, GUID shapes or other control characters
+}
+```
+
+The recorder trims prose, removes control characters other than line feeds, and caps it in UTF-8 bytes on a character boundary. The exporter and schema enforce string-length limits. The exporter drops events without a valid required field or with both subject IDs valid, and projects only the documented fields. GUIDs are never stored in these events.
 
 ### Flight masters and flights (3.11.0)
 

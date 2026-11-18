@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.18.0** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.19.0** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)
@@ -79,6 +79,7 @@ While enabled, it records:
 
 - Loot windows by source (creature/boss, chest, fishing, gathering, skinning or opened item), including empty/coins-only corpses without coin amounts. Known sources are deduplicated; skinning counts separately.
 - Group-loot roll lists, including when another player opens the corpse, the loot threshold and boss encounter when identified. Your own system “You won” line adds a flag; other players' rolls/wins are not retained in observations.
+- Game-authored NPC and object gossip or quest greetings. Your name is replaced with $N in the text. Gossip options, player chat and mail are excluded.
 - Quest acceptance/turn-in, giver/ender IDs and item rewards/choices. Available quest prose is recorded once per quest/action while under half the size cap; occurrences of your given name are replaced with `$N`. From 1.18.0, an accept also carries the quest's level, group size, daily/weekly, whether it is timed and the item that started it; a turn-in the XP the reward window showed (under the level cap only) and the reputation it changed, as per-faction changes only: your standing itself is never kept, and the changes are dropped when loot, combat or another quest came in between.
 - Vendor stock, quantities, prices, item/currency costs and limited stock, read under the window's all-items filter (your filter is put back at once), and the vendor's reaction to you. Identical stock from the same NPC is recorded at most once per hour in a session.
 - Class and profession trainers' lists: each service's spell ID where the client gives one, name, rank, required level/skill/abilities, cost, whether you can learn it now or know it, and the trainer's reaction to you. The same list from the same trainer is recorded at most once a week, while the earlier event is still kept (30 days, or less once the size caps prune it). The hunter's Beast Training window is not recorded.
@@ -192,7 +193,7 @@ node tools/inventory_export.js --format 2 <path-to-KutzInventory.lua> <output.js
 
 With no input it looks for all accounts in the conventional Windows `Program Files (x86)/World of Warcraft/_forever_/WTF/Account` folder. Default output is `export/inventory.json` beside the source tree, with `auction-scans.json` alongside it. It prints a local crafting-profit/levelling estimate using observed vendor and AH prices (5% AH sale cut); these are estimates, not guaranteed sale prices. Add `--upload` only after setting `WOW_IMPORT_URL` and `WOW_IMPORT_TOKEN`. `--no-inventory` and `--no-auctions` select upload categories; local conversion still includes both. Details and all tooling: [tools/README.md](tools/README.md).
 
-[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.11.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
+[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.12.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
 
 From the repository root:
 

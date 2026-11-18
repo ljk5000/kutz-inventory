@@ -214,6 +214,64 @@ end
 local COIN = { n = 0, from = { MOB, 0 } }                         -- a money slot: no item link
 local function item(id, n, from) return { link = "|cffffffff|Hitem:" .. id .. "::::::::60:::::|h[X]|h|r", n = n, from = from } end
 
+-- Game gossip and greetings share a persistent, bounded subject/text index.
+do
+  local secret = {}
+  local function gossip(opts)
+    local h = fresh(opts)
+    h.s.units.npc = { guid = MOB }
+    h.G.C_GossipInfo = { GetText = function() return h.s.words end }
+    h.G.GetGreetingText = function() return h.s.greeting end
+    h.G.GetGossipText = function() return h.s.legacy end
+    return h
+  end
+  local h = gossip({ globals = { issecretvalue = function(v) return v == secret end } })
+  h.s.words = "  Welcome Tester Testwood, Rogue.  "
+  h.event("GOSSIP_SHOW")
+  local e = h.events()[1]
+  assert(e and e.npc == 11502 and e.type == "gossip" and e.kind == "gossip"
+         and e.text == "Welcome $N, Rogue." and e.guid == nil and e.where and e.who, h.db().lastError)
+  h.s.greeting = "Welcome Tester, Rogue."
+  h.event("QUEST_GREETING")
+  assert(#h.events() == 1 and h.db().n == 1, "same normalized text across both windows")
+  h.s.units.npc.guid = NODE
+  h.event("QUEST_GREETING")
+  e = h.events()[2]
+  assert(e and e.object == 1617 and not e.npc and e.kind == "greeting", "distinct object subject")
+  h.s.units.npc.guid = PLAYER
+  h.event("GOSSIP_SHOW")
+  h.s.units.npc.guid = secret
+  h.event("GOSSIP_SHOW")
+  h.s.units.npc.guid, h.s.words, h.s.legacy = MOB, secret, "Do not fall back from a secret"
+  h.event("GOSSIP_SHOW")
+  h.s.words = "Do not record me in mail"
+  h.event("MAIL_SHOW"); h.event("GOSSIP_SHOW"); h.event("MAIL_CLOSED")
+  h.G.InboxFrame = { IsVisible = function() return secret end }
+  h.event("GOSSIP_SHOW")
+  assert(#h.events() == 2 and not h.db().lastError, "player, secret values and mail leave no event")
+  h.G.InboxFrame, h.G.C_GossipInfo, h.s.legacy = nil, nil, string.rep("a", 3999) .. "é"
+  h.event("GOSSIP_SHOW")
+  assert(#h.events()[3].text == 3999, "legacy fallback and correct UTF-8 cut")
+  h.G.GetGossipText = nil
+  h.event("GOSSIP_SHOW")
+  assert(#h.events() == 3, "missing APIs")
+  h.db().events = {}
+  local r = gossip({ db = h.db() })
+  r.s.words = "Welcome Tester, Rogue."
+  r.event("GOSSIP_SHOW")
+  assert(#r.events() == 0, "saved dedup survives reload and absence of the original event")
+  for i = 1, 2000 do r.s.words = "Message number " .. i; r.event("GOSSIP_SHOW") end
+  assert(#r.db().textSeen.gossip.keys == 2000 and #r.events() == 2000, r.db().lastError)
+  r.s.words = "Welcome Tester, Rogue."
+  r.event("GOSSIP_SHOW")
+  assert(#r.events() == 2001, "oldest key is evicted")
+  local full = gossip({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  full.G.C_GossipInfo.GetText = function() error("should not read gossip above half cap") end
+  full.event("GOSSIP_SHOW")
+  assert(#full.events() == 1 and not full.db().textSeen and not full.db().n, "half cap skips gossip")
+  print("OK   gossip and greetings, normalized subjects, privacy guards, saved FIFO and size gate")
+end
+
 -- 1) on by default for a new install only: a first load makes the table and records without any command; a table
 --    from the opt-in days keeps its choice (off stays off, on stays on), only a missing setting becomes on; an off
 --    survives reloads

@@ -52,6 +52,7 @@
 --           PLAYER_CONTROL_GAINED with UnitOnTaxi false; only when the landing position is by "to" (no other node closer),
 --           or, when the position cannot be read, the next taxi window within 2 minutes is at "to". Never a position
 --           trail. One per from/to in 30 days (saved events).
+--   gossip NPC or object greeting and dialogue body only, while under half the event size cap.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
@@ -84,10 +85,9 @@ local MAX_EVENTS, MAX_AGE, MAX_BYTES = 5000, 30 * 86400, 2000000
 local CAST_WINDOW = 5                           -- seconds (GetTime) from a gathering / skinning cast to its loot window
 local VENDOR_AGAIN = 3600                       -- the same vendor with the same stock is recorded at most once an hour
 local LF = string.char(10)
-local TEXT_MAX = { title = 200, details = 8000, objectives = 4000, progress = 4000, completion = 8000 }   -- bytes
+local TEXT_MAX = { title = 200, details = 8000, objectives = 4000, progress = 4000, completion = 8000, gossip = 4000 }   -- bytes
 
 local function Plain(v)
-    if v == nil then return nil end
     if issecretvalue and issecretvalue(v) then return nil end
     return v
 end
@@ -652,26 +652,126 @@ end
 
 -- The quest window's words. The game writes the character's name into them; it goes back to "$N", so the text is the
 -- quest's and not about the player. Cut to the field's limit on a whole UTF-8 character.
-local function Prose(fn, max)
-    local s = Plain(Try(fn))
+local function ReplaceName(s, name)
+    local pat = name:gsub("(%W)", "%%%1")
+    if name:find("^%w") then pat = "%f[%w]" .. pat end
+    if name:find("%w$") then pat = pat .. "%f[%W]" end
+    return (s:gsub(pat, "$N"))
+end
+
+local function Prose(s, max, names)
+    s = Plain(s)
     if type(s) ~= "string" then return nil end
     s = s:gsub("%c", function(c) return c == LF and c or "" end):gsub("^%s+", ""):gsub("%s+$", "")
     if s == "" then return nil end
-    local given = Me()
-    if given then
-        local pat = given:gsub("(%W)", "%%%1")
-        if given:find("^%w") then pat = "%f[%w]" .. pat end
-        if given:find("%w$") then pat = pat .. "%f[%W]" end
-        s = s:gsub(pat, "$N")
+    if names then
+        for _, name in ipairs(names) do s = ReplaceName(s, name) end
+    else
+        local given = Me()
+        if given then s = ReplaceName(s, given) end
     end
     s = Cut(s, max)
     return s ~= "" and s or nil
 end
 
+-- New game prose fields share a half-cap gate and separate, saved FIFO indexes. Each ring holds only
+-- bounded keys, with a session set for constant-time lookups; dropping an event does not forget its key.
+local gameText = { CAP = 2000, indexes = {}, mail = false }
+
+function gameText.Id(v)
+    local id = Int(v, 1)
+    if id and id <= 2147483647 then return id end
+end
+
+function gameText.Room(added)
+    return bytes + (added or 0) <= MAX_BYTES / 2
+end
+
+function gameText.PlainText(s)
+    s = Plain(s)
+    if type(s) == "string" and not s:find("|", 1, true) and not s:find("%a+%-%d+%-%d+") then return s end
+end
+
+function gameText.OwnNames()
+    local given, surname = Me()
+    if not given then return nil end
+    return surname and { given .. " " .. surname, given, surname } or { given }
+end
+
+function gameText.Checksum(s)
+    local a, b = 1, 1
+    for i = 1, #s do
+        local c = s:byte(i)
+        a, b = (a * 33.0 + c) % 2147483647, (b * 131.0 + c) % 2147483629
+    end
+    return string.format("%08x%08x", a, b)
+end
+
+function gameText.Index(kind)
+    local index = gameText.indexes[kind]
+    if index then return index end
+    local d = DB()
+    if type(d.textSeen) ~= "table" then d.textSeen = {} end
+    local ring = d.textSeen[kind]
+    if type(ring) ~= "table" or type(ring.keys) ~= "table" or #ring.keys > gameText.CAP
+        or not Int(ring.next, 1) or ring.next > gameText.CAP or ring.next > #ring.keys + 1 then
+        ring = { next = 1, keys = {} }
+        d.textSeen[kind] = ring
+    end
+    index = { ring = ring, seen = {} }
+    for i, key in ipairs(ring.keys) do index.seen[key] = i end
+    gameText.indexes[kind] = index
+    return index
+end
+
+-- Includes the new event in the half-cap check. A refused event does not consume an ID or a dedup key.
+function gameText.Record(kind, key, fields)
+    local index = gameText.Index(kind)
+    if index.seen[key] then return end
+    local d, e = DB(), NewEvent(kind)
+    for k, v in pairs(fields) do e[k] = v end
+    if not gameText.Room(Size(e)) then d.n = d.n - 1; return end
+    Add(e)
+    local ring, seen = index.ring, index.seen
+    local i = ring.next
+    local old = ring.keys[i]
+    if old then seen[old] = nil end
+    ring.keys[i], seen[key], ring.next = key, i, i % gameText.CAP + 1
+end
+
+function gameText.InMail()
+    if gameText.mail then return true end
+    for _, name in ipairs({ "MailFrame", "InboxFrame", "OpenMailFrame" }) do
+        local frame = Plain(_G[name])
+        if frame and Plain(Try(frame.IsVisible, frame)) ~= false then return true end
+    end
+    return false
+end
+
+function gameText.Gossip(kind)
+    if not gameText.Room() or gameText.InMail() then return end
+    local what, id = Giver("npc")
+    id = gameText.Id(id)
+    if not id then return end
+    local names = gameText.OwnNames()
+    if not names then return end
+    local s
+    if kind == "gossip" then
+        s = Try(C_GossipInfo and C_GossipInfo.GetText)
+        if not Secret(s) and s == nil then s = Try(GetGossipText) end
+    else
+        s = Try(GetGreetingText)
+    end
+    local text = Prose(gameText.PlainText(s), TEXT_MAX.gossip, names)
+    if not text then return end
+    local key = what .. ":" .. id .. ":" .. gameText.Checksum(text)
+    gameText.Record("gossip", key, { [what] = id, text = text, kind = kind })
+end
+
 local function QuestText(fields)                -- { title = GetTitleText, ... } -> { title = "...", ... } or nil
     local out, any = {}, false
     for key, fn in pairs(fields) do
-        local s = Prose(fn, TEXT_MAX[key])
+        local s = Prose(Try(fn), TEXT_MAX[key])
         if s then out[key], any = s, true end
     end
     return any and out or nil
@@ -1689,6 +1789,11 @@ local function QuestGiverSeen()                 -- the quest window is open with
     pcall(Sighting, "npc", true)                -- the same creature: the 30 s throttle makes this a no-op
 end
 
+function handlers.MAIL_SHOW() gameText.mail = true end
+function handlers.MAIL_CLOSED() gameText.mail = false end
+function handlers.GOSSIP_SHOW() gameText.Gossip("gossip") end
+function handlers.QUEST_GREETING() gameText.Gossip("greeting") end
+
 function handlers.QUEST_DETAIL(startItem)       -- (questStartItemID): the item that started it, 0 when none
     QuestGiverSeen()
     local what, id = Giver("questnpc", "npc")
@@ -1714,7 +1819,7 @@ function handlers.QUEST_ACCEPTED(...)
     end
 end
 function handlers.QUEST_PROGRESS()
-    progress = { quest = Int(Try(GetQuestID), 1), text = Prose(GetProgressText, TEXT_MAX.progress) }
+    progress = { quest = Int(Try(GetQuestID), 1), text = Prose(Try(GetProgressText), TEXT_MAX.progress) }
 end
 function handlers.QUEST_COMPLETE()
     QuestGiverSeen()
@@ -1786,6 +1891,7 @@ function handlers.HEARTHSTONE_BOUND() Sighting("npc", true, { "inn" }) end
 local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
+                    "GOSSIP_SHOW", "QUEST_GREETING", "MAIL_SHOW", "MAIL_CLOSED",
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                     "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
@@ -1816,6 +1922,7 @@ local function Disable()
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
     taxi.Reset()
+    gameText.mail = false
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
 end
 
@@ -1897,10 +2004,10 @@ function ns.ObsNote()
     if d.noted then return end
     d.noted = true
     if d.on and d.agreed then
-        Say("drop, quest, vendor, trainer and NPC tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
+        Say("drop, quest, vendor, trainer, NPC and game text tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
         print("  It never records gold or anything about other players. |cffaaaaaa/kinv track drops off|r stops recording.")
     else
-        Say("drop, quest, vendor, trainer and NPC tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
+        Say("drop, quest, vendor, trainer, NPC and game text tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
         print("  It never records gold or anything about other players. |cffaaaaaa/kinv track|r shows the status.")
     end
 end

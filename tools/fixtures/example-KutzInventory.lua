@@ -124,7 +124,7 @@ KutzInventoryDB = {
 -- the same corpse skinned, a quest accepted and turned in (with its level, group size, XP and reputation changes), a
 -- vendor, a class trainer, a flight master's map, a flight from it, and one broken event the exporter leaves out.
 KutzInventoryObsDB = {
-  v = 1, on = true, agreed = true, noted = true, addon = "1.8.0", prefix = "k1f9c2", n = 26,
+  v = 1, on = true, agreed = true, noted = true, addon = "1.19.0", prefix = "k1f9c2", n = 26,
   events = {
     { id = "k1f9c2-000017", t = 1762905600, b = "1.60.1.70888", type = "loot",
       src = { kind = "boss", npc = 11502, guid = "Creature-0-4170-409-1234-11502-000012ABCD", via = "slot" },
@@ -166,6 +166,9 @@ KutzInventoryObsDB = {
       to = { { node = 4, cost = 1050, hops = 2 }, { node = 5, cost = 270, hops = 1 }, { node = 6, cost = 1800, hops = 3 } } },
     { id = "k1f9c2-000025", t = 1762906300, b = "1.60.1.70888", type = "flight", from = 2, to = 5, sec = 181,
       who = { level = 20, class = 8, faction = "Alliance" } },
+    { id = "k1f9c2-000026", t = 1762906350, b = "1.60.1.70888", type = "gossip", npc = 352, kind = "gossip",
+      text = "Welcome back, $N. The northern road is clear.", where = { uiMap = 1453, x = 0.7081, y = 0.7254 },
+      who = { level = 20, class = 8, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" } },
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },
   -- the npcs summary (1.17.0): a beast with its attack speed (spds is the addon's own tally, not exported), a vendor with

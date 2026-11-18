@@ -674,7 +674,7 @@ KutzInventoryObsDB = {
 	["on"] = true,
 	["agreed"] = true,
 	["noted"] = true,
-	["addon"] = "1.8.0",
+	["addon"] = "1.19.0",
 	["prefix"] = "k1f9c2",
 	["n"] = 26,
 	["events"] = {
@@ -997,6 +997,27 @@ KutzInventoryObsDB = {
 			},
 		}, -- [9]
 		{
+			["id"] = "k1f9c2-000026",
+			["t"] = 1762906350,
+			["b"] = "1.60.1.70888",
+			["type"] = "gossip",
+			["npc"] = 352,
+			["kind"] = "gossip",
+			["text"] = "Welcome back, $N. The northern road is clear.",
+			["where"] = {
+				["uiMap"] = 1453,
+				["x"] = 0.7081,
+				["y"] = 0.7254,
+			},
+			["who"] = {
+				["level"] = 20,
+				["class"] = 8,
+				["faction"] = "Alliance",
+				["name"] = "Exampleobserver",
+				["surname"] = "Examplefamily",
+			},
+		}, -- [10]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -1005,7 +1026,7 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [10]
+		}, -- [11]
 	},
 	["npcs"] = {
 		[525] = {

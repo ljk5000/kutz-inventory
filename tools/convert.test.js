@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.11.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.12.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -196,10 +196,10 @@ const WHO = `who = { level = 60, class = 4, faction = "Alliance" }`;
 
 test("observations: the example's events are exported in the documented shape; the broken one is not; 2.x has none", () => {
   const obs = convert.convertSavedVariables([LUA]).inventory.observations;
-  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.8.0");
+  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.19.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -280,6 +280,18 @@ test("observations 3.9.0: one 60-row trainer event is a few kilobytes of JSON", 
   const bytes = Buffer.byteLength(JSON.stringify(obs.events[0]));
   assert.equal(obs.events[0].rows.length, 60);
   assert.ok(bytes > 4000 && bytes < 6500, "one 60-row trainer event: " + bytes + " bytes");
+});
+
+test("observations 3.12.0: gossip projects only valid subjects and safe prose", () => {
+  const event = { id: "abc123-1", t: 100, type: "gossip", npc: 352, kind: "greeting", text: "Welcome, $N.", guid: "discard",
+                  options: ["discard"] };
+  const obs = (events) => convert.exportObservations([{ events }]);
+  assert.deepEqual(obs([event]).events[0], {
+    id: event.id, t: 100, type: "gossip", npc: 352, kind: "greeting", text: "Welcome, $N.", where: {}, who: {},
+  });
+  assert.equal(obs([{ ...event, npc: undefined, object: 12 }]).events[0].object, 12);
+  for (const bad of [{ object: 12 }, { npc: 0 }, { kind: "option" }, { text: " " }, { text: "|unsafe" },
+                     { text: "Player-1-25" }, { text: "x".repeat(4001) }]) assert.equal(obs([{ ...event, ...bad }]), null);
 });
 
 test("observations 3.11.0: taxi and flight events keep only the documented fields; a doubtful list is dropped whole", () => {
@@ -454,7 +466,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.11.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.12.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });

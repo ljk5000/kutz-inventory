@@ -1,5 +1,11 @@
 # Release notes
 
+## KutzInventory 1.19.0
+
+- Record game-authored gossip and quest greetings for creatures and objects while drop tracking is on and there is room for text. The player's name becomes $N. Gossip options, player chat and mail are excluded.
+
+Inventory export 3.12.0 (default) adds `gossip` observations. The observations section stays `v: 1`.
+
 ## KutzInventory 1.18.0
 
 - Record flight masters for cr0m's item database (drop tracking, `/kinv track`): when a flight master's map opens, every node you can fly to from its node, by taxi node id, with the price the map shows you (a game price, not your money) and the number of legs. The node ids come from `C_TaxiMap.GetAllTaxiNodes` matched slot by slot to the map; when the client gives no ids, the two disagree or there is not exactly one current node, nothing is recorded. Node names are not kept. The same list and reaction from the same flight master is recorded at most once a week.
