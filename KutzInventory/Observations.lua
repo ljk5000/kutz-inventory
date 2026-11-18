@@ -53,6 +53,7 @@
 --           or, when the position cannot be read, the next taxi window within 2 minutes is at "to". Never a position
 --           trail. One per from/to in 30 days (saved events).
 --   gossip NPC or object greeting and dialogue body only, while under half the event size cap.
+--   read   one page of game-authored book or object text, only when mail and creator checks pass.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
@@ -85,7 +86,7 @@ local MAX_EVENTS, MAX_AGE, MAX_BYTES = 5000, 30 * 86400, 2000000
 local CAST_WINDOW = 5                           -- seconds (GetTime) from a gathering / skinning cast to its loot window
 local VENDOR_AGAIN = 3600                       -- the same vendor with the same stock is recorded at most once an hour
 local LF = string.char(10)
-local TEXT_MAX = { title = 200, details = 8000, objectives = 4000, progress = 4000, completion = 8000, gossip = 4000 }   -- bytes
+local TEXT_MAX = { title = 200, details = 8000, objectives = 4000, progress = 4000, completion = 8000, gossip = 4000, read = 8000 }   -- bytes
 
 local function Plain(v)
     if issecretvalue and issecretvalue(v) then return nil end
@@ -742,8 +743,8 @@ end
 function gameText.InMail()
     if gameText.mail then return true end
     for _, name in ipairs({ "MailFrame", "InboxFrame", "OpenMailFrame" }) do
-        local frame = Plain(_G[name])
-        if frame and Plain(Try(frame.IsVisible, frame)) ~= false then return true end
+        local frame = _G[name]
+        if Secret(frame) or (frame and Plain(Try(frame.IsVisible, frame)) ~= false) then return true end
     end
     return false
 end
@@ -766,6 +767,80 @@ function gameText.Gossip(kind)
     if not text then return end
     local key = what .. ":" .. id .. ":" .. gameText.Checksum(text)
     gameText.Record("gossip", key, { [what] = id, text = text, kind = kind })
+end
+
+-- Read the creator before any title or page body. Try() alone cannot distinguish a nil creator (game
+-- text) from a failed call. A creator or a mail-like material also blocks a saved letter used from a bag.
+function gameText.BookMaterial()
+    if type(ItemTextGetCreator) ~= "function" or type(ItemTextGetMaterial) ~= "function" then return nil, false end
+    local ok, creator = pcall(ItemTextGetCreator)
+    if not ok or Secret(creator) or (creator ~= nil and creator ~= "") then return nil, false end
+    local got, raw = pcall(ItemTextGetMaterial)
+    if not got or Secret(raw) then return nil, false end
+    if raw == nil or raw == "" then return nil, true end
+    local material = Label(gameText.PlainText(raw), 40)
+    if not material then return nil, false end
+    local lower = material:lower()
+    if lower:find("mail", 1, true) or lower:find("letter", 1, true) or lower:find("stationery", 1, true) then
+        return nil, false
+    end
+    return material, true
+end
+
+function gameText.BookBegin()
+    local used = gameText.bookUse
+    gameText.bookUse, gameText.book = nil, nil
+    if not gameText.Room() or gameText.InMail() then return end
+    local _, safe = gameText.BookMaterial()
+    if not safe then return end
+    local title = gameText.PlainText(Try(ItemTextGetItem))
+    local guid = Try(UnitGUID, "npc")
+    if not Label(title, 200) or Secret(guid) then return end
+    local what, id = FromGuid(Plain(guid))
+    local object = what == "object" and gameText.Id(id) or nil
+    local item
+    local clock = Num(Try(GetTime))
+    if used and clock and clock >= used.at and clock - used.at <= 1 and used.title == title then
+        if object then object = nil            -- both sources are plausible: keep the title only
+        elseif guid == nil then item = used.id end
+    end
+    gameText.book = { rawTitle = title, item = item, object = object }
+end
+
+function gameText.BookPage()
+    local book = gameText.book
+    if not book or not gameText.Room() then return end
+    if gameText.InMail() then gameText.book = nil; return end
+    local material, safe = gameText.BookMaterial()
+    local rawTitle = safe and gameText.PlainText(Try(ItemTextGetItem))
+    if rawTitle ~= book.rawTitle then gameText.book = nil; return end
+    local page = gameText.Id(Try(ItemTextGetPage))
+    if not page then return end
+    local names = gameText.OwnNames()
+    local title = names and Label(Prose(rawTitle, 200, names), 200)
+    if not title then return end
+    local subject = book.object and ("o:" .. book.object) or book.item and ("i:" .. book.item)
+        or ("t:" .. gameText.Checksum(title))
+    local key = subject .. ":" .. page
+    if gameText.Index("read").seen[key] then return end
+    local text = Prose(gameText.PlainText(Try(ItemTextGetText)), TEXT_MAX.read, names)
+    if not text then return end
+    local ok, more = pcall(ItemTextHasNextPage)
+    local last = ok and not Secret(more) and (more == false or more == nil)
+    gameText.Record("read", key, { item = book.item, object = book.object, title = title, page = page,
+                                   last = last and true or nil, material = material, text = text })
+end
+
+-- Keep a candidate only from a secure post-hook, using the item ID and a cached item name. A
+-- synchronous BEGIN before this post-hook, a stale use or a different title can still record by title.
+function gameText.BookUse(id)
+    gameText.bookUse = nil
+    local d = DB()
+    if not (d and d.on and d.agreed and id and gameText.Room()) or gameText.InMail() then return end
+    local getName = C_Item and C_Item.GetItemNameByID or GetItemInfo
+    local title = gameText.PlainText(Try(getName, id))
+    local clock = Num(Try(GetTime))
+    if Label(title, 200) and clock then gameText.bookUse = { id = id, title = title, at = clock } end
 end
 
 local function QuestText(fields)                -- { title = GetTitleText, ... } -> { title = "...", ... } or nil
@@ -1789,10 +1864,16 @@ local function QuestGiverSeen()                 -- the quest window is open with
     pcall(Sighting, "npc", true)                -- the same creature: the 30 s throttle makes this a no-op
 end
 
-function handlers.MAIL_SHOW() gameText.mail = true end
+function handlers.MAIL_SHOW()
+    gameText.mail, gameText.book, gameText.bookUse = true, nil, nil
+end
 function handlers.MAIL_CLOSED() gameText.mail = false end
 function handlers.GOSSIP_SHOW() gameText.Gossip("gossip") end
 function handlers.QUEST_GREETING() gameText.Gossip("greeting") end
+
+function handlers.ITEM_TEXT_BEGIN() gameText.BookBegin() end
+function handlers.ITEM_TEXT_READY() gameText.BookPage() end
+function handlers.ITEM_TEXT_CLOSED() gameText.book = nil end
 
 function handlers.QUEST_DETAIL(startItem)       -- (questStartItemID): the item that started it, 0 when none
     QuestGiverSeen()
@@ -1892,6 +1973,7 @@ local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
                     "GOSSIP_SHOW", "QUEST_GREETING", "MAIL_SHOW", "MAIL_CLOSED",
+                    "ITEM_TEXT_BEGIN", "ITEM_TEXT_READY", "ITEM_TEXT_CLOSED",
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                     "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
@@ -1907,9 +1989,11 @@ local function Enable()
     end
     if not hookedBags and type(hooksecurefunc) == "function" and C_Container and type(C_Container.UseContainerItem) == "function" then
         hookedBags = pcall(hooksecurefunc, C_Container, "UseContainerItem", function(bag, slot)
-            local info = C_Container.GetContainerItemInfo and Try(C_Container.GetContainerItemInfo, bag, slot)
-            local id = type(info) == "table" and Int(info.itemID, 1)
+            bag, slot = Plain(bag), Int(slot, 1)
+            local info = type(bag) == "number" and slot and Plain(Try(C_Container.GetContainerItemInfo, bag, slot))
+            local id = type(info) == "table" and gameText.Id(info.itemID)
             if id then lastUsedItem.id, lastUsedItem.at = id, Now() end
+            pcall(gameText.BookUse, id)
         end)
     end
     if not taxi.hooked and type(hooksecurefunc) == "function" and type(TakeTaxiNode) == "function" then
@@ -1922,7 +2006,7 @@ local function Disable()
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
     taxi.Reset()
-    gameText.mail = false
+    gameText.mail, gameText.book, gameText.bookUse = false, nil, nil
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
 end
 

@@ -600,6 +600,16 @@ function observationEvent(e) {
     if ((npc === undefined) === (object === undefined) || !text || !OBS_GOSSIP_KINDS.includes(e.kind)) return null;
     return { ...base, ...pick({ npc, object }), kind: e.kind, text, ...place() };
   }
+  if (e.type === "read") {
+    const item = obsInt(e.item, 1), object = obsInt(e.object, 1), page = obsInt(e.page, 1);
+    const title = obsLabel(e.title, 200), text = obsProse(e.text, 8000);
+    const material = obsLabel(e.material, 40);
+    if ((item !== undefined && object !== undefined) || page === undefined || !title?.trim() || !text) return null;
+    if (["creator", "author", "sender", "mail"].some((key) => e[key] != null && e[key] !== "" && e[key] !== false)
+        || (typeof e.material === "string" && /mail|letter|stationery/i.test(e.material))) return null;
+    return { ...base, ...pick({ item, object }), title, page, ...(e.last === true ? { last: true } : {}),
+             ...(material?.trim() ? { material } : {}), text, ...place() };
+  }
   if (e.type === "flight") {
     if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;
     if (!Number.isInteger(e.sec) || e.sec < OBS_FLIGHT_SEC[0] || e.sec > OBS_FLIGHT_SEC[1]) return null;

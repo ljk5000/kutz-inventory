@@ -272,6 +272,94 @@ do
   print("OK   gossip and greetings, normalized subjects, privacy guards, saved FIFO and size gate")
 end
 
+-- Readable pages: provenance, gating before the body read, and persistent per-page dedup.
+do
+  local secret = {}
+  local function library(opts)
+    opts = opts or {}
+    opts.globals = {
+      issecretvalue = function(v) return v == secret end,
+      C_Container = { UseContainerItem = function() end, GetContainerItemInfo = function(bag, slot)
+        assert(bag == 0 and slot == 1, "only safe hook arguments")
+        return { itemID = 54000 }
+      end },
+      C_Item = { GetItemNameByID = function(id) if id == 54000 then return "Example Journal" end end },
+    }
+    local h = fresh(opts)
+    local s = h.s
+    s.title, s.page, s.material, s.more, s.bodies = "Example Journal", 1, "Parchment", true, 0
+    s.body = "A page for Tester."
+    h.G.ItemTextGetItem = function() return s.title end
+    h.G.ItemTextGetText = function() s.bodies = s.bodies + 1; return s.body end
+    h.G.ItemTextGetCreator = function() return s.creator end
+    h.G.ItemTextGetMaterial = function() return s.material end
+    h.G.ItemTextGetPage = function() return s.page end
+    h.G.ItemTextHasNextPage = function() return s.more end
+    function h.open() h.event("ITEM_TEXT_BEGIN"); h.event("ITEM_TEXT_READY") end
+    return h
+  end
+  local h = library()
+  h.event("ITEM_TEXT_READY")
+  assert(h.s.bodies == 0, "no observed begin")
+  h.s.units.npc = { guid = NODE }
+  h.open()
+  local e = h.events()[1]
+  assert(e and e.object == 1617 and e.type == "read" and e.title == "Example Journal" and e.text == "A page for $N."
+    and e.page == 1 and e.last == nil and e.material == "Parchment", h.db().lastError)
+  h.event("ITEM_TEXT_READY")
+  assert(h.s.bodies == 1 and h.db().n == 1, "repeats leave the body unread")
+  h.s.page, h.s.more = 2, false
+  h.event("ITEM_TEXT_READY")
+  assert(h.events()[2].last == true and h.events()[2].object == 1617, "last page of the same object")
+
+  h.event("ITEM_TEXT_CLOSED")
+  h.s.units.npc, h.s.page = nil, 1
+  h.hooks.UseContainerItem(secret, secret)
+  h.hooks.UseContainerItem(0, 1)
+  h.open()
+  assert(h.events()[3].item == 54000 and not h.events()[3].object, "a matching recent bag use")
+  h.hooks.UseContainerItem(0, 1)
+  h.s.clock = h.s.clock + 2
+  h.open()
+  assert(h.events()[4].item == nil and h.events()[4].object == nil, "a stale bag use leaves a title-only event")
+  h.hooks.UseContainerItem(0, 1)
+  h.s.units.npc, h.s.page = { guid = NODE }, 2
+  h.open()
+  assert(h.events()[5].page == 2 and h.events()[5].item == nil and h.events()[5].object == nil, "competing sources")
+  h.db().events = {}
+  local r = library({ db = h.db() })
+  r.open()
+  assert(r.s.bodies == 0 and #r.events() == 0, "title and page dedup across sessions and pruning")
+  r.s.page, r.s.body = 4, string.rep("a", 7999) .. "é"
+  r.open()
+  assert(#r.events()[1].text == 7999, "UTF-8 page cap")
+
+  local function never(setup)
+    local n = library()
+    setup(n)
+    assert(n.s.bodies == 0 and #n.events() == 0 and not n.db().lastError, "unsafe body left unread")
+  end
+  never(function(n) n.event("MAIL_SHOW"); n.event("ITEM_TEXT_BEGIN"); n.event("MAIL_CLOSED"); n.event("ITEM_TEXT_READY") end)
+  never(function(n) n.event("ITEM_TEXT_BEGIN"); n.event("MAIL_SHOW"); n.event("MAIL_CLOSED"); n.event("ITEM_TEXT_READY") end)
+  never(function(n)
+    n.G.InboxFrame = { IsVisible = function() return true end }; n.event("ITEM_TEXT_BEGIN")
+    n.G.InboxFrame = nil; n.event("ITEM_TEXT_READY")
+  end)
+  never(function(n) n.s.creator = "Examplewriter"; n.hooks.UseContainerItem(0, 1); n.open() end)
+  never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.creator = secret; n.event("ITEM_TEXT_READY") end)
+  never(function(n) n.G.ItemTextGetCreator = nil; n.open() end)
+  never(function(n) n.G.ItemTextGetCreator = function() error("not readable") end; n.open() end)
+  never(function(n) n.s.material = "ExampleStationery"; n.open() end)
+  never(function(n) n.s.material = secret; n.open() end)
+  never(function(n) n.s.page = secret; n.open() end)
+  never(function(n) n.event("ITEM_TEXT_BEGIN"); n.event("ITEM_TEXT_CLOSED"); n.event("ITEM_TEXT_READY") end)
+  never(function(n) n.event("ITEM_TEXT_BEGIN"); n.s.title = "Different Text"; n.event("ITEM_TEXT_READY") end)
+  local full = library({ db = { events = { { t = 1767225600, padding = string.rep("x", 1000000) } } } })
+  full.open()
+  assert(full.s.bodies == 0 and not full.db().textSeen, "half cap skips reading")
+  print("OK   game-readable pages, bag or object provenance, per-page dedup, never read mail or secret creator")
+end
+
 -- 1) on by default for a new install only: a first load makes the table and records without any command; a table
 --    from the opt-in days keeps its choice (off stays off, on stays on), only a missing setting becomes on; an off
 --    survives reloads

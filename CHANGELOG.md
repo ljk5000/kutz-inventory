@@ -4,7 +4,9 @@
 
 - Record game-authored gossip and quest greetings for creatures and objects while drop tracking is on and there is room for text. The player's name becomes $N. Gossip options, player chat and mail are excluded.
 
-Inventory export 3.12.0 (default) adds `gossip` observations. The observations section stays `v: 1`.
+- Record pages of game-authored books and readable objects using the title, page number and a source ID when known. The recorder checks for mail and player-written letters before reading a page.
+
+Inventory export 3.12.0 (default) adds `gossip` and `read` observations. The observations section stays `v: 1`.
 
 ## KutzInventory 1.18.0
 

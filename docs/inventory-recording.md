@@ -35,6 +35,8 @@ The Companion polls saved-file timestamps/sizes every second; it starts with an 
 
 In 1.19.0 drop tracking also records game-authored gossip and quest greetings for identified creatures and objects. Your name is replaced with `$N` in this prose. Gossip options and player chat are excluded, and mail is never read by this recorder. The text must fit below the half-cap gate, and repeats are suppressed across sessions by a bounded saved index.
 
+Game-authored book and object pages follow the same text gate and saved dedup rules. The recorder checks mailbox state, creator and material before reading any page body. A player-written letter saved in a bag is excluded too. An unidentified game-authored source can use the title alone.
+
 `Raids.lua` records only manually tracked raid strings within their active window while grouped/instanced. It includes group rosters and system loot messages, with other players' names. `Prices.lua` records vendor prices and manual AH scans independently of the observation switch. No module sends HTTP requests; desktop upload is separate.
 
 ## Hearth, Legacy Trees and identity

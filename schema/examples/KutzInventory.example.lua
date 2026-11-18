@@ -676,7 +676,7 @@ KutzInventoryObsDB = {
 	["noted"] = true,
 	["addon"] = "1.19.0",
 	["prefix"] = "k1f9c2",
-	["n"] = 26,
+	["n"] = 27,
 	["events"] = {
 		{
 			["id"] = "k1f9c2-000017",
@@ -1018,6 +1018,30 @@ KutzInventoryObsDB = {
 			},
 		}, -- [10]
 		{
+			["id"] = "k1f9c2-000027",
+			["t"] = 1762906400,
+			["b"] = "1.60.1.70888",
+			["type"] = "read",
+			["object"] = 1617,
+			["title"] = "Example Field Journal",
+			["page"] = 1,
+			["material"] = "Parchment",
+			["last"] = true,
+			["text"] = "The watch keeps the northern road open. The lanterns are lit each evening.",
+			["where"] = {
+				["uiMap"] = 1453,
+				["x"] = 0.7081,
+				["y"] = 0.7254,
+			},
+			["who"] = {
+				["level"] = 20,
+				["class"] = 8,
+				["faction"] = "Alliance",
+				["name"] = "Exampleobserver",
+				["surname"] = "Examplefamily",
+			},
+		}, -- [11]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -1026,7 +1050,7 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [11]
+		}, -- [12]
 	},
 	["npcs"] = {
 		[525] = {

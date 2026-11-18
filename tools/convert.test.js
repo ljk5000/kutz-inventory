@@ -199,7 +199,7 @@ test("observations: the example's events are exported in the documented shape; t
   assert.equal(obs.v, 1); assert.equal(obs.addon, "1.19.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -292,6 +292,20 @@ test("observations 3.12.0: gossip projects only valid subjects and safe prose", 
   assert.equal(obs([{ ...event, npc: undefined, object: 12 }]).events[0].object, 12);
   for (const bad of [{ object: 12 }, { npc: 0 }, { kind: "option" }, { text: " " }, { text: "|unsafe" },
                      { text: "Player-1-25" }, { text: "x".repeat(4001) }]) assert.equal(obs([{ ...event, ...bad }]), null);
+});
+
+test("observations 3.12.0: read events omit unknown fields and reject unsafe pages", () => {
+  const event = { id: "abc123-1", t: 100, type: "read", title: "Example Journal", page: 1, text: "A page for $N.",
+                  last: true, material: "Parchment", guid: "discard" };
+  const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
+  assert.deepEqual(obs({}).events[0], { id: event.id, t: 100, type: "read", title: event.title, page: 1,
+    last: true, material: "Parchment", text: event.text, where: {}, who: {} });
+  assert.deepEqual(obs({ item: 2, last: false, material: "|unsafe" }).events[0],
+    { id: event.id, t: 100, type: "read", item: 2, title: event.title, page: 1, text: event.text, where: {}, who: {} });
+  for (const bad of [{ item: 2, object: 3 }, { page: 0 }, { title: "Item-0-1" }, { title: "x".repeat(201) },
+                     { text: "x".repeat(8001) }, { creator: "Examplewriter" }, { mail: true }, { material: "Stationery" }]) {
+    assert.equal(obs(bad), null);
+  }
 });
 
 test("observations 3.11.0: taxi and flight events keep only the documented fields; a doubtful list is dropped whole", () => {

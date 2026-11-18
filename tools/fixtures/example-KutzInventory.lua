@@ -124,7 +124,7 @@ KutzInventoryDB = {
 -- the same corpse skinned, a quest accepted and turned in (with its level, group size, XP and reputation changes), a
 -- vendor, a class trainer, a flight master's map, a flight from it, and one broken event the exporter leaves out.
 KutzInventoryObsDB = {
-  v = 1, on = true, agreed = true, noted = true, addon = "1.19.0", prefix = "k1f9c2", n = 26,
+  v = 1, on = true, agreed = true, noted = true, addon = "1.19.0", prefix = "k1f9c2", n = 27,
   events = {
     { id = "k1f9c2-000017", t = 1762905600, b = "1.60.1.70888", type = "loot",
       src = { kind = "boss", npc = 11502, guid = "Creature-0-4170-409-1234-11502-000012ABCD", via = "slot" },
@@ -168,6 +168,11 @@ KutzInventoryObsDB = {
       who = { level = 20, class = 8, faction = "Alliance" } },
     { id = "k1f9c2-000026", t = 1762906350, b = "1.60.1.70888", type = "gossip", npc = 352, kind = "gossip",
       text = "Welcome back, $N. The northern road is clear.", where = { uiMap = 1453, x = 0.7081, y = 0.7254 },
+      who = { level = 20, class = 8, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" } },
+    { id = "k1f9c2-000027", t = 1762906400, b = "1.60.1.70888", type = "read", object = 1617,
+      title = "Example Field Journal", page = 1, material = "Parchment", last = true,
+      text = "The watch keeps the northern road open. The lanterns are lit each evening.",
+      where = { uiMap = 1453, x = 0.7081, y = 0.7254 },
       who = { level = 20, class = 8, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" } },
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },

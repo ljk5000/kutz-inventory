@@ -83,6 +83,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
 - `gossip` (3.12.0): game-authored NPC or object gossip and quest greetings ([below](#game-text-3120)).
+- `read` (3.12.0): game-authored pages of books and readable objects ([below](#game-text-3120)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -135,6 +136,23 @@ KutzInventory 1.19.0 records these events with the usual `id`, `t`, `b?`, `where
 ```
 
 The recorder trims prose, removes control characters other than line feeds, and caps it in UTF-8 bytes on a character boundary. The exporter and schema enforce string-length limits. The exporter drops events without a valid required field or with both subject IDs valid, and projects only the documented fields. GUIDs are never stored in these events.
+
+**Readable pages** are read at `ITEM_TEXT_READY` after an observed `ITEM_TEXT_BEGIN`. A mailbox opened at any point invalidates the reading, including when it closes before the page is ready. The recorder checks the mail event state and visible mail frames, and requires successful `ItemTextGetCreator()` and `ItemTextGetMaterial()` checks at begin and at each page before reading any body. Non-empty or secret creator values, unavailable or secret checks, and materials naming mail, letters or stationery are refused. Title and prose replace the recording character's name with `$N`. The title must match across the open and page events. Dedup uses object ID, item ID or a checksum of the normalized title, with separate namespaces, plus the page number. A page revisited with a different body deduplicates on the same key.
+
+```text
+{ id, t, b?, type: "read", where, who,
+  item?:     integer 1-2147483647   cached bag item ID from a secure UseContainerItem post-hook within 1 second before
+                                    the open, with matching title and no "npc" GUID
+  object?:   integer 1-2147483647   game object ID from UnitGUID("npc") on open
+  title:     label 1-200           ItemTextGetItem(), required even when a source ID is known
+  page:      integer 1-2147483647   ItemTextGetPage(), first page is 1
+  last?:     true                  successful ItemTextHasNextPage() returns plain false or nil
+  material?: label 1-40            ItemTextGetMaterial() when nonempty and usable
+  text:      prose 1-8000          ItemTextGetText(), line breaks allowed; no pipe markup, GUID shapes or other control characters
+}
+```
+
+At most one source ID is present. When provenance is ambiguous or unavailable, a safely identified game-authored page has the title alone. Labels have no pipe markup, GUID shapes or control characters. Text and labels are capped in UTF-8 bytes by the addon. Consumers render these strings as text. The exporter drops events without usable required fields, with both IDs valid, or with explicit mail or creator metadata. Invalid optional values are omitted.
 
 ### Flight masters and flights (3.11.0)
 
