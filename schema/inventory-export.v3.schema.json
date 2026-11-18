@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/inventory-export.v3.schema.json",
   "title": "KutzInventory export 3.x",
-  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises.",
+  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, statistics, PvP or achievement points, and equipped items are only slotId, id and link. Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took).",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -1288,7 +1288,7 @@
     },
     "observations": {
       "type": "object",
-      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Never gold (no coin loot, quest money or player money), chat, guild or anything about other players. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know.",
+      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Never gold (no coin loot, quest money or player money), chat, guild or anything about other players. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know.",
       "required": [
         "v",
         "addon",
@@ -2047,6 +2047,155 @@
                   }
                 }
               }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Since 3.11.0: a flight master's map was opened (TAXIMAP_OPENED): every node this character can fly to from the flight master's own node, with its price. Node ids come from C_TaxiMap.GetAllTaxiNodes, joined by slot to the window's own slot functions; when the client gives no node ids, the two disagree, there is not exactly one current node, or more than 200 nodes are reachable, nothing is recorded. The same flight master, node, list of nodes and prices and rx is recorded at most once in 7 days. Costs are game prices, not the player's money. No node names, no GUID.",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "npc",
+            "node",
+            "where",
+            "who",
+            "to"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "where": {
+              "$ref": "#/$defs/observationWhere"
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
+            },
+            "type": {
+              "const": "taxi"
+            },
+            "npc": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The flight master's NPC ID, from its GUID (the GUID itself is never kept)."
+            },
+            "node": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The flight master's own node: the taxi node id (TaxiNodes) the window marks as current."
+            },
+            "rx": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8,
+              "description": "The flight master's reaction to the recording character, UnitReaction(\"npc\", \"player\"): 1 hated, 4 neutral, 5 friendly, 6 honored, 7 revered, 8 exalted. Costs are what the game showed, which already include this character's reputation discount. Absent when the client did not say."
+            },
+            "to": {
+              "type": "array",
+              "maxItems": 200,
+              "description": "Every node reachable from node (the window's REACHABLE nodes), sorted by node, each once and never node itself. Nodes the character has not discovered or cannot reach are not listed. Empty when none is reachable yet.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "node",
+                  "cost"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "node": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647,
+                    "description": "The taxi node id."
+                  },
+                  "cost": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483647,
+                    "description": "Copper, TaxiNodeCost as the window shows it to this character. A game price, not the player's money."
+                  },
+                  "hops": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "How many flight legs the route takes (GetNumRoutes). Absent when the client gave none."
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Since 3.11.0: a flight this character took, from boarding to landing. Started by TakeTaxiNode in a taxi window that was read (the destination), PLAYER_CONTROL_LOST and UnitOnTaxi true; ended by PLAYER_CONTROL_GAINED with UnitOnTaxi false. Recorded only when the landing is known to be at to: the position on the taxi map is by that node (no other node closer), or, when the position could not be read, the next taxi window within 2 minutes is at to. Once per from and to in 30 days. No where: never a position or route trail.",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "who",
+            "from",
+            "to",
+            "sec"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When the flight landed, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
+            },
+            "type": {
+              "const": "flight"
+            },
+            "from": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The taxi node id the flight started at (the flight master's own node)."
+            },
+            "to": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The taxi node id it landed at, the one chosen in the window. Never the same as from."
+            },
+            "sec": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 3600,
+              "description": "Seconds from boarding to landing (GetTime, rounded), as this character flew it. Flights under 5 seconds or over an hour are not recorded."
             }
           }
         }

@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.10.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.11.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -199,7 +199,7 @@ test("observations: the example's events are exported in the documented shape; t
   assert.equal(obs.v, 1); assert.equal(obs.addon, "1.8.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -217,6 +217,11 @@ test("observations: the example's events are exported in the documented shape; t
       { s: 8427, name: "Blizzard", rank: "Rank 2", lv: 28, needs: ["Blizzard"], cost: 4000, st: "u" },
       { s: 116, name: "Frostbolt", rank: "Rank 1", lv: 4, cost: 100, st: "k" },
       { name: "Made-up Ward", lv: 30, cost: 10, st: "a" }] });
+  assert.deepEqual(obs.events[7], { id: "k1f9c2-000024", t: 1762906100, b: "1.60.1.70888", type: "taxi", npc: 352, node: 2, rx: 5,
+    where: { map: 0, uiMap: 1453, x: 0.7081, y: 0.7254 }, who: { level: 20, class: 8, faction: "Alliance" },
+    to: [{ node: 4, cost: 1050, hops: 2 }, { node: 5, cost: 270, hops: 1 }, { node: 6, cost: 1800, hops: 3 }] });
+  assert.deepEqual(obs.events[8], { id: "k1f9c2-000025", t: 1762906300, b: "1.60.1.70888", type: "flight", from: 2, to: 5, sec: 181,
+    who: { level: 20, class: 8, faction: "Alliance" } });
   assert.ok(!("observations" in convert.convertSavedVariables([LUA], { format: 2 }).inventory), "2.x must not change");
 });
 
@@ -277,6 +282,66 @@ test("observations 3.9.0: one 60-row trainer event is a few kilobytes of JSON", 
   assert.ok(bytes > 4000 && bytes < 6500, "one 60-row trainer event: " + bytes + " bytes");
 });
 
+test("observations 3.11.0: taxi and flight events keep only the documented fields; a doubtful list is dropped whole", () => {
+  const G = "Creature-0-4170-0-1234-352-000012AB10";
+  const WHERE = `where = { map = 0, uiMap = 1429, x = 0.4123, y = 0.6543 }`;
+  const obs = convert.convertSavedVariables([obsFile(`{
+    { id = "taxi-1", t = 100, type = "taxi", npc = 352, node = 2, rx = 5, guid = "${G}", money = 9, name = "Made-up Keep", ${WHERE}, ${WHO},
+      to = { { node = 5, cost = 950, hops = 2, name = "Made-up Port" }, { node = 4, cost = 210, hops = 1 }, { node = 9, cost = 0, hops = 0 },
+             { node = 11, cost = 30, hops = 101 }, { node = 12, cost = 40, hops = 1.5 } } },
+    { id = "taxi-2", t = 101, type = "taxi", npc = 352, node = 2, rx = 9, ${WHO}, to = {} },
+    { id = "taxi-3", t = 102, type = "taxi", npc = 352, node = 2, ${WHO}, to = { { node = 4, cost = 210 }, { node = 4, cost = 210 } } },
+    { id = "taxi-4", t = 103, type = "taxi", npc = 352, node = 2, ${WHO}, to = { { node = 2, cost = 0 } } },
+    { id = "taxi-5", t = 104, type = "taxi", npc = 352, node = 2, ${WHO}, to = { { node = 4 } } },
+    { id = "taxi-6", t = 105, type = "taxi", npc = 352, node = 2, ${WHO}, to = { { node = 4, cost = -1 } } },
+    { id = "taxi-7", t = 106, type = "taxi", npc = 352, node = 2, ${WHO}, to = { { name = "Made-up Port", cost = 1 } } },
+    { id = "taxi-8", t = 107, type = "taxi", node = 2, ${WHO}, to = {} },
+    { id = "taxi-9", t = 108, type = "taxi", npc = 352, ${WHO}, to = {} },
+    { id = "taxi-10", t = 109, type = "taxi", npc = 352, node = 2, ${WHO} },
+    { id = "flyt-1", t = 200, type = "flight", from = 2, to = 4, sec = 95, money = 210, ${WHERE}, ${WHO} },
+    { id = "flyt-2", t = 201, type = "flight", from = 2, to = 2, sec = 95, ${WHO} },
+    { id = "flyt-3", t = 202, type = "flight", from = 2, to = 4, sec = 4, ${WHO} },
+    { id = "flyt-4", t = 203, type = "flight", from = 2, to = 4, sec = 3601, ${WHO} },
+    { id = "flyt-5", t = 204, type = "flight", from = 2, to = 4, sec = 95.5, ${WHO} },
+    { id = "flyt-6", t = 205, type = "flight", from = 0, to = 4, sec = 95, ${WHO} },
+    { id = "flyt-7", t = 206, type = "flight", from = 2, sec = 95, ${WHO} },
+    { id = "flyt-8", t = 207, type = "flight", from = 2, to = 4, sec = 5, ${WHO} },
+  }`)]).inventory.observations;
+  assert.deepEqual(obs.events.map((e) => e.id), ["taxi-1", "taxi-2", "flyt-1", "flyt-8"], "a doubtful list or flight is dropped whole");
+  const [t, empty, f] = obs.events;
+  assert.deepEqual(t, { id: "taxi-1", t: 100, type: "taxi", npc: 352, node: 2, rx: 5, where: { map: 0, uiMap: 1429, x: 0.4123, y: 0.6543 },
+    who: { level: 60, class: 4, faction: "Alliance" },
+    to: [{ node: 4, cost: 210, hops: 1 }, { node: 5, cost: 950, hops: 2 }, { node: 9, cost: 0 }, { node: 11, cost: 30 }, { node: 12, cost: 40 }] },
+    "sorted by node; a bad hops only loses hops");
+  assert.deepEqual(empty.to, []); assert.ok(!("rx" in empty), "rx only 1..8");
+  assert.deepEqual(f, { id: "flyt-1", t: 200, type: "flight", from: 2, to: 4, sec: 95, who: { level: 60, class: 4, faction: "Alliance" } },
+    "a flight never has a where");
+  assert.ok(!/Creature-|money|Made-up/.test(JSON.stringify(obs)), "no GUID, money or node name");
+  // at most 200 nodes: a longer list is dropped, not cut (a cut list would read as nodes unreachable)
+  const nodes = (n) => Array.from({ length: n }, (_, i) => `{ node = ${i + 10}, cost = ${i} }`).join(",");
+  const capped = (n) => convert.convertSavedVariables([obsFile(`{ { id = "taxi-11", t = 1, type = "taxi", npc = 352, node = 2, ${WHO},
+    to = { ${nodes(n)} } } }`)]).inventory.observations;
+  assert.equal(capped(200).events[0].to.length, 200);
+  assert.equal(capped(201), undefined);
+});
+
+// The size of one taxi event with 40 reachable nodes (a well-travelled character's continent) and of one flight event,
+// as exported (compact JSON, the same who and where as every event)
+test("observations 3.11.0: one 40-node taxi event is about 1.6 KB, a flight event about 200 bytes", () => {
+  const to = Array.from({ length: 40 }, (_, i) => `{ node = ${10 + i * 7}, cost = ${[85, 210, 950, 1400, 3200, 5100][i % 6] * (1 + (i % 3))},` +
+    ` hops = ${1 + (i % 4)} }`).join(",");
+  const who = `who = { level = 60, class = 4, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" }`;
+  const obs = convert.convertSavedVariables([obsFile(`{
+    { id = "k1f9c2-000124", t = 1762906100, b = "1.60.1.70888", type = "taxi", npc = 352, node = 2, rx = 5,
+      where = { map = 0, uiMap = 1429, x = 0.4123, y = 0.6543 }, ${who}, to = { ${to} } },
+    { id = "k1f9c2-000125", t = 1762906300, b = "1.60.1.70888", type = "flight", from = 2, to = 45, sec = 181, ${who} } }`)])
+    .inventory.observations;
+  const [taxi, flight] = obs.events.map((e) => Buffer.byteLength(JSON.stringify(e)));
+  assert.equal(obs.events[0].to.length, 40);
+  assert.ok(taxi > 1200 && taxi < 1700, "one 40-node taxi event: " + taxi + " bytes");
+  assert.ok(flight > 120 && flight < 220, "one flight event: " + flight + " bytes");
+});
+
 test("observations: absent when the module is missing, off with nothing recorded, or has only broken events", () => {
   assert.ok(!("observations" in convert.convertSavedVariables(["KutzInventoryDB = { chars = {} }"]).inventory));
   assert.ok(!("observations" in convert.convertSavedVariables([obsFile("{}")]).inventory));
@@ -327,7 +392,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.10.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.11.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });

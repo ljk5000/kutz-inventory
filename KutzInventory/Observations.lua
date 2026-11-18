@@ -1,5 +1,5 @@
--- KutzInventory / Observations: default-on recording of what drops, what quests give, what vendors sell and what
--- trainers teach, plus a summary of the NPCs seen, for cr0m's item database. On from the first load of a new install; an
+-- KutzInventory / Observations: default-on recording of what drops, what quests give, what vendors sell, what
+-- trainers teach and where flight masters fly, plus a summary of the NPCs seen, for cr0m's item database. On from the first load of a new install; an
 -- install from the opt-in days keeps its choice (off stays off). /kinv track drops off stops all of it (the NPC summary too)
 -- and stays off across reloads; /kinv track shows the status.
 --
@@ -11,7 +11,7 @@
 --   prefix: random, made once per install; the event ids start with it and the export names the npcs summary's install by it.
 --   on: a new table starts true (KutzInventory 1.13.0); an existing one keeps what it holds, only a missing on becomes
 --   true. Recording needs on and agreed.
--- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor"|"trainer",
+-- Each event: { id = prefix .. "-" .. counter, t = time(), b = "1.60.1.70888", type = "loot"|"quest"|"vendor"|"trainer"|"taxi"|"flight",
 --               where = { map, uiMap, itype, difficulty, x, y }, who = { level, class, faction, name, surname }, ... }
 --   who.name / who.surname: this character's own name (never anyone else's), so cr0m can credit the right character.
 --   items carry link = "|cffa335ee|Hitem:19019|h[Name]|h|r": only the item's quality colour, id and name, so cr0m can name
@@ -37,9 +37,19 @@
 --           s = spell id (from the tooltip data; left out when the client gives none), st = "a" available, "u" not
 --           yet, "k" known. The hunter's Beast Training window is never recorded. The same trainer with the same list
 --           (st aside, so learning a spell changes nothing) and rx is recorded at most once in 7 days.
+--   taxi    npc, node (the flight master's own node, the window's current one), rx, to = { { node, cost, hops } }: every
+--           node the flight map lists as reachable, sorted by node, with its price as shown and the number of legs. Node
+--           ids come from C_TaxiMap.GetAllTaxiNodes(GetTaxiMapID()), joined by slotIndex to TaxiNodeGetType / TaxiNodeCost
+--           / GetNumRoutes; nothing is recorded without them (names are not ids), nor when the two views disagree or more
+--           than 200 nodes are reachable. The same npc, node, prices and rx at most once in 7 days (saved events).
+--   flight  from, to (node ids), sec (whole seconds), and no where: one flight's duration, from PLAYER_CONTROL_LOST with
+--           UnitOnTaxi true soon after TakeTaxiNode (hooked, never called) picked "to" in a taxi window we read, to
+--           PLAYER_CONTROL_GAINED with UnitOnTaxi false; only when the landing position is by "to" (no other node closer),
+--           or, when the position cannot be read, the next taxi window within 2 minutes is at "to". Never a position
+--           trail. One per from/to in 30 days (saved events).
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
---           They are game prices, not the player's money.
+--           They are game prices, not the player's money (taxi costs too).
 -- Never recorded: coin loot, quest money, the player's money, other players' names or GUIDs, chat, guild. (Loot chat is
 -- read only for this player's own "You won" line, kept as the won flag; who else rolled or won is never kept.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
@@ -924,6 +934,205 @@ local function SoonTrainer()                    -- one read about 0.5 s after th
 end
 
 ---------------------------------------------------------------------------
+-- flight masters: where a flight master's map can take this character and at what price; how long a flight takes
+---------------------------------------------------------------------------
+-- AGAIN: the same flight master, node, prices and rx once a week; FLOWN: one flight time per from/to in 30 days; PICK: a
+-- chosen destination waits this long for the flight to start; BOARD: tries (0.5 s apart) for UnitOnTaxi to say so; LAND:
+-- the same at landing; CONFIRM: a landing whose position could not be read waits this long for the next taxi window;
+-- NEAR: how close (taxi-map units, 0-1) the landing must be to the chosen node, and no other node closer
+local TAXI = { AGAIN = 7 * 86400, NODES = 200, FLOWN = 30 * 86400, PICK = 10, BOARD = 10, LAND = 6, CONFIRM = 120,
+               NEAR = 0.01, SEC_MIN = 5, SEC_MAX = 3600 }
+-- window: the taxi window read when it opened { npc, from, map, slots = { [slot] = node }, pos = { [node] = { x, y } } };
+-- pick: the destination chosen in it; flight: the flight under way; landed: a landing waiting for the next taxi window
+local taxi = { window = nil, pick = nil, flight = nil, landed = nil, seen = nil, flown = nil, hooked = false, token = 0 }
+
+local function TaxiPos(n)                       -- a node's position on the taxi map, or nil
+    local p = type(n) == "table" and Plain(n.position) or nil
+    if type(p) ~= "table" then return nil end
+    local x, y = Num(p.x), Num(p.y)
+    if not (x and y) and type(p.GetXY) == "function" then x, y = Try(p.GetXY, p); x, y = Num(x), Num(y) end
+    if x and y and x >= 0 and x <= 1 and y >= 0 and y <= 1 and (x > 0 or y > 0) then return { x, y } end
+end
+
+-- The open taxi window: node ids from C_TaxiMap.GetAllTaxiNodes(GetTaxiMapID()), joined by slotIndex to the slot functions
+-- (TaxiNodeGetType, TaxiNodeCost, GetNumRoutes). -> { from, map, to = { { node, cost, hops } } sorted by node, slots, pos },
+-- or nil when anything needed is missing or doubtful: no node ids (names are not ids), no single current node, a reachable
+-- slot no node maps to or without a cost, a slot whose two names disagree, or more than 200 reachable nodes.
+function taxi.Read()
+    local T, map, count = C_TaxiMap, Int(Try(GetTaxiMapID), 1), Int((Try(NumTaxiNodes)))
+    if not (T and type(T.GetAllTaxiNodes) == "function" and map and count and count > 0) then return nil end
+    local list = Try(T.GetAllTaxiNodes, map)
+    if type(list) ~= "table" or Secret(list) then return nil end
+    local bySlot, ids, w = {}, {}, { map = map, to = {}, slots = {}, pos = {} }
+    for _, n in ipairs(list) do
+        local slot, id = type(n) == "table" and Int(n.slotIndex, 1), type(n) == "table" and Int(n.nodeID, 1)
+        if slot and id then
+            if bySlot[slot] or ids[id] then return nil end
+            bySlot[slot], ids[id], w.pos[id] = n, true, TaxiPos(n)
+        end
+    end
+    local S = Enum and Enum.FlightPathState
+    for slot = 1, count do
+        local n, kind = bySlot[slot], Plain(Try(TaxiNodeGetType, slot))
+        if type(kind) ~= "string" and n and S then
+            local st = Plain(n.state)
+            kind = st ~= nil and (st == S.Current and "CURRENT" or st == S.Reachable and "REACHABLE") or nil
+        end
+        if kind == "CURRENT" or kind == "REACHABLE" then
+            if not n then return nil end
+            local name, other = Plain(n.name), Plain(Try(TaxiNodeName, slot))
+            if type(name) == "string" and type(other) == "string" and name ~= other then return nil end
+            local id = Int(n.nodeID, 1)
+            if kind == "CURRENT" then
+                if w.from then return nil end
+                w.from = id
+            else
+                local cost = Int((Try(TaxiNodeCost, slot)))
+                if not cost or #w.to >= TAXI.NODES then return nil end
+                w.to[#w.to + 1] = { node = id, cost = cost, hops = Int((Try(GetNumRoutes, slot)), 1) }
+                w.slots[slot] = id
+            end
+        end
+    end
+    if not w.from then return nil end
+    table.sort(w.to, function(a, b) return a.node < b.node end)
+    return w
+end
+
+local function TaxiSig(to)                      -- what makes two readings the same list: each node and its price
+    local parts = {}
+    for i, x in ipairs(type(to) == "table" and to or {}) do
+        parts[i] = type(x) == "table" and (tostring(x.node) .. ":" .. tostring(x.cost)) or "?"
+    end
+    return table.concat(parts, ",")
+end
+
+-- The newest t per key among the saved events, built on first use: taxi (npc|node|prices|rx) and flight (from>to)
+function taxi.Index()
+    if taxi.seen then return end
+    taxi.seen, taxi.flown = {}, {}
+    for _, e in ipairs(DB().events) do
+        if type(e) == "table" and type(e.t) == "number" then
+            local key, into
+            if e.type == "taxi" then
+                key, into = tostring(e.npc) .. "|" .. tostring(e.node) .. "|" .. TaxiSig(e.to) .. "|" .. tostring(e.rx), taxi.seen
+            elseif e.type == "flight" then key, into = tostring(e.from) .. ">" .. tostring(e.to), taxi.flown end
+            if key and (not into[key] or into[key] < e.t) then into[key] = e.t end
+        end
+    end
+end
+
+function taxi.Opened()
+    taxi.window = nil
+    local w = taxi.Read()
+    local landed = taxi.landed                  -- a landing whose position could not be read: this window decides it
+    taxi.landed = nil
+    if landed and w and w.from == landed.to and Now() - landed.at <= TAXI.CONFIRM then taxi.Record(landed) end
+    local what, npc = Giver("npc")
+    if what ~= "npc" then return end            -- not a creature: never recorded
+    pcall(Sighting, "npc", true)
+    if not w then return end
+    w.npc = npc
+    taxi.window = w
+    local rx = Reaction()
+    taxi.Index()
+    local key, now = npc .. "|" .. w.from .. "|" .. TaxiSig(w.to) .. "|" .. tostring(rx), time()
+    if taxi.seen[key] and now - taxi.seen[key] < TAXI.AGAIN then return end
+    taxi.seen[key] = now
+    local e = NewEvent("taxi")
+    e.npc, e.node, e.rx, e.to = npc, w.from, rx, w.to
+    Add(e)
+end
+
+function taxi.Record(f)                        -- a flight both ends of which are known: once per from/to in 30 days
+    taxi.Index()
+    local key, now = f.from .. ">" .. f.to, time()
+    if taxi.flown[key] and now - taxi.flown[key] < TAXI.FLOWN then return end
+    taxi.flown[key] = now
+    local e = NewEvent("flight")
+    e.where, e.from, e.to, e.sec = nil, f.from, f.to, f.sec
+    Add(e)
+end
+
+-- TakeTaxiNode(slot), after the game ran it: the destination chosen in the window we read
+function taxi.Take(slot)
+    local d, w = DB(), taxi.window
+    if not (d and d.on and d.agreed and w) then return end
+    slot = Int(slot, 1)
+    local to = slot and w.slots[slot]
+    taxi.pick = to and to ~= w.from and { from = w.from, to = to, at = Now(), map = w.map, pos = w.pos } or nil
+end
+
+-- At landing: true when the player stands by the chosen node (no other node closer, within NEAR), false when somewhere
+-- else, nil when the position cannot be read on the taxi map
+function taxi.Arrived(f)
+    local M = C_Map
+    local mine = f.pos[f.to]
+    if not (mine and M and M.GetPlayerMapPosition) then return nil end
+    local pos = Try(M.GetPlayerMapPosition, f.map, "player")
+    if type(pos) ~= "table" or Secret(pos) or type(pos.GetXY) ~= "function" then return nil end
+    local x, y = Try(pos.GetXY, pos)
+    x, y = Num(x), Num(y)
+    if not (x and y) or (x == 0 and y == 0) then return nil end
+    local best, bestD
+    for id, p in pairs(f.pos) do
+        local dd = (p[1] - x) ^ 2 + (p[2] - y) ^ 2
+        if not bestD or dd < bestD then best, bestD = id, dd end
+    end
+    return best == f.to and bestD <= TAXI.NEAR ^ 2
+end
+
+-- PLAYER_CONTROL_LOST soon after a destination was chosen: the flight starts if UnitOnTaxi says so (now or within 5 s)
+function taxi.Board()
+    local p = taxi.pick
+    taxi.pick = nil
+    if not p or Now() - p.at > TAXI.PICK then return end
+    taxi.token = taxi.token + 1
+    local token, start, tries = taxi.token, Now(), 0
+    local function check()
+        if token ~= taxi.token then return end
+        if Plain(Try(UnitOnTaxi, "player")) == true then
+            taxi.flight = { from = p.from, to = p.to, start = start, map = p.map, pos = p.pos }
+        elseif tries < TAXI.BOARD and C_Timer and C_Timer.After then
+            tries = tries + 1
+            C_Timer.After(0.5, function() pcall(check) end)
+        end
+    end
+    check()
+end
+
+-- PLAYER_CONTROL_GAINED during a flight: landed once UnitOnTaxi is a plain false (now or within 3 s); kept when it still
+-- says true (control came back mid-flight); dropped when the client will not say
+function taxi.Land()
+    local f = taxi.flight
+    if not f then return end
+    taxi.token = taxi.token + 1
+    local token, at, tries = taxi.token, Now(), 0
+    local function check()
+        if token ~= taxi.token or taxi.flight ~= f then return end
+        local on = Plain(Try(UnitOnTaxi, "player"))
+        if on == true and tries < TAXI.LAND and C_Timer and C_Timer.After then
+            tries = tries + 1
+            C_Timer.After(0.5, function() pcall(check) end)
+            return
+        end
+        if on == true then return end           -- still flying: wait for the next PLAYER_CONTROL_GAINED
+        taxi.flight = nil
+        if on ~= false then return end
+        local sec = math.floor(at - f.start + 0.5)
+        if sec < TAXI.SEC_MIN or sec > TAXI.SEC_MAX then return end
+        local landing, arrived = { from = f.from, to = f.to, sec = sec, at = at }, taxi.Arrived(f)
+        if arrived then taxi.Record(landing)
+        elseif arrived == nil then taxi.landed = landing end
+    end
+    check()
+end
+
+function taxi.Reset()                           -- tracking switched off: a flight under way is forgotten
+    taxi.window, taxi.pick, taxi.flight, taxi.landed, taxi.token = nil, nil, nil, nil, taxi.token + 1
+end
+
+---------------------------------------------------------------------------
 -- npcs: a summary of the creatures this player looks at, one entry per NPC id, updated in place (see the header)
 ---------------------------------------------------------------------------
 -- DAYS: an entry not seen for this long is dropped on load; SESSION: the session tables below are trimmed past this many npcs
@@ -1331,6 +1540,13 @@ end
 function handlers.TRAINER_UPDATE() if not trainer.reading then SoonTrainer() end end
 function handlers.TRAINER_CLOSED() trainer.open = false end
 
+-- flight masters: the window is read when it opens; TakeTaxiNode (hooked, after the game ran it) names the destination;
+-- the flight is timed from losing control on the taxi to gaining it back on the ground
+function handlers.TAXIMAP_OPENED() taxi.Opened() end
+function handlers.TAXIMAP_CLOSED() taxi.window = nil end
+function handlers.PLAYER_CONTROL_LOST() taxi.Board() end
+function handlers.PLAYER_CONTROL_GAINED() taxi.Land() end
+
 -- the npcs summary: these fire all the time, so Sighting leaves early (players, the same npc within 30 s)
 function handlers.PLAYER_TARGET_CHANGED() Sighting("target", false) end
 function handlers.UPDATE_MOUSEOVER_UNIT() Sighting("mouseover", false) end
@@ -1339,6 +1555,7 @@ local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN",
                     "MERCHANT_SHOW", "MERCHANT_CLOSED", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
+                    "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                     "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }
 
 local ev = CreateFrame("Frame")
@@ -1356,12 +1573,16 @@ local function Enable()
             if id then lastUsedItem.id, lastUsedItem.at = id, Now() end
         end)
     end
+    if not taxi.hooked and type(hooksecurefunc) == "function" and type(TakeTaxiNode) == "function" then
+        taxi.hooked = pcall(hooksecurefunc, "TakeTaxiNode", function(slot) pcall(taxi.Take, Plain(slot)) end)
+    end
 end
 local function Disable()
     for _, e in ipairs(RECORDING) do pcall(ev.UnregisterEvent, ev, e) end
     lootDone, detail, turnin, progress, merchantOpen = false, nil, nil, nil, false
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
+    taxi.Reset()
 end
 
 local function AddonVersion()

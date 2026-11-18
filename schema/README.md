@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.10.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
+| `inventory-export.v3.schema.json` | **3.11.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -69,7 +69,7 @@ Optional `characters[].hearth` is the bind-location name from `GetBindLocation`,
 
 Events have ISO `t` and `kind`: `start` (instance ID/name/type/difficulty, `by`), `end` (instance ID/name), `encounter_start`/`encounter_end` (encounter ID/name, difficulty, group size, plus success on end), `loot` (item ID/link/count, `looter`) or `roster` (`members`). Missing API values are omitted. Account files tracking the same raid string merge their events. The addon records only during the two-hours-before/eight-hours-after window while grouped in an instance; exact matching instance IDs are preferred, with a window fallback. It retains at most 20 raids, 2,000 events each, pruning raids more than 14 days after start on load/add.
 
-### Observations (3.2.0–3.10.0)
+### Observations (3.2.0–3.11.0)
 
 `observations: { v: 1, addon, install?, events: [...], npcs? }` comes from the **same saved file's** `KutzInventoryObsDB` table. The addon retains up to 5,000 events, 30 days and roughly 2 MB; export deduplicates by event ID, sorts by time/ID and caps count/serialized size. IDs combine a random install prefix and counter; they are not cryptographic identities or guaranteed globally unique.
 
@@ -81,6 +81,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money.
 - `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session. From 3.9.0, optional `rx` and `filtered` (below).
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
+- `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -116,6 +117,40 @@ From 3.9.0 (KutzInventory 1.16.0), `observations.v` stays `1`: readers ignore ev
 ```
 
 Strings are game labels as shown: the addon trims them and cuts them to the limit in UTF-8 bytes; the exporter and schema refuse (drop) a label with `|` markup, a control character, more than the limit in characters, or anything shaped like a GUID (`Player-1-2`, `Creature-0-…`). Rows keep the window's order with headers left out. The hunter's Beast Training window (trainer type Pet: no trainer NPC, and it costs training points) is never recorded, nor is a window whose `npc` unit has no creature ID. The same `npc` with the same list and `rx` is recorded at most once in 7 days, checked against the retained events, so it holds across sessions while the earlier event is still kept (30 days, or less once the size caps prune it); the comparison uses each row's name, rank, cost, level and skill rank but not `st` (learning a spell does not re-record the list) and not `s`. One realistic 60-row class trainer event is about 5.2 KB of JSON (about 82 bytes per row, 1.1 KB gzipped); 400 rows is about 33 KB.
+
+### Flight masters and flights (3.11.0)
+
+From 3.11.0 (KutzInventory 1.18.0) observations may be of type `taxi` and `flight`; `observations.v` stays `1` (an older reader skips both types).
+
+**Taxi events** are recorded at `TAXIMAP_OPENED` while the window's `npc` unit is a creature (its NPC ID from `UnitGUID("npc")`; an object or a player is never recorded). Node ids come from `C_TaxiMap.GetAllTaxiNodes(GetTaxiMapID())`, joined by `slotIndex` to the window's slot functions `TaxiNodeGetType`, `TaxiNodeCost`, `GetNumRoutes` and `TaxiNodeName` (`TaxiNodeGetType` falls back to the node's `state` when the client has no such function). **Nothing is recorded** when the client gives no node ids (names are never used as ids), a node id or slot appears twice, there is not exactly one current node, a reachable slot has no node or no cost, a slot's name disagrees with its node's name, or more than 200 nodes are reachable: a list cut short would read as those nodes being unreachable, so it is refused rather than truncated. The same `npc`, `node`, list of nodes and costs and `rx` is recorded at most once in 7 days, checked against the retained events (`hops` is not part of the check). Exact contract (the exporter drops the whole event when `npc` or `node` is missing or any `to` entry has no usable `node` or `cost`, repeats a node or names `node` itself; a `hops` outside 1-100 is left out):
+
+```text
+{ id, t, b?, type: "taxi", where, who,
+  npc:  integer >= 1             the flight master's NPC ID, from UnitGUID("npc") (required; the GUID itself is never kept)
+  node: integer >= 1             its own taxi node id: the window's one CURRENT node (required)
+  rx?:  integer 1-8              UnitReaction("npc", "player")
+  to: [ 0-200 of {               every REACHABLE node, sorted by node, each once, never node itself; [] when none yet
+    node:  integer >= 1          the taxi node id
+    cost:  integer >= 0          copper, TaxiNodeCost as the window shows it to this character (after any reputation
+                                 discount; see rx): a game price, not the player's money
+    hops?: integer 1-100         GetNumRoutes: the flight legs of the route; absent when the client gave none
+  } ] }
+```
+
+Nodes the character has not discovered or cannot reach (`DISTANT`, `NONE`) are not listed, so `to` says what this character could reach from here at the time, not the whole network. Node names are not kept; a reader maps node ids to names from game data.
+
+**Flight events** time one flight. It starts when `TakeTaxiNode(slot)` (hooked with `hooksecurefunc`, never called by the addon) picks a node in a taxi window that was read as above (also when its list was not re-recorded that week), followed within 10 seconds by `PLAYER_CONTROL_LOST` with `UnitOnTaxi("player")` a plain `true` (asked again every 0.5 s for 5 s; the start is the moment control was lost). It ends at the next `PLAYER_CONTROL_GAINED` after which `UnitOnTaxi` is a plain `false` (asked again for 3 s while it still says `true`; control regained mid-flight keeps the flight). The landing is trusted only when the player's position on the taxi map (`C_Map.GetPlayerMapPosition(GetTaxiMapID(), "player")`) is within 0.01 map units of the chosen node and no other node of that window is closer, or, when that position cannot be read, when the next taxi window opened within 2 minutes has the chosen node as its current one. Anything else (another landing spot, a secret or missing answer, tracking switched off on the way, under 5 seconds or over an hour) records nothing. One flight per `from` and `to` in 30 days, checked against the retained events. Exact contract (the exporter drops the event when any field fails its check):
+
+```text
+{ id, t, b?, type: "flight", who,      no where: never a position or route trail
+  t:    integer                  when it landed, from time() (Unix seconds)
+  from: integer >= 1             the taxi node id it started at (the flight master's own node)
+  to:   integer >= 1             the taxi node id it landed at, the one chosen in the window; never equal to from
+  sec:  integer 5-3600           whole seconds from losing control to landing (GetTime, rounded)
+}
+```
+
+`sec` is this character's flight as flown (the game's flight speed, with any detour of the route); it is not a price and says nothing about money. **Privacy:** a taxi event has the same `where` and `who` as any event (where the flight master stands); a flight event adds only which two nodes and how long, with no position, path or time other than the landing's `t`. Measured as compact JSON with a named `who`: a taxi event with 40 reachable nodes is about 1.6 KB (about 33 bytes per node beyond a 260-byte event with none; 430 bytes gzipped), a flight event about 200 bytes.
 
 ### NPC summary (3.10.0)
 

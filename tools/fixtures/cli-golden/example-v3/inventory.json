@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.10.0",
+ "schemaVersion": "3.11.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": null,
  "prices": {
@@ -772,6 +772,57 @@
       "st": "a"
      }
     ]
+   },
+   {
+    "id": "k1f9c2-000024",
+    "t": 1762906100,
+    "b": "1.60.1.70888",
+    "type": "taxi",
+    "npc": 352,
+    "node": 2,
+    "rx": 5,
+    "where": {
+     "map": 0,
+     "uiMap": 1453,
+     "x": 0.7081,
+     "y": 0.7254
+    },
+    "who": {
+     "level": 20,
+     "class": 8,
+     "faction": "Alliance"
+    },
+    "to": [
+     {
+      "node": 4,
+      "cost": 1050,
+      "hops": 2
+     },
+     {
+      "node": 5,
+      "cost": 270,
+      "hops": 1
+     },
+     {
+      "node": 6,
+      "cost": 1800,
+      "hops": 3
+     }
+    ]
+   },
+   {
+    "id": "k1f9c2-000025",
+    "t": 1762906300,
+    "b": "1.60.1.70888",
+    "type": "flight",
+    "from": 2,
+    "to": 5,
+    "sec": 181,
+    "who": {
+     "level": 20,
+     "class": 8,
+     "faction": "Alliance"
+    }
    }
   ],
   "npcs": [

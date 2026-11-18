@@ -35,7 +35,9 @@ const SCHEMA_VERSION = "2.1.0";
 // 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at (level
 // range, classification, type, family, reaction per side, subtitle, beast attack speed, last day seen, map squares
 // stood beside it), and install, the id of the install(s) it summarises (KutzInventory 1.17.0). observations.v stays 1.
-const SCHEMA_VERSION_3 = "3.10.0";
+// 3.11.0: observations may be of type "taxi" (a flight master's reachable nodes with their prices) and "flight" (how many
+// seconds a flight from one node to another took) (KutzInventory 1.18.0). observations.v stays 1.
+const SCHEMA_VERSION_3 = "3.11.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).
@@ -418,7 +420,7 @@ function exportRaids(dbs) {
 }
 
 // ---------------------------------------------------------------------------
-// Observations (inventory 3.2.0+; trainer events 3.9.0): KutzInventoryObsDB.events from Observations.lua, recorded while
+// Observations (inventory 3.2.0+; trainer events 3.9.0; taxi and flight events 3.11.0):KutzInventoryObsDB.events from Observations.lua, recorded while
 // drop tracking is on (/kinv track; on by default since KutzInventory 1.13.0). Exported as observations = { v: 1, addon, events[] } only when there is
 // at least one usable event. Each event keeps only the fields its type has, with the right types; everything else
 // (anything about money, other players, unknown keys) is dropped. Ids are unique per install, so several saved files
@@ -552,7 +554,38 @@ function observationEvent(e) {
     const rx = obsReaction(e.rx);
     return { ...base, npc: e.npc, kind: e.kind, ...(rx ? { rx } : {}), ...place(), rows };
   }
+  if (e.type === "taxi") {
+    if (obsInt(e.npc, 1) === undefined || obsInt(e.node, 1) === undefined) return null;
+    const to = obsTaxiTo(e.to, e.node);
+    if (!to) return null;
+    const rx = obsReaction(e.rx);
+    return { ...base, npc: e.npc, node: e.node, ...(rx ? { rx } : {}), ...place(), to };
+  }
+  if (e.type === "flight") {
+    if (obsInt(e.from, 1) === undefined || obsInt(e.to, 1) === undefined || e.from === e.to) return null;
+    if (!Number.isInteger(e.sec) || e.sec < OBS_FLIGHT_SEC[0] || e.sec > OBS_FLIGHT_SEC[1]) return null;
+    return { ...base, from: e.from, to: e.to, sec: e.sec, who: obsWho(e.who) };   // never a where: no position trail
+  }
   return null;
+}
+// A flight master's list (3.11.0): every node reachable from its own, { node, cost (copper, a game price), hops? }, sorted
+// by node. One bad entry (no node id, a node twice or the master's own, no cost) drops the whole list: a list with a
+// node missing would read as that node unreachable. A bad hops only drops hops. At most 200 nodes.
+const OBS_TAXI_NODES = 200;
+const OBS_FLIGHT_SEC = [5, 3600];
+function obsTaxiTo(list, own) {
+  if (!Array.isArray(list) && !(list && typeof list === "object")) return null;
+  const rows = asList(list);
+  if (rows.length > OBS_TAXI_NODES) return null;
+  const seen = new Set(), out = [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") return null;
+    const node = obsInt(r.node, 1), cost = obsInt(r.cost);
+    if (node === undefined || cost === undefined || node === own || seen.has(node)) return null;
+    seen.add(node);
+    out.push(pick({ node, cost, hops: Number.isInteger(r.hops) && r.hops >= 1 && r.hops <= 100 ? r.hops : undefined }));
+  }
+  return out.sort((a, b) => a.node - b.node);
 }
 // ---------------------------------------------------------------------------
 // The npcs summary (3.10.0, KutzInventory 1.17.0): KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss, cls, ct,

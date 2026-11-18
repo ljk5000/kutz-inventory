@@ -54,7 +54,7 @@ node --test companion/companion.test.js tools/package_release.test.js
 
 - Lua syntax, Lua 5.1 local/upvalue limits and unexpected globals (`check.js`, `limits.js`, `globals.js`).
 - Scheduler/retries, bank/logout/exit snapshots and diagnostics, GUID ownership for same-name characters.
-- Vendor/AH scans/migration/supply, tracked raids, drop/quest/vendor/trainer observations, the NPC summary and craft counters in offline Lua.
+- Vendor/AH scans/migration/supply, tracked raids, drop/quest/vendor/trainer/taxi/flight observations, the NPC summary and craft counters in offline Lua.
 - Inventory 2.x/3.x and auction schemas, invalid-data rejection, gzip requests and credential-redaction errors.
 - Synthetic examples, conversion with no Node globals, exact CLI fixtures, watch queues, outbox and auction sender.
 - Companion identity/HTTP/watch/locks, site migration and legacy distribution tests (Node 22+; older Node skips this part).

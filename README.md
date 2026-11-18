@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.17.0** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.18.0** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)
@@ -71,7 +71,7 @@ The whole-house request has an approximately 15-minute cooldown. `/kinv ah slow`
 
 Only explicitly tracked raids record events. Up to 20 raids and 2,000 events per raid are retained; raids older than 14 days are pruned on load/add. Raid strings and recorded events are included in 3.x inventory uploads. Server authorization is outside this addon.
 
-### Drop, quest, vendor and trainer observations — `Observations.lua`
+### Drop, quest, vendor, trainer and flight observations — `Observations.lua`
 
 **On by default for new installs or a missing preference.** An existing off preference stays off. `/kinv track drops off` stops new recording, the NPC summary included; it **does not erase old events or the summary, or exclude them from later uploads**.
 
@@ -83,8 +83,10 @@ While enabled, it records:
 - Vendor stock, quantities, prices, item/currency costs and limited stock, read under the window's all-items filter (your filter is put back at once), and the vendor's reaction to you. Identical stock from the same NPC is recorded at most once per hour in a session.
 - Class and profession trainers' lists: each service's spell ID where the client gives one, name, rank, required level/skill/abilities, cost, whether you can learn it now or know it, and the trainer's reaction to you. The same list from the same trainer is recorded at most once a week, while the earlier event is still kept (30 days, or less once the size caps prune it). The hunter's Beast Training window is not recorded.
 - A summary of the creatures you target, mouse over, talk to or loot (1.17.0), one entry per NPC, updated in place rather than as events: its name, level range, classification, creature type and family, its reaction to your faction, its subtitle when the tooltip proves one, a beast's attack speed, the last **day** it was seen, and counts of the 1% map squares you stood in while within about 10 yards of it. Never players, pets, guardians, totems or companions, nothing inside instances, no GUIDs, player names or times of day, and no order of sightings. At most 3,000 NPCs (least recently seen go first), and none not seen for 180 days.
+- Flight masters (1.18.0): the node ids you can fly to from the flight master's own node and each flight's price, at most once a week for the same list. Nothing when the client gives no node ids. Node names are not kept.
+- Flight times (1.18.0): from which node to which and how many seconds the flight took, once per route in 30 days, only when the landing is known to be at the chosen node. No position or route trail.
 
-Events include time, game build, map/instance, coordinates outside instances, and **your level, class, faction, given name and surname**. Creature/object GUIDs may identify loot sources. Vendor prices and trainer costs are game prices as shown to you (after any reputation discount), not your money. This module does not store player GUIDs, guild, coin loot, quest money or general chat. Raids and inventory have their own, broader data described above. The addon retains at most 5,000 events, 30 days and roughly 2 MB, pruning oldest entries. The NPC summary has its own cap of about 500 KB.
+Events include time, game build, map/instance, coordinates outside instances, and **your level, class, faction, given name and surname**. Creature/object GUIDs may identify loot sources. Vendor prices, trainer costs and flight prices are game prices as shown to you (after any reputation discount), not your money. This module does not store player GUIDs, guild, coin loot, quest money or general chat. Raids and inventory have their own, broader data described above. The addon retains at most 5,000 events, 30 days and roughly 2 MB, pruning oldest entries. The NPC summary has its own cap of about 500 KB.
 
 ### Items created — `Crafts.lua`
 
@@ -190,7 +192,7 @@ node tools/inventory_export.js --format 2 <path-to-KutzInventory.lua> <output.js
 
 With no input it looks for all accounts in the conventional Windows `Program Files (x86)/World of Warcraft/_forever_/WTF/Account` folder. Default output is `export/inventory.json` beside the source tree, with `auction-scans.json` alongside it. It prints a local crafting-profit/levelling estimate using observed vendor and AH prices (5% AH sale cut); these are estimates, not guaranteed sale prices. Add `--upload` only after setting `WOW_IMPORT_URL` and `WOW_IMPORT_TOKEN`. `--no-inventory` and `--no-auctions` select upload categories; local conversion still includes both. Details and all tooling: [tools/README.md](tools/README.md).
 
-[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.10.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
+[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.11.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
 
 From the repository root:
 

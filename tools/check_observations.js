@@ -1,7 +1,7 @@
 // Offline check for KutzInventory/Observations.lua (default-on drop / quest / vendor / trainer recording) in a
 // small fake game: on from a new install's first load (an opt-in era install keeps its choice), nothing recorded while off,
 // /kinv track (status, off, on again), the one-time note, each event type (loot per source incl. coin-only opens, skinning / herbs / fishing / containers,
-// quests with rewards, vendors with costs, rx and the item filter, trainers' whole lists), item links cut to colour, id and name, the character's own name and surname
+// quests with rewards, vendors with costs, rx and the item filter, trainers' whole lists, flight masters and flight times), item links cut to colour, id and name, the character's own name and surname
 // (never anyone else's), that gold and other players are never recorded, the caps and pruning,
 // and that a client without the APIs records nothing and raises no error.
 "use strict";
@@ -55,8 +55,13 @@ local function fresh(opts)
     G.GetBuildInfo = function() return "1.60.1", "70888", "Nov 1 2026", 16001 end
     G.C_AddOns = { GetAddOnMetadata = function(a, k) if a == "KutzInventory" and k == "Version" then return "1.8.0" end end }
     G.GetInstanceInfo = function() return "Somewhere", s.itype, s.difficulty, "", 0, 0, false, s.iid end
+    -- s.mapPos[uiMap] = { x, y } puts the player there on that map (the taxi map); false: the client gives no position
     G.C_Map = { GetBestMapForUnit = function() return s.uiMap end,
-                GetPlayerMapPosition = function() return { GetXY = function() return s.x, s.y end } end }
+                GetPlayerMapPosition = function(map)
+                  local p = s.mapPos and s.mapPos[map]
+                  if p == false then return nil end
+                  return { GetXY = function() if p then return p[1], p[2] end; return s.x, s.y end }
+                end }
     G.UnitLevel = function(u) if u == "player" then return 60 end; local x = s.units[u]; return x and x.level end
     G.UnitClass = function() return "Rogue", "ROGUE", 4 end
     G.UnitFactionGroup = function() return "Alliance", "Alliance" end
@@ -143,7 +148,32 @@ local function fresh(opts)
       frames[1].scripts.OnEvent(frames[1], "TRAINER_UPDATE")
     end
     G.C_Trainer = { GetTrainerType = function() return s.trainer.type end }
-    G.Enum = { TrainerType = { General = 0, Tradeskills = 2, Pet = 3 }, TooltipDataType = { Item = 0, Spell = 1 } }
+    G.Enum = { TrainerType = { General = 0, Tradeskills = 2, Pet = 3 }, TooltipDataType = { Item = 0, Spell = 1 },
+               FlightPathState = { Current = 0, Reachable = 1, Unreachable = 2 } }
+    -- flight masters: s.taxi.nodes = { { nodeID, name, slotIndex, type (CURRENT|REACHABLE|DISTANT|NONE), state, cost, hops,
+    -- x, y, slotName, slot } }: GetAllTaxiNodes gives nodeID, name, state, slotIndex and the position; the slot functions
+    -- answer for slot (default slotIndex) with slotName (default name); s.onTaxi is UnitOnTaxi("player")
+    s.taxi = { map = 1415, nodes = {} }
+    local function slotNode(i) for _, n in ipairs(s.taxi.nodes) do if (n.slot or n.slotIndex) == i then return n end end end
+    G.GetTaxiMapID = function() return s.taxi.map end
+    G.NumTaxiNodes = function() return #s.taxi.nodes end
+    G.TaxiNodeName = function(i) local n = slotNode(i); return n and (n.slotName or n.name) end
+    G.TaxiNodeGetType = function(i) local n = slotNode(i); return n and n.type or "NONE" end
+    G.TaxiNodeCost = function(i) local n = slotNode(i); return n and n.cost end
+    G.GetNumRoutes = function(i) local n = slotNode(i); return n and n.hops or 0 end
+    G.UnitOnTaxi = function(u) if u == "player" then return s.onTaxi end end
+    G.TakeTaxiNode = function() end
+    if not opts.noTaxiMap then
+      G.C_TaxiMap = { GetAllTaxiNodes = function(map)
+        if map ~= s.taxi.map then return {} end
+        local out = {}
+        for _, n in ipairs(s.taxi.nodes) do
+          out[#out + 1] = { nodeID = n.nodeID, name = n.name, state = n.state, slotIndex = n.slotIndex,
+                            position = n.x and { x = n.x, y = n.y } or nil }
+        end
+        return out
+      end }
+    end
     if not opts.noTooltip then
       G.C_TooltipInfo = { GetTrainerService = function(i)
         local r = services()[i]
@@ -568,6 +598,171 @@ do
   print("OK   trainers: whole list with filters put back, spell ids, rx, kind; once a week per list; no Beast Training, no GUID, caps")
 end
 
+-- 7c) flight masters: every reachable node with its node id, price and legs; nothing without node ids or when the
+--     window's two views disagree; once a week per list; never a GUID or a node name
+local function taxiNodes()
+  return {
+    { nodeID = 2, name = "Made-up Keep, Made-up Shire", slotIndex = 1, type = "CURRENT", state = 0, cost = 0, hops = 0, x = 0.40, y = 0.60 },
+    { nodeID = 5, name = "Made-up Port, Made-up Coast", slotIndex = 3, type = "REACHABLE", state = 1, cost = 950, hops = 2, x = 0.45, y = 0.80 },
+    { nodeID = 4, name = "Made-up Ford, Made-up Hills", slotIndex = 2, type = "REACHABLE", state = 1, cost = 210, hops = 1, x = 0.42, y = 0.40 },
+    { nodeID = 9, name = "Made-up Peak, Made-up Range", slotIndex = 4, type = "DISTANT", state = 2, cost = 0, hops = 0, x = 0.60, y = 0.20 },
+  }
+end
+local FLIGHTMASTER = "Creature-0-4170-0-1234-352-000012AB10"
+local function airfield(opts)
+  local h = fresh(opts); h.on()
+  h.s.units.npc = { guid = FLIGHTMASTER, level = 55 }
+  h.s.reaction, h.s.taxi.nodes = 5, taxiNodes()
+  return h
+end
+local function ofType(h, kind)
+  local out = {}
+  for _, e in ipairs(h.events()) do if e.type == kind then out[#out + 1] = e end end
+  return out
+end
+do
+  local h = airfield()
+  assert(h.registered.TAXIMAP_OPENED and h.registered.TAXIMAP_CLOSED and h.registered.PLAYER_CONTROL_LOST
+         and h.registered.PLAYER_CONTROL_GAINED, "taxi events registered")
+  h.event("TAXIMAP_OPENED", 1); h.event("TAXIMAP_CLOSED")
+  local ev = ofType(h, "taxi")
+  assert(#ev == 1, "one taxi event: " .. dump(h.events()) .. tostring(h.db().lastError))
+  local e = ev[1]
+  assert(e.npc == 352 and e.node == 2 and e.rx == 5 and e.who.name == "Tester" and e.where.uiMap == 1429 and e.where.x == 0.4123, dump(e))
+  assert(dump(e.to) == "{1={cost=210,hops=1,node=4},2={cost=950,hops=2,node=5}}", "reachable nodes, sorted by node: " .. dump(e.to))
+  assert(not dump(h.db()):find("Creature%-") and not dump(e):find("Made%-up") and not h.db().lastError, "no GUID, no names: " .. dump(e))
+  assert(h.db().npcs[352] and h.db().npcs[352].cells, "the flight master is a near sighting")
+  -- the same list again, also after a reload: not within 7 days; another price, another reaction, a week later: again
+  h.event("TAXIMAP_OPENED"); h.event("TAXIMAP_CLOSED")
+  local r = airfield({ db = h.db() }); r.event("TAXIMAP_OPENED")
+  assert(#ofType(h, "taxi") == 1 and #ofType(r, "taxi") == 1, "once a week per list, across a reload")
+  r.s.taxi.nodes[2].cost = 900; r.event("TAXIMAP_OPENED")
+  r.s.reaction = 6; r.event("TAXIMAP_OPENED")
+  r.s.now = r.s.now + 7 * 86400; r.event("TAXIMAP_OPENED")
+  local re = ofType(r, "taxi")
+  assert(#re == 4 and re[2].to[2].cost == 900 and re[3].rx == 6, "a new price, a new reaction, a week later: " .. #re)
+  -- hops are left out when the client gives none; without TaxiNodeGetType the node's state decides
+  local g = airfield(); g.G.TaxiNodeGetType = nil; g.s.taxi.nodes[2].hops = nil
+  g.event("TAXIMAP_OPENED")
+  assert(#ofType(g, "taxi") == 1 and dump(ofType(g, "taxi")[1].to) == "{1={cost=210,hops=1,node=4},2={cost=950,node=5}}",
+         dump(g.events()))
+  -- an empty list (no other node known yet) is still the flight master's own node
+  local lone = airfield(); lone.s.taxi.nodes = { taxiNodes()[1] }; lone.event("TAXIMAP_OPENED")
+  assert(#ofType(lone, "taxi") == 1 and dump(ofType(lone, "taxi")[1].to) == "{}", "no destinations yet")
+  -- nothing: no node ids, the two names disagree, a reachable slot no node maps to, a node without an id, two current
+  -- nodes, no current node, a reachable node without a price, a node id twice, not a creature, no npc unit, no taxi map,
+  -- while off
+  local function none(setup, opts)
+    local x = airfield(opts)
+    setup(x)
+    x.event("TAXIMAP_OPENED")
+    assert(#ofType(x, "taxi") == 0 and not x.db().lastError, "nothing: " .. dump(x.events()) .. tostring(x.db().lastError))
+  end
+  none(function() end, { noTaxiMap = true })
+  none(function(x) x.s.taxi.nodes[2].slotName = "Somewhere Else" end)
+  none(function(x) x.s.taxi.nodes[2].slot = 3; x.s.taxi.nodes[2].slotIndex = 9 end)
+  none(function(x) x.s.taxi.nodes[2].nodeID = nil end)
+  none(function(x) x.s.taxi.nodes[3].type = "CURRENT" end)
+  none(function(x) x.s.taxi.nodes[1].type = "DISTANT" end)
+  none(function(x) x.s.taxi.nodes[3].cost = nil end)
+  none(function(x) x.s.taxi.nodes[3].nodeID = 5 end)
+  none(function(x) x.s.units.npc = { guid = PLAYER } end)
+  none(function(x) x.s.units.npc = nil end)
+  none(function(x) x.G.GetTaxiMapID = nil end)
+  none(function(x) x.cmd("track drops off") end)
+  local many = airfield(); many.s.taxi.nodes = { taxiNodes()[1] }
+  for i = 1, 201 do many.s.taxi.nodes[i + 1] = { nodeID = 100 + i, name = "N" .. i, slotIndex = i + 1, type = "REACHABLE", cost = i } end
+  many.event("TAXIMAP_OPENED")
+  assert(#ofType(many, "taxi") == 0, "more than 200 reachable nodes: nothing (a cut list would read as unreachable)")
+  many.s.taxi.nodes[202] = nil; many.event("TAXIMAP_OPENED")
+  assert(#ofType(many, "taxi") == 1 and #ofType(many, "taxi")[1].to == 200, "200 reachable nodes are kept")
+  print("OK   taxi: every reachable node with id, price and legs; nothing without ids or when the views disagree; once a week per list")
+end
+
+-- 7d) flight times: from boarding (control lost on a taxi, right after TakeTaxiNode picked a node in a window we read) to
+--     landing (control back, off the taxi) by the chosen node; never without both ends; one per from/to in 30 days
+do
+  local function fly(h, slot, sec, landAt)
+    h.event("TAXIMAP_OPENED"); h.hooks.TakeTaxiNode(slot); h.event("TAXIMAP_CLOSED")
+    h.s.onTaxi = true; h.event("PLAYER_CONTROL_LOST")
+    h.s.clock = h.s.clock + sec
+    h.s.onTaxi = false; h.s.mapPos = { [1415] = landAt }; h.event("PLAYER_CONTROL_GAINED")
+  end
+  local h = airfield()
+  assert(type(h.hooks.TakeTaxiNode) == "function", "TakeTaxiNode is hooked")
+  fly(h, 2, 95.4, { 0.4201, 0.4003 })
+  local f = ofType(h, "flight")
+  assert(#f == 1 and f[1].from == 2 and f[1].to == 4 and f[1].sec == 95 and f[1].where == nil and f[1].who.name == "Tester", dump(f))
+  assert(f[1].id:match("^[0-9a-z]+%-%d+$") and f[1].t == h.s.now and not h.db().lastError, dump(f[1]))
+  -- the same flight again (and after a reload): once in 30 days; another destination is its own
+  fly(h, 2, 90, { 0.42, 0.40 })
+  local r = airfield({ db = h.db() }); fly(r, 2, 90, { 0.42, 0.40 })
+  assert(#ofType(h, "flight") == 1 and #ofType(r, "flight") == 1, "once per from/to")
+  fly(r, 3, 181, { 0.45, 0.80 })
+  assert(#ofType(r, "flight") == 2 and ofType(r, "flight")[2].to == 5 and ofType(r, "flight")[2].sec == 181, "another destination")
+  r.s.now = r.s.now + 30 * 86400; fly(r, 2, 92, { 0.42, 0.40 })
+  assert(#ofType(r, "flight") == 3, "30 days later")
+  -- UnitOnTaxi may only say so a moment after control is lost: asked again every 0.5 s, timed from losing control
+  local late = airfield()
+  late.event("TAXIMAP_OPENED"); late.hooks.TakeTaxiNode(2); late.event("TAXIMAP_CLOSED")
+  late.s.onTaxi = false; late.event("PLAYER_CONTROL_LOST"); late.s.clock = late.s.clock + 0.5
+  late.s.onTaxi = true; late.drain()
+  late.s.clock = late.s.clock + 60; late.s.onTaxi = false; late.s.mapPos = { [1415] = { 0.42, 0.40 } }; late.event("PLAYER_CONTROL_GAINED")
+  assert(#ofType(late, "flight") == 1 and ofType(late, "flight")[1].sec == 61, "timed from losing control: " .. dump(ofType(late, "flight")))
+  -- control back mid-flight (still on the taxi): the flight is kept, the real landing counts
+  local mid = airfield()
+  mid.event("TAXIMAP_OPENED"); mid.hooks.TakeTaxiNode(2); mid.event("TAXIMAP_CLOSED")
+  mid.s.onTaxi = true; mid.event("PLAYER_CONTROL_LOST"); mid.s.clock = mid.s.clock + 30; mid.event("PLAYER_CONTROL_GAINED")
+  for _ = 1, 8 do mid.drain() end
+  mid.s.clock = mid.s.clock + 30; mid.s.onTaxi = false; mid.s.mapPos = { [1415] = { 0.42, 0.40 } }; mid.event("PLAYER_CONTROL_GAINED")
+  assert(#ofType(mid, "flight") == 1 and ofType(mid, "flight")[1].sec == 60, dump(ofType(mid, "flight")))
+  -- the position could not be read at landing: the next taxi window within 2 minutes decides
+  local function unread(nextNode, after)
+    local u = airfield(); fly(u, 2, 100, false)
+    assert(#ofType(u, "flight") == 0, "not yet")
+    u.s.clock = u.s.clock + after
+    for _, n in ipairs(u.s.taxi.nodes) do
+      if n.nodeID == nextNode then n.type = "CURRENT" elseif n.type == "CURRENT" then n.type = "REACHABLE" end
+    end
+    u.event("TAXIMAP_OPENED")
+    return ofType(u, "flight")
+  end
+  assert(#unread(4, 30) == 1 and unread(4, 30)[1].to == 4 and unread(4, 30)[1].sec == 100, "the next window is at the destination")
+  assert(#unread(5, 30) == 0, "the next window is somewhere else")
+  assert(#unread(4, 121) == 0, "the next window came too late")
+  -- never: landing by another node or far from any, the flight master's own node, no destination picked, a pick too long
+  -- before, UnitOnTaxi never true, a secret or no answer at landing, under 5 s, over an hour, switched off on the way, a
+  -- window not read (names disagree), not a creature
+  local SECRET = {}
+  local function never(setup, slot, sec, landAt, opts)
+    local x = airfield(opts)
+    if setup then setup(x) end
+    fly(x, slot or 2, sec or 95, landAt or { 0.42, 0.40 })
+    for _ = 1, 12 do x.drain() end
+    assert(#ofType(x, "flight") == 0 and not x.db().lastError, "no flight: " .. dump(ofType(x, "flight")) .. tostring(x.db().lastError))
+  end
+  never(nil, 2, 95, { 0.45, 0.79 })
+  never(nil, 2, 95, { 0.30, 0.40 })
+  never(nil, 1)
+  never(function(x) x.hooks.TakeTaxiNode = function() end end)
+  never(function(x) local take = x.hooks.TakeTaxiNode; x.hooks.TakeTaxiNode = function(s) take(s); x.s.clock = x.s.clock + 11 end end)
+  never(function(x) x.G.UnitOnTaxi = function() return false end end)
+  never(function(x) x.G.UnitOnTaxi = function() if x.s.onTaxi then return true end; return SECRET end end, nil, nil, nil,
+        { globals = { issecretvalue = function(v) return v == SECRET end } })
+  never(function(x) x.G.UnitOnTaxi = function() if x.s.onTaxi then return true end end end)
+  never(nil, 2, 4)
+  never(nil, 2, 3601)
+  never(function(x) local take = x.hooks.TakeTaxiNode; x.hooks.TakeTaxiNode = function(s) take(s); x.cmd("track drops off") end end)
+  never(function(x) x.s.taxi.nodes[2].slotName = "Somewhere Else" end)
+  never(function(x) x.s.units.npc = { guid = PLAYER } end)
+  -- a window not recorded again (the same list this week) still times the flight
+  local w = airfield(); w.event("TAXIMAP_OPENED"); w.event("TAXIMAP_CLOSED"); fly(w, 2, 95, { 0.42, 0.40 })
+  assert(#ofType(w, "taxi") == 1 and #ofType(w, "flight") == 1, "the flight from a window seen this week")
+  local all = dump(h.db().events)
+  assert(not all:find("Creature%-") and not all:find("0%.42") and not all:find("0%.40"), "no GUID and no landing position")
+  print("OK   flights: boarding to landing by the chosen node in whole seconds; both ends known or nothing; once per from/to in 30 days")
+end
+
 -- 8) never money or other players, anywhere in the saved table; the only names are this character's own, in who, and
 -- creatures' own names in the npcs summary
 do
@@ -718,6 +913,7 @@ do
   for _, e in ipairs({ "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_SUCCEEDED", "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE",
                        "QUEST_TURNED_IN", "MERCHANT_SHOW", "MERCHANT_CLOSED", "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_START",
                        "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
+                       "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                        "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }) do
     h.event(e, 1, 2, 3)
   end

@@ -289,6 +289,26 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         withNpcs({}, { npcs: [] }), withObs({ ...goodObs, install: "k1f9c2" }), withNpcs({}, { events: [], npcs: undefined }),
     ];
     badNpcs.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(o))).length) fail("the 3.x schema accepted bad npcs #" + n); });
+    // 3.11.0: taxi (a flight master's reachable nodes and prices) and flight (how long a flight took; never a where)
+    const taxiEvent = { id: "k1f9c2-000024", t: 1762906100, type: "taxi", npc: 352, node: 2, rx: 5, where: { map: 0 }, who,
+        to: [{ node: 4, cost: 1050, hops: 2 }, { node: 5, cost: 270 }] };
+    const flightEvent = { id: "k1f9c2-000025", t: 1762906300, type: "flight", from: 2, to: 5, sec: 181, who };
+    const tx = (patch) => ({ ...goodObs, events: [{ ...taxiEvent, ...patch }] });
+    const hop = (patch) => tx({ to: [{ ...taxiEvent.to[0], ...patch }] });
+    const fl = (patch) => ({ ...goodObs, events: [{ ...flightEvent, ...patch }] });
+    const txp = [withObs({ ...goodObs, events: [...obsEvents, taxiEvent, flightEvent] }), withObs(tx({ rx: undefined, to: [] })),
+        withObs(fl({ sec: 5, b: "1.60.1.70888" })), withObs(fl({ sec: 3600 }))].flatMap((o) => validateExport(JSON.parse(JSON.stringify(o))));
+    if (txp.length) fail("3.11.0 taxi and flight do not match the 3.x schema:\n  " + txp.join("\n  "));
+    const badTaxi = [
+        tx({ npc: undefined }), tx({ node: undefined }), tx({ node: 0 }), tx({ to: undefined }), tx({ rx: 9 }), tx({ where: undefined }),
+        tx({ guid: "Creature-0-4170-0-1234-352-000012AB10" }), tx({ name: "Made-up Keep" }), tx({ money: 1 }),
+        tx({ to: Array.from({ length: 201 }, (_, i) => ({ node: i + 10, cost: 1 })) }),
+        hop({ node: 0 }), hop({ node: undefined }), hop({ cost: undefined }), hop({ cost: -1 }), hop({ cost: 1.5 }), hop({ hops: 0 }),
+        hop({ hops: 101 }), hop({ name: "Made-up Port" }),
+        fl({ where: { map: 0 } }), fl({ from: 0 }), fl({ to: undefined }), fl({ sec: 4 }), fl({ sec: 3601 }), fl({ sec: 95.5 }),
+        fl({ sec: undefined }), fl({ money: 210 }), fl({ path: [[1429, 41, 65]] }), fl({ who: undefined }),
+    ];
+    badTaxi.forEach((o, n) => { if (!validateExport(JSON.parse(JSON.stringify(withObs(o)))).length) fail("the 3.x schema accepted bad taxi/flight #" + n); });
     if (!validateExport({ ...data, schemaVersion: SCHEMA_VERSION_3 }).length) fail("the 3.x schema accepted a 2.x document");
     const eq = run([inv, out3, "--format=3"], { WOW_IMPORT_TOKEN: "", WOW_IMPORT_URL: "" });
     if (eq.status !== 0 || JSON.parse(fs.readFileSync(out3, "utf8")).schemaVersion !== SCHEMA_VERSION_3) fail("--format=3 did not write 3.x");

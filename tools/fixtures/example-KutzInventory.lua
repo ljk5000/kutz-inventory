@@ -121,10 +121,10 @@ KutzInventoryDB = {
   },
 }
 -- /kinv track drops on: made-up observations (ids, GUIDs and timings invented). Includes a coins-only corpse (items = {}),
--- the same corpse skinned, a quest accepted and turned in, a vendor, a class trainer, and one broken event the exporter
--- leaves out.
+-- the same corpse skinned, a quest accepted and turned in, a vendor, a class trainer, a flight master's map, a flight
+-- from it, and one broken event the exporter leaves out.
 KutzInventoryObsDB = {
-  v = 1, on = true, agreed = true, noted = true, addon = "1.8.0", prefix = "k1f9c2", n = 24,
+  v = 1, on = true, agreed = true, noted = true, addon = "1.8.0", prefix = "k1f9c2", n = 26,
   events = {
     { id = "k1f9c2-000017", t = 1762905600, b = "1.60.1.70888", type = "loot",
       src = { kind = "boss", npc = 11502, guid = "Creature-0-4170-409-1234-11502-000012ABCD", via = "slot" },
@@ -159,6 +159,11 @@ KutzInventoryObsDB = {
                { s = 8427, name = "Blizzard", rank = "Rank 2", lv = 28, cost = 4000, needs = { "Blizzard" }, st = "u" },
                { s = 116, name = "Frostbolt", rank = "Rank 1", lv = 4, cost = 100, st = "k" },
                { name = "Made-up Ward", lv = 30, cost = 10, st = "a" } } },
+    { id = "k1f9c2-000024", t = 1762906100, b = "1.60.1.70888", type = "taxi", npc = 352, node = 2, rx = 5,
+      where = { map = 0, uiMap = 1453, x = 0.7081, y = 0.7254 }, who = { level = 20, class = 8, faction = "Alliance" },
+      to = { { node = 4, cost = 1050, hops = 2 }, { node = 5, cost = 270, hops = 1 }, { node = 6, cost = 1800, hops = 3 } } },
+    { id = "k1f9c2-000025", t = 1762906300, b = "1.60.1.70888", type = "flight", from = 2, to = 5, sec = 181,
+      who = { level = 20, class = 8, faction = "Alliance" } },
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },
   -- the npcs summary (1.17.0): a beast with its attack speed (spds is the addon's own tally, not exported), a vendor with
