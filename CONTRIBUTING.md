@@ -9,6 +9,8 @@ npm ci --prefix tools
 node tools/check_all.js
 ```
 
+Optional editor diagnostics: `.luarc.json` sets up lua-language-server for Lua 5.1 with the WoW API annotations from [Ketho/vscode-wow-api](https://github.com/Ketho/vscode-wow-api). Clone it anywhere and set `WOW_API_ANNOTATIONS` to its `Annotations` folder. Client APIs the annotations don't cover are listed under `diagnostics.globals`; add to that list rather than switching the check off.
+
 For Windows executable changes, also follow the [build and smoke-test guide](companion/README.md#build-from-source). For addon behavior, test in WoW Forever as well as the offline fake-game checks. State what you tested and what you could not check in the pull request.
 
 Keep schemas, examples and documentation consistent with changed behavior. `node tools/examples.js --write` and `node tools/cli_golden.js --write` update generated fixtures; inspect those changes before committing. Do not commit real game saves, exports, tokens or build outputs. Preserve third-party notices. Contributions are under the repository's MIT license, subject to existing third-party asset notices.

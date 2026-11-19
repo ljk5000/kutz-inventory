@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.1",
+  "workspace.library": [
+    "${env:WOW_API_ANNOTATIONS}/Core",
+    "${env:WOW_API_ANNOTATIONS}/FrameXML"
+  ],
+  "workspace.ignoreDir": ["/.git", "/tools", "/companion", "/docs", "/schema"],
+  "diagnostics.globals": [
+    "C_SkillInfo", "C_Trainer", "GetAddOnMetadata", "GetArmorPenetration", "GetGossipText", "GetItemStats",
+    "GetNumQuestLogEntries", "GetNumSkillLines", "GetQuestLogTitle", "GetRangedHitModifier", "GetSkillLineInfo",
+    "GetSpellBookItemInfo", "GetSpellBookItemName", "GetSpellInfo", "GetTalentTabInfo", "GetUnitName",
+    "GetUnspentTalentPoints", "HasPetSpells", "LE_LOOT_FILTER_ALL", "SlashCmdList", "UNKNOWNOBJECT",
+    "UnitAura", "UnitDefenseSkill", "UnitResistance",
+    "KutzUIDB"
+  ]
+}
