@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.20.0** and Companion **0.12.2**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.20.0** and Companion **0.12.3**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)

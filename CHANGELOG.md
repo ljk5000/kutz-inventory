@@ -1,5 +1,10 @@
 # Release notes
 
+## Companion 0.12.3
+
+- Bundle KutzInventory 1.20.0.
+- Send inventory export 3.13.0: the NPC summary and the trainer, flight, service, quest, game text, tame and objective credit observations recorded by KutzInventory 1.16.0 to 1.20.0. Upload, retry and credential behavior are unchanged.
+
 ## KutzInventory 1.20.0
 
 - Record hunter tames while drop tracking is on. When a hunter's Tame Beast begins, the target's creature ID, level and family are noted from its GUID, and its name and level are held in memory to compare. The new pet must come within 30 seconds of the start and within 2 seconds of the channel's end, bear the target's name, and match its level, family and (where the client has `UnitCreatureID`) creature ID wherever both are readable; a cast the client says went to another unit (`UNIT_SPELLCAST_SENT`, a mouseover or focus macro) is not armed. When in doubt, nothing is recorded. The pet's spellbook abilities with ranks (kept once two reads in a row agree; absent means not read), its attack speed (with neither the pet nor the player in combat, flagged `spdAura` when the pet had an aura at every read), its diet and the client's locale (`loc`, the language of the family and diet labels) are read for up to a minute. A tame without a creature ID in the target is not recorded. Interrupting the tame, or Call Pet or Revive Pet, cancels it. The pet's GUID and name and the target's name are never kept. Once per beast, level, abilities and speed per install (keyed by creature ID, level and a checksum, so the saved index stays small), at most 20 a session, under the half caps.
