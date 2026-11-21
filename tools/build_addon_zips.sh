@@ -36,7 +36,10 @@ for unit in $units; do
   rel=$(mktemp -d)
   # -d no upload, -l no localization, -e no externals. -n names the zip from the .toc version,
   # because the packager would otherwise use the newest tag of any prefix (companion-v*, v*, ...).
-  bash "$PACKAGER" -d -l -e -m "$meta" -r "$rel" -n "{package-name}-$label:$label"
+  # Without GITHUB_ACTIONS: on a branch push the packager builds nothing when the commit carries any tag ("Found
+  # future tag", exit 0), and main's newest commit often carries a companion-v* tag. The packager otherwise uses
+  # the variable only for log groups and step outputs, which nothing here reads.
+  env -u GITHUB_ACTIONS bash "$PACKAGER" -d -l -e -m "$meta" -r "$rel" -n "{package-name}-$label:$label"
   zipfile=$(ls "$rel"/*.zip)
 
   # MIT: the licence travels inside every addon folder.
