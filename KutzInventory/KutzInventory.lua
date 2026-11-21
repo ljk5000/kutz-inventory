@@ -332,9 +332,31 @@ local function PlayerName()
     return given, surname
 end
 
+-- The realm's name. One client build (2026-11-20) answered "" for the whole session: the character got a second,
+-- realm-less record ("Name-") and /kinv ah could not tell its auction house. A saved record still knows the name: this
+-- character's own, else the one realm every saved character with the same realm number in its GUID
+-- ("Player-<number>-...") was saved with. "" only when nothing saved knows it.
+local function RealmName()
+    local realm = Plain(Try(GetRealmName))
+    if type(realm) == "string" and realm ~= "" then return realm end
+    local guid = Plain(Try(UnitGUID, "player"))
+    if type(guid) ~= "string" or type(db) ~= "table" or type(db.chars) ~= "table" then return "" end
+    local number, found = guid:match("^Player%-(%d+)%-"), nil
+    for _, c in pairs(db.chars) do
+        if type(c) == "table" and type(c.realm) == "string" and c.realm ~= "" and type(c.guid) == "string" then
+            if c.guid == guid then return c.realm end
+            if number and c.guid:match("^Player%-(%d+)%-") == number then
+                if found == nil then found = c.realm elseif found ~= c.realm then found = false end
+            end
+        end
+    end
+    return found or ""
+end
+ns.RealmName = RealmName                      -- Prices.lua (the auction house's key) and Raids.lua
+
 local function CharacterKey()
     local given, surname = PlayerName()
-    local realm, guid = GetRealmName(), Plain(UnitGUID("player"))
+    local realm, guid = RealmName(), Plain(UnitGUID("player"))
     -- Without an owner we cannot safely choose a table. PLAYER_LOGIN normally always has a GUID.
     if type(guid) ~= "string" or guid == "" then error("Cannot select character without player GUID") end
     local base = given .. "-" .. realm
@@ -349,6 +371,20 @@ local function CharacterKey()
         end
     end
     if found then return found end
+    -- A record started while the game gave no realm name ("Name-", realm ""), for a character with no other record:
+    -- it is this character's data, so it moves to the real key. One with a realm-named twin stays where it is.
+    if not old and realm ~= "" then
+        local orphan
+        for key, c in pairs(db.chars) do
+            if key:sub(1, #prefix) == prefix and key:sub(-1) == "-" and type(c) == "table" and c.guid == guid
+               and (c.realm == nil or c.realm == "") and (not orphan or key < orphan) then orphan = key end
+        end
+        if orphan then
+            db.chars[base], db.chars[orphan] = db.chars[orphan], nil
+            db.chars[base].realm = realm
+            return base
+        end
+    end
     if not old or not old.guid then return base end -- preserve ownership of pre-GUID saves
     local tail = guid:match("([^-]+)$") or guid
     local stem = given .. "-" .. (surname or tail)
@@ -376,7 +412,8 @@ end
 
 local function ScanIdentity()
     me.name, me.surname = PlayerName()
-    me.realm = GetRealmName()
+    local realm = RealmName()
+    if realm ~= "" or type(me.realm) ~= "string" then me.realm = realm end -- never blank a realm we know
     local className, classFile = UnitClass("player")
     me.class, me.classFile = className, classFile
     me.race, me.faction = UnitRace("player"), UnitFactionGroup("player")
@@ -1044,7 +1081,7 @@ local function ScanGuildBankTab()
     if not (guildBankOpen and GetCurrentGuildBankTab) then return end
     local guild = Plain(Try(GetGuildInfo, "player"))
     if not guild then return end
-    local key = guild .. "-" .. GetRealmName()
+    local key = guild .. "-" .. RealmName()
     local g = db.guilds[key] or { tabs = {} }
     db.guilds[key] = g
     local tab = Try(GetCurrentGuildBankTab)

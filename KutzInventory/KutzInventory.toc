@@ -3,7 +3,7 @@
 ## Notes: Records every character's bags, bank, warband and guild bank, gear, character sheet, talents, skills, recipes, trainers, reputation, location, where the Hearthstone is set and gold, plus vendor and auction house prices (/kinv ah), the cr0m raids you track (/kinv raid), the items each character crafts (counted as they are made), default-on drop (also group-loot roll lists, with the boss and what you won), quest (with quest text, objectives and places, level, XP and the reputation it changes), vendor, trainer (what each class or profession trainer teaches and charges) flight master (where you can fly, the price and how long it takes), gossip, readable page and NPC line recording, and a summary of the NPCs you look at (level, type, reaction, subtitle, services, where they stand), for cr0m's item database (/kinv track), and copies KutzUI's addon-monitor findings for export with tools/inventory_export.js.
 ## X-Category: cr0m
 ## Author: ljk5000
-## Version: 1.20.0
+## Version: 1.20.1
 ## OptionalDeps: KutzUI_Monitor
 ## SavedVariables: KutzInventoryDB, KutzInventoryObsDB
 

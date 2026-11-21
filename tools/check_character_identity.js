@@ -16,7 +16,7 @@ local function dump(v)
   table.sort(out)
   return "{" .. table.concat(out, ",") .. "}"
 end
-local function login(db, surname, guid, item, name)
+local function login(db, surname, guid, item, name, realm)
   local frames, timers, now = {}, {}, 0
   local G = setmetatable({}, { __index = _G })
   G._G, G.KutzInventoryDB = G, db
@@ -36,7 +36,7 @@ local function login(db, surname, guid, item, name)
   G.SlashCmdList = {}
   G.UnitName = function() return name or "Examplehero" end
   G.GetUnitName = function() return (name or "Examplehero") .. (surname and " " .. surname or "") end
-  G.GetRealmName = function() return REALM end
+  G.GetRealmName = function() return realm or REALM end
   G.UnitGUID = function() return guid end
   G.UnitClass = function() return "Warrior", "WARRIOR" end
   G.UnitRace = function() return "Human" end
@@ -174,6 +174,41 @@ local missingBefore = dump(missing.chars)
 local h = login(missing, "First", nil, 25)
 assert(h.ns.Me() == nil and dump(missing.chars) == missingBefore and missing.lastError, "missing GUID fails before changing any character")
 print("OK   legacy ownership, surname changes, absent surname, collisions and unavailable GUID")
+
+-- The game gives no realm name (a client build of 2026-11-20 answered "" all session).
+local function count(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
+local quiet = {}
+firstLogin = login(quiet, "First", FIRST_GUID, 25); firstLogin.scan()
+local mine = quiet.chars[BASE]
+firstLogin = login(quiet, "First", FIRST_GUID, 26, nil, ""); firstLogin.scan()
+assert(firstLogin.ns.CharacterKey() == BASE and firstLogin.ns.Me() == mine and count(quiet.chars) == 1,
+       "a saved character is found by GUID: no realm-less second record")
+assert(mine.realm == REALM and mine.bags[0].items[1].id == 26, "the realm it was saved with stays, and the session's scans land in it")
+firstLogin.event("GUILDBANKBAGSLOTS_CHANGED"); firstLogin.scan()
+assert(quiet.guilds["Shared Guild-" .. REALM] and count(quiet.guilds) == 1, "the guild bank keeps its realm key")
+assert(firstLogin.ns.RealmName() == REALM, "Prices.lua and Raids.lua read the same name")
+local third = login(quiet, "Third", "Player-1-00000003", 27, "Newhero", ""); third.scan()
+assert(third.ns.CharacterKey() == "Newhero-" .. REALM and third.ns.Me().realm == REALM,
+       "a character never saved takes the realm of its GUID's realm number")
+-- A record the old addon left behind ("Name-", realm ""): with a twin it is left alone, alone it moves to the real key.
+local left = { chars = { [BASE] = { guid = FIRST_GUID, realm = REALM, money = 1 }, ["Examplehero-"] = { guid = FIRST_GUID, realm = "", money = 2 },
+  ["Lonehero-"] = { guid = "Player-1-00000004", realm = "", bank = { marker = "kept" } } } }
+local stale = left.chars["Examplehero-"]
+for _, realm in ipairs({ "", REALM }) do
+  firstLogin = login(left, "First", FIRST_GUID, 25, nil, realm)
+  assert(firstLogin.ns.CharacterKey() == BASE and firstLogin.ns.Me() == left.chars[BASE] and left.chars["Examplehero-"] == stale,
+         "the realm-named record is the character's; its realm-less twin is not touched")
+end
+local lone = left.chars["Lonehero-"]
+firstLogin = login(left, nil, "Player-1-00000004", 25, "Lonehero", ""); firstLogin.scan()
+assert(firstLogin.ns.CharacterKey() == "Lonehero-" .. REALM and firstLogin.ns.Me() == lone and left.chars["Lonehero-"] == nil
+       and lone.realm == REALM and lone.bank.marker == "kept", "a realm-less record with no twin moves to its real key with its data")
+-- Nothing saved knows the realm, or two realms share the number: nothing is guessed.
+local unknown = login({}, "First", "Player-9-00000001", 25, nil, "")
+assert(unknown.ns.CharacterKey() == "Examplehero-" and unknown.ns.Me().realm == "", "unknown realm stays empty")
+local split = { chars = { ["A-One"] = { guid = "Player-1-0000000A", realm = "One" }, ["B-Two"] = { guid = "Player-1-0000000B", realm = "Two" } } }
+assert(login(split, "First", FIRST_GUID, 25, nil, "").ns.RealmName() == "", "two realms under one number are not guessed between")
+print("OK   no realm name from the game: saved realm by GUID or realm number, no second record, orphan record adopted")
 return saved
 `;
 const L = lauxlib.luaL_newstate();

@@ -503,7 +503,7 @@ ev:SetScript("OnEvent", function(_, event, a)
     elseif event == "AUCTION_HOUSE_SHOW" then
         scan.open = true
         local house, source = DetectHouse()
-        local realm = Plain(Try(GetRealmName))
+        local realm = ns.RealmName and ns.RealmName() or Plain(Try(GetRealmName)) -- the saved name when the game gives none
         scan.house, scan.houseSource = house, source
         scan.houseKey = (house and type(realm) == "string" and realm ~= "") and (realm .. "|" .. house) or nil
     elseif event == "AUCTION_HOUSE_CLOSED" then scan.open = false

@@ -69,7 +69,7 @@ end
 
 local function MyKey()
     if ns.CharacterKey then return ns.CharacterKey() end
-    local name, realm = Plain(Try(UnitName, "player")), Plain(Try(GetRealmName))
+    local name, realm = Plain(Try(UnitName, "player")), ns.RealmName and ns.RealmName() or Plain(Try(GetRealmName))
     if type(name) ~= "string" or type(realm) ~= "string" then return nil end
     return name .. "-" .. realm
 end
@@ -81,7 +81,7 @@ local function UnitKey(unit)
     local name, realm = Try(UnitName, unit)
     name, realm = Plain(name), Plain(realm)
     if type(name) ~= "string" or name == "" or name == _G.UNKNOWNOBJECT then return nil end
-    if type(realm) ~= "string" or realm == "" then realm = Plain(Try(GetRealmName)) or "" end
+    if type(realm) ~= "string" or realm == "" then realm = ns.RealmName and ns.RealmName() or Plain(Try(GetRealmName)) or "" end
     return name .. "-" .. realm
 end
 

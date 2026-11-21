@@ -1,5 +1,11 @@
 # Release notes
 
+## KutzInventory 1.20.1
+
+- Fix: when the game gives no realm name, a character no longer gets a second record. A WoW Forever build of 2026-11-20 answered `GetRealmName()` with an empty text for the whole session. The addon then saved the character under `Name-` beside its real record `Name-Realm`, so it showed twice with the same name, the new copy had no realm, and `/kinv ah` answered "could not tell which auction house this is". The realm is now read from what is already saved when the game does not give it: this character's own record (found by its GUID), else the one realm that every saved character with the same realm number in its GUID (`Player-<number>-...`) has. Nothing is guessed when no saved record knows it or two realms share the number. The character record, the guild bank key, the auction house key and raid attribution all use that name, and a known realm is never overwritten with an empty one.
+
+- A record that 1.20.0 started as `Name-` for a character with no other record moves to its real key at the next login, with its data. One that sits beside the character's real record is left as it is: cr0m reads the two as one character (the newest reading of each section, items made added up).
+
 ## Companion 0.12.3
 
 - Bundle KutzInventory 1.20.0.
