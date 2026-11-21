@@ -55,6 +55,8 @@ node --test companion/companion.test.js tools/package_release.test.js
 - Lua syntax, Lua 5.1 local/upvalue limits and unexpected globals (`check.js`, `limits.js`, `globals.js`).
 - Scheduler/retries, bank/logout/exit snapshots and diagnostics, GUID ownership for same-name characters.
 - Vendor/AH scans/migration/supply, tracked raids, drop/quest/vendor/trainer/taxi/flight observations, the NPC summary and craft counters in offline Lua.
+- Item facts, random suffixes, kills per day, `/kinv perf`, statistics days, vendor lists and the move of unlearned recipes to one table per account file (`check_facts.js` runs `check_facts.lua`; the move must undo to the original and give the same 2.x and 3.x export). `KUTZ_REAL_SAVES=<folder> node tools/check_facts.js` runs the same proof on every `*.lua` saved file in a folder of your own and prints sizes and counts only.
+- The tooltip cleaner (`tooltip_clean.js`, a dependency-free CommonJS module a server can copy) and that the copy inside `convert.js` is the same text (`tooltip_clean.test.js`).
 - Inventory 2.x/3.x and auction schemas, invalid-data rejection, gzip requests and credential-redaction errors.
 - Synthetic examples, conversion with no Node globals, exact CLI fixtures, watch queues, outbox and auction sender.
 - Companion identity/HTTP/watch/locks, site migration and legacy distribution tests (Node 22+; older Node skips this part).

@@ -13,6 +13,7 @@ const addonDir = path.join(__dirname, "..", "KutzInventory");
 const source = fs.readFileSync(path.join(addonDir, "Observations.lua"), "utf8");
 const bagSource = source.replace("local READ_BAG_ITEMS = false", "local READ_BAG_ITEMS = true");
 const commonWords = fs.readFileSync(path.join(addonDir, "CommonWords.lua"), "utf8");
+const factsSource = fs.readFileSync(path.join(addonDir, "Facts.lua"), "utf8");
 if (bagSource === source) throw new Error("Could not enable the bag-page path for the fake game");
 
 const code = `
@@ -1866,7 +1867,15 @@ do
   assert(p.s.calls.UnitPlayerControlled == 0 and p.s.calls.CheckInteractDistance == 0, "a player leaves at once")
   none({ controlled = true }); none({ ct = 12, ctName = "Non-combat Pet" }); none({ guid = "Pet-0-4170-0-1234-525-000012AB01" })
   none({ guid = NODE }); none({}, { noControlled = true })
-  none({}, nil, function(g) g.s.itype, g.s.iid = "party", 36 end)
+  -- inside an instance (1.21.0): kept, under the instance map and difficulty, with no cell; a place with neither is not
+  do
+    local g = fresh(); g.on(); g.s.units.target = wolf(); g.s.itype, g.s.iid, g.s.difficulty = "party", 36, 1
+    g.event("PLAYER_TARGET_CHANGED"); g.event("UPDATE_MOUSEOVER_UNIT")
+    local n = g.db().npcs[525]
+    assert(n and n.name == "Mangy Wolf" and n.cells == nil and dump(n.inst) == "{36:1=1}" and not g.db().lastError,
+           "inside an instance: " .. dump(g.db().npcs) .. " " .. tostring(g.db().lastError))
+  end
+  none({}, nil, function(g) g.s.itype, g.s.iid, g.s.x, g.s.y = "party", 0, nil, nil end)
   none({}, nil, function(g) g.s.x, g.s.y = 0, 0 end)
   none({}, nil, function(g) g.cmd("track drops off") end)
   local SECRET = {}
@@ -1879,7 +1888,7 @@ do
   assert(dump(q.db().npcs[525]) == "{day=" .. DAY .. ",fam=1,name=Mangy Wolf}", "secrets left out: " .. dump(q.db().npcs[525]))
   local qn = fresh({ globals = secret }); qn.on(); qn.s.units.target = wolf({ name = SECRET }); qn.event("PLAYER_TARGET_CHANGED")
   assert(qn.db().npcs[525] and qn.db().npcs[525].name == nil, "a secret name is left out: " .. dump(qn.db().npcs[525]))
-  print("OK   npcs: never players, pets, guardians, totems, companions, objects, inside instances, secrets or while off; players leave at once")
+  print("OK   npcs: never players, pets, guardians, totems, companions, objects, secrets or while off; players leave at once; inside an instance by map and difficulty")
 
   -- a skull: boss only for a world boss or when the player is at the level cap; else nothing about the level
   local function skull(patch, max)
@@ -1975,7 +1984,7 @@ do
   j.s.units.npc = { guid = TAILOR, level = 30 }; j.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 8)
   assert(svc(npcs(j)[1346]) == "bank" and not j.db().lastError, dump(npcs(j)[1346]))
   -- nothing: a mailbox or other object, a type with no service, an unknown number, no Enum, no npc unit, a player, a pet,
-  -- inside an instance, while off; a gossip window is no service and its text is never read
+  -- while off; a gossip window is no service and its text is never read
   local function nothing(setup, kind, ev)
     local x = fresh(); x.on(); x.s.units.npc = { guid = TAILOR, level = 30 }
     setup(x)
@@ -1995,7 +2004,13 @@ do
   nothing(function(x) x.s.units.npc = nil end, 5)
   nothing(function(x) x.s.units.npc = { guid = PLAYER, player = true } end, 5)
   nothing(function(x) x.s.units.npc.controlled = true end, 5)
-  nothing(function(x) x.s.itype, x.s.iid = "party", 36 end, 5)
+  do                                            -- inside an instance (1.21.0): the service is kept with the instance
+    local x = fresh(); x.on(); x.s.units.npc = { guid = TAILOR, level = 30 }; x.s.itype, x.s.iid = "party", 36
+    x.event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5)
+    local n = (x.db().npcs or {})[1346]
+    assert(n and svc(n) == "vendor" and dump(n.inst) == "{36:0=1}" and n.cells == nil and not x.db().lastError,
+           "a service inside an instance: " .. dump(x.db().npcs) .. tostring(x.db().lastError))
+  end
   nothing(function(x) x.cmd("track drops off") end, 5)
   nothing(function(x) x.s.units.npc = nil end, nil, "HEARTHSTONE_BOUND")
   nothing(function(x) x.cmd("track drops off") end, nil, "CONFIRM_BINDER")
@@ -2564,6 +2579,84 @@ do
   quiet.event("UNIT_HEALTH", "nameplate1")
   assert(reads == 1, "a nameplate is read")
   print("OK   objective credit: a creature, item or object counted for a quest objective; by name, or sole for a creature alone; rows; refusals, dedup, caps")
+end
+
+-- Facts.lua beside Observations.lua (1.21.0): a looted link keeps its random suffix and stays that one item, the item
+-- is met and read once out of combat, and a creature that dies while the player fights is counted for the day whether
+-- or not anyone loots it. (Facts.lua alone: tools/check_facts.js.)
+do
+  local h = fresh(); h.on()
+  local reads = {}
+  h.G.C_Item = { GetItemInfo = function(link)
+                   reads[#reads + 1] = link
+                   if link:find("^item:6560") then return "Soldier's Shield", nil, 2, 25, 20, "Armor", "Shields", 1, "INVTYPE_SHIELD", 1, 100, 4, 6, 2, 0, nil end
+                   return "Linen Cloth", nil, 1, 5, 0, "Tradeskill", "Cloth", 20, "", 1, 13, 7, 5, 0, 0, nil
+                 end,
+                 GetItemStats = function(link)
+                   if link:find("12729") then return { ITEM_MOD_INTELLECT_SHORT = 5, RESISTANCE0_NAME = 478 } end
+                   if link:find("^item:6560") then return { ITEM_MOD_STAMINA_SHORT = 3, RESISTANCE0_NAME = 478 } end
+                 end }
+  h.G.C_TooltipInfo = h.G.C_TooltipInfo or {}
+  h.G.C_TooltipInfo.GetHyperlink = function(link)
+    return { lines = { { leftText = link:find("6560") and "Soldier's Shield" or "Linen Cloth" }, { leftText = "Off Hand", rightText = "Shield" } } }
+  end
+  local fighting = true
+  h.G.InCombatLockdown = function() return fighting end
+  h.G.UnitAffectingCombat = function() return fighting end
+  h.G.UnitIsTapDenied = function(u) local x = h.s.units[u]; return x and x.tapped or false end
+  assert(load([=====[${factsSource}]=====], "@Facts.lua", "t", h.G))("KutzInventory", h.ns)
+
+  local CORPSE = "Creature-0-4170-0-1234-2958-00001FAC01"
+  local SHIELD = "|cff1eff00|Hitem:6560::::::::19:1489:::1:12729::::::|h[Soldier's Shield of Intellect]|h|r"
+  h.s.units.target = { guid = CORPSE, dead = true, level = 14 }
+  h.loot({ { link = SHIELD, n = 1, from = { CORPSE, 1 } }, item(2589, 2, { CORPSE, 2 }) })
+  local e = h.events()[#h.events()]
+  assert(e and e.type == "loot" and e.items[1].id == 6560
+         and e.items[1].link == "|cff1eff00|Hitem:6560::::::::::::1:12729|h[Soldier's Shield of Intellect]|h|r",
+         "the suffix stays on the short link: " .. dump(e) .. tostring(h.db().lastError))
+  assert(e.items[2].id == 2589 and e.items[2].link == "|cffffffff|Hitem:2589|h[X]|h|r", "a plain item's link is unchanged: " .. dump(e.items[2]))
+  assert(not dump(e):find("1489") and not dump(e):find(":19:"), "nothing else of the copy's link is kept")
+  for _ = 1, 6 do h.drain() end
+  assert(#reads == 0 and next(h.db().items or {}) == nil, "nothing is read in combat: " .. #reads)
+  fighting = false
+  for _ = 1, 8 do h.drain() end
+  local items = h.db().items
+  local count = 0
+  for _ in pairs(items) do count = count + 1 end
+  assert(count == 2 and items[6560] and items[2589], "one entry per item, none for the suffixed copy: " .. dump(items) .. tostring(h.db().lastError))
+  assert(items[6560].f == "2:2:4:6:25:20::INVTYPE_SHIELD" and items[6560].s == "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478"
+         and items[6560].n == nil and items[6560].t == "-Soldier's Shield\\n-Off Hand\\n>Shield", dump(items[6560]))
+  assert(dump(items[6560].v) == "{0;12729=Soldier's Shield of Intellect\\nITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478}",
+         "the suffix is a variant of 6560: " .. dump(items[6560].v))
+  for _, link in ipairs(reads) do assert(link == "item:6560" or link == "item:2589", "read from a link of the id alone: " .. link) end
+  local n = #reads
+  h.event("LOOT_CLOSED"); h.s.units.target = { guid = "Creature-0-4170-0-1234-2958-00001FAC02", dead = true, level = 14 }
+  h.loot({ { link = SHIELD, n = 1, from = { "Creature-0-4170-0-1234-2958-00001FAC02", 1 } } })
+  for _ = 1, 4 do h.drain() end
+  assert(#reads == n, "met again: nothing is read twice")
+
+  -- kills: the looted corpse counts once however many unit tokens show it; an unlooted one counts too; another
+  -- player's tap, a player, a pet and a death while the player is not fighting do not
+  fighting = true
+  h.s.units.target = { guid = CORPSE, dead = true, level = 14 }
+  h.event("UNIT_HEALTH", "target"); h.event("UNIT_HEALTH", "target")
+  h.s.units.nameplate3 = { guid = CORPSE, dead = true, level = 14 }; h.event("UNIT_HEALTH", "nameplate3")
+  h.s.units.nameplate4 = { guid = "Creature-0-4170-0-1234-2958-00001FAC03", dead = true, level = 15 }; h.event("UNIT_HEALTH", "nameplate4")
+  h.s.units.nameplate5 = { guid = "Creature-0-4170-0-1234-2958-00001FAC04", dead = true, level = 14 }; h.event("UNIT_HEALTH", "nameplate5")
+  h.s.units.nameplate6 = { guid = "Creature-0-4170-0-1234-525-00001FAC05", dead = true, level = 11, tapped = true }; h.event("UNIT_HEALTH", "nameplate6")
+  h.s.units.nameplate7 = { guid = "Creature-0-4170-0-1234-526-00001FAC06", dead = false, level = 11 }; h.event("UNIT_HEALTH", "nameplate7")
+  h.s.units.nameplate8 = { guid = "Creature-0-4170-0-1234-527-00001FAC07", dead = true, level = 11, controlled = true }; h.event("UNIT_HEALTH", "nameplate8")
+  h.s.units.nameplate9 = { guid = PLAYER, dead = true, player = true, level = 60 }; h.event("UNIT_HEALTH", "nameplate9")
+  h.s.units.party1 = { guid = "Creature-0-4170-0-1234-528-00001FAC08", dead = true, level = 11 }; h.event("UNIT_HEALTH", "party1")
+  fighting = false
+  h.s.units.nameplate2 = { guid = "Creature-0-4170-0-1234-529-00001FAC09", dead = true, level = 11 }; h.event("UNIT_HEALTH", "nameplate2")
+  local day = math.floor(h.s.now / 86400)
+  assert(dump(h.db().kills) == "{" .. day .. "={2958:14=2,2958:15=1}}", "kills per day, npc and level: " .. dump(h.db().kills) .. tostring(h.db().lastError))
+  assert(not dump(h.db().kills):find("FAC") and not dump(h.db().items):find("Tester"), "no corpse GUID, no player")
+  h.cmd("track drops off")
+  h.s.units.nameplate2 = { guid = "Creature-0-4170-0-1234-2958-00001FAC0A", dead = true, level = 14 }; fighting = true; h.event("UNIT_HEALTH", "nameplate2")
+  assert(dump(h.db().kills) == "{" .. day .. "={2958:14=2,2958:15=1}}" and not h.db().lastError, "nothing counted while off")
+  print("OK   item facts and kills beside drop tracking: the suffix on a looted link, one item with a variant, no read in combat or twice, kills per day")
 end
 `;
 

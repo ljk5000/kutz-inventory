@@ -59,6 +59,7 @@ end
 local function Item(link, count, quality, bound, name, icon)
     link = Plain(link)
     if type(link) ~= "string" then return nil end
+    if ns.Facts and ns.Facts.Meet then ns.Facts.Meet(link) end   -- Facts.lua reads each item's own facts once
     local id = tonumber(link:match("item:(%-?%d+)"))
     local it = {
         id = id, link = link, count = Plain(count) or 1,
@@ -694,11 +695,18 @@ local function ScanRecipes(force)
         end
     end
     me.recipes = me.recipes or {}
+    -- The unlearned recipes are the same for every character with the profession: saved once per account file
+    -- (db.recipeBook), and this book keeps their ids (Saved.lua). Without that file: the list itself, as before.
+    local S = ns.Saved
+    if S and type(me.recipes[name]) == "table" then me.recipes[name].unlearnedIds = nil end   -- this book's old list no longer counts
+    local shared, ids = false, nil
+    if S then shared, ids = pcall(S.Share, db, unlearned) end
     me.recipes[name] = {
         professionID = Plain(prof.professionID), skill = Plain(child.skillLevel or prof.skillLevel),
         max = Plain(child.maxSkillLevel or prof.maxSkillLevel), updated = time(), recipes = recipes,
-        unlearned = unlearned,
+        unlearned = not shared and unlearned or nil, unlearnedIds = shared and ids or nil,
     }
+    if S then pcall(S.Sweep, db) end
     me.updated.recipes = time()
 end
 
@@ -864,6 +872,8 @@ local function ScanStatistics(force)
             end
         end
     end
+    -- the values that changed since the last reading go under today, for 30 days (Saved.lua); the list is the newest
+    if ns.Saved then pcall(ns.Saved.StatDays, me, list, math.floor(time() / 86400)) end
     me.statistics = list
     me.achievementPoints = Plain(Try(GetTotalAchievementPoints))
     me.updated.statistics = time()
@@ -1170,6 +1180,13 @@ function handlers.ADDON_LOADED(name)
     db.chars = db.chars or {}
     db.warband = db.warband or {}
     db.guilds = db.guilds or {}
+    if ns.Saved then                            -- Saved.lua: unlearned recipes once per account file, 30 statistics days
+        local ok, err = pcall(function()
+            if ns.Saved.MigrateRecipes(db) > 0 then ns.Saved.Sweep(db) end
+            for _, c in pairs(db.chars) do ns.Saved.PruneStatDays(c, math.floor(time() / 86400)) end
+        end)
+        if not ok then db.lastError = "saved shapes: " .. tostring(err) end
+    end
 end
 
 function handlers.PLAYER_LOGIN()
@@ -1361,13 +1378,15 @@ SlashCmdList.KUTZINVENTORY = function(msg)
     if ns.RaidCommand and ns.RaidCommand(msg) then return end
     -- /kinv track drops on|off, /kinv track (status): default-on drop / quest / vendor / trainer recording (Observations.lua)
     if ns.ObsCommand and ns.ObsCommand(msg) then return end
+    -- /kinv perf: item facts held and waiting, and the time Facts.lua used per frame
+    if ns.Facts and ns.Facts.Command and ns.Facts.Command(msg) then return end
     if msg == "scan" then
         ScanIdentity(); ScanWallet(); ScanBags(true); ScanGear(); ScanProfessions(); ScanCurrencies(); ScanTalents(); ScanSkills(); ScanSpells(); ScanStats(); ScanGuildBankTab(); ScanRecipes(true)
         ScanReputation(); ScanPvP(); ScanStatistics(true)
         print("|cffd8b84aKutzInventory|r: everything rescanned. It reaches the file on /reload or logout.")
         return
     end
-    print("|cffd8b84aKutzInventory|r — saved to disk on /reload or logout. |cffaaaaaa/kinv scan|r rescans now, |cffaaaaaa/kinv ah|r (at the auction house) records every item's price, |cffaaaaaa/kinv ah slow|r searches your crafting items one by one, |cffaaaaaa/kinv raid|r lists the cr0m raids you track" .. (ns.ObsCommand and ", |cffaaaaaa/kinv track|r says whether drop tracking is on" or "") .. ".")
+    print("|cffd8b84aKutzInventory|r — saved to disk on /reload or logout. |cffaaaaaa/kinv scan|r rescans now, |cffaaaaaa/kinv ah|r (at the auction house) records every item's price, |cffaaaaaa/kinv ah slow|r searches your crafting items one by one, |cffaaaaaa/kinv raid|r lists the cr0m raids you track" .. (ns.ObsCommand and ", |cffaaaaaa/kinv track|r says whether drop tracking is on" or "") .. (ns.Facts and ", |cffaaaaaa/kinv perf|r says what reading item facts costs per frame" or "") .. ".")
     for key, c in pairs(db.chars) do
         local u = c.updated or {}
         local gear = 0

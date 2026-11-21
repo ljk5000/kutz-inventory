@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.14.0",
+ "schemaVersion": "3.15.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": {
   "updatedAt": "2023-11-14T22:13:20.000Z",
@@ -77,7 +77,13 @@
   "2996": {
    "vendorBuy": 40,
    "vendor": "Someone",
-   "vendorSell": null
+   "vendorSell": null,
+   "vendors": [
+    {
+     "name": "Someone",
+     "price": 40
+    }
+   ]
   }
  },
  "characters": [

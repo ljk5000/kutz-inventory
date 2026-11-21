@@ -44,7 +44,13 @@ const SCHEMA_VERSION = "2.1.0";
 // 3.14.0: characters[].statistics is exported again, with its updated.statistics stamp: the Statistics tab of the
 // achievement window (kills, deaths, quests, ...), which the Battle.net API does not serve for this client. Optional:
 // an export older than 3.14.0 has neither.
-const SCHEMA_VERSION_3 = "3.14.0";
+// 3.15.0 (KutzInventory 1.21.0), all optional and additive: observations.items (each item's own facts, read once per
+// item and game build, with its random-suffix variants), observations.kills (creatures killed per day, npc and level),
+// npcs[].inst (a creature seen inside an instance: the instance map and difficulty, no cells), suffix / bonus beside an
+// observation item's link (a random-suffix copy; the link itself stays the plain item's), characters[].statisticsDays
+// (the statistics that changed on each of the last 30 days), and on prices[id]: vendorDay, vendorLimited and vendors
+// (every vendor seen selling it). Unlearned recipes saved once per account file export exactly as before.
+const SCHEMA_VERSION_3 = "3.15.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).
@@ -210,13 +216,22 @@ const DIFFICULTY = ["orange", "yellow", "green", "gray"];  // the recipe's colou
 // Saved files from before KutzInventory 1.3.0 have prices.ah keyed by item ID with no house: those only feed the
 // local report (the addon moves them to their house the next time it loads).
 function mergePrices(dbs) {
-  const book = { vendor: {}, sell: {}, ah: {}, houses: {} };
+  const book = { vendor: {}, vendors: {}, sell: {}, ah: {}, houses: {} };
   const newer = (a, b) => !a || (b.t || 0) > (a.t || 0);
+  // vendors[id]: every vendor seen selling the item, by name, each one's newest reading (the entry itself and, since
+  // KutzInventory 1.21.0, the others under its also)
+  const sells = (id, name, v) => {
+    if (!v || typeof v !== "object" || typeof name !== "string" || typeof v.price !== "number") return;
+    const all = book.vendors[id] || (book.vendors[id] = new Map());
+    if (newer(all.get(name), v)) all.set(name, { ...v, vendor: name });
+  };
   for (const db of dbs) {
     const p = db.prices || {};
     for (const [id, v] of Object.entries(p.vendor || {})) {
       const old = book.vendor[id];
       if (!old || (v.price ?? Infinity) < old.price) book.vendor[id] = v;     // the cheapest vendor anywhere
+      sells(id, v && v.vendor, v);
+      for (const [name, x] of Object.entries((v && typeof v.also === "object" && v.also) || {})) sells(id, name, x);
     }
     for (const [id, v] of Object.entries(p.sell || {})) book.sell[id] = v;
     for (const [key, v] of Object.entries(p.ah || {})) {
@@ -310,6 +325,53 @@ function vendorPrice(book, id) {
   return { vendorBuy: vendor ? vendor.price : null, vendor: vendor ? vendor.vendor ?? null : null, vendorSell: book.sell[id] ?? null };
 }
 
+// Inventory 3.15.0, beside those three: the day the cheapest vendor was last seen selling it (UTC, no time of day, so
+// the export does not change on every visit), whether its stock was limited, and every vendor seen selling it.
+const dayOf = (t) => (typeof t === "number" && t >= 1 && t <= 1e11 ? new Date(t * 1000).toISOString().slice(0, 10) : undefined);
+function vendorDetails(book, id) {
+  const cheapest = book.vendor[id];
+  const vendors = [...(book.vendors[id] || new Map()).values()]
+    .map((v) => pick({ name: plainName(v.vendor) ?? undefined, npc: Number.isInteger(v.npc) && v.npc >= 1 && v.npc <= 2147483647 ? v.npc : undefined,
+                       price: v.price >= 0 && Number.isFinite(v.price) ? v.price : undefined, limited: v.limited === true ? true : undefined, day: dayOf(v.t) }))
+    .filter((v) => v.name !== undefined && v.price !== undefined)
+    .sort((a, b) => a.price - b.price || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, 20);
+  return pick({ vendorDay: cheapest ? dayOf(cheapest.t) : undefined, vendorLimited: cheapest && cheapest.limited === true ? true : undefined,
+                vendors: vendors.length ? vendors : undefined });
+}
+
+// Unlearned recipes saved once per account file (KutzInventory 1.21.0, Saved.lua): a book's unlearnedIds lists recipe ids
+// (the record is db.recipeBook[id]) and, where a record differs from the shared one, the record itself. -> the book with
+// its unlearned list as every earlier version saved it, so the export is the same from either shape.
+function ownRecipes(db, c) {
+  if (!c || typeof c !== "object" || !c.recipes || typeof c.recipes !== "object") return c;
+  if (!Object.values(c.recipes).some((p) => p && typeof p === "object" && p.unlearnedIds !== undefined)) return c;
+  const shared = (db && typeof db.recipeBook === "object" && db.recipeBook) || {};
+  const recipes = Object.fromEntries(Object.entries(c.recipes).map(([profession, p]) => {
+    if (!p || typeof p !== "object" || p.unlearnedIds === undefined) return [profession, p];
+    const { unlearnedIds, ...book } = p;
+    book.unlearned = asList(unlearnedIds).map((u) => (typeof u === "number" ? shared[u] : u)).filter((u) => u && typeof u === "object");
+    return [profession, book];
+  }));
+  return { ...c, recipes };
+}
+
+// Statistics per day (3.15.0; KutzInventory 1.21.0): chars[key].statDays[day][statisticId] = the value it had when it
+// was seen changed that day -> [{ day, values: [{ id, value }] }], days since 1970 (UTC) in order, the newest 30.
+function exportStatDays(days) {
+  if (!days || typeof days !== "object") return null;
+  const out = [];
+  for (const [key, list] of Object.entries(days)) {
+    const day = /^[1-9][0-9]{0,6}$/.test(key) ? Number(key) : 0;
+    if (!day || !list || typeof list !== "object") continue;
+    const values = Object.entries(list)
+      .filter(([id, v]) => /^[1-9][0-9]{0,9}$/.test(id) && ((typeof v === "number" && Number.isFinite(v)) || (typeof v === "string" && v.length >= 1 && v.length <= 200 && !/[|\u0000-\u001f]/.test(v))))
+      .map(([id, value]) => ({ id: Number(id), value })).sort((a, b) => a.id - b.id).slice(0, 400);
+    if (values.length) out.push({ day, values });
+  }
+  out.sort((a, b) => a.day - b.day);
+  return out.length ? out.slice(-30) : null;
+}
+
 // one recipe's numbers: what the materials cost and what the product is worth
 function recipeValue(book, r, learned) {
   const makes = ((r.makesMin || 1) + (r.makesMax || r.makesMin || 1)) / 2;
@@ -360,7 +422,8 @@ function crafting(book, c) {
 // Statistics are not in that API for this client, so they are exported (3.0.0 to 3.13.0 left them out).
 const DROPPED_IN_3 = ["spec", "role", "stats", "sheet", "talents", "reputation", "achievementPoints", "pvp"];
 const DROPPED_SECTIONS_IN_3 = ["sheet", "stats", "talents", "reputation", "pvp"];   // keys of characters[].updated
-function toFormat3(inventory, raids, observations, crafted, hearths) {
+// more (3.15.0): { statDays: Map(character key -> statisticsDays), prices: { itemId: vendorDetails } }
+function toFormat3(inventory, raids, observations, crafted, hearths, more) {
   const characters = inventory.characters.map((c) => {
     const out = { ...c };
     for (const k of DROPPED_IN_3) delete out[k];
@@ -372,9 +435,14 @@ function toFormat3(inventory, raids, observations, crafted, hearths) {
     if (made) out.crafted = made;
     const hearth = hearths && hearths.get(c.key);
     if (hearth) out.hearth = hearth;
+    const statDays = more && more.statDays && more.statDays.get(c.key);
+    if (statDays) out.statisticsDays = statDays;
     return out;
   });
-  return { ...inventory, schemaVersion: SCHEMA_VERSION_3, characters, raids: raids || [], ...(observations ? { observations } : {}) };
+  const prices = more && more.prices
+    ? Object.fromEntries(Object.entries(inventory.prices || {}).map(([id, p]) => [id, { ...p, ...(more.prices[id] || {}) }]))
+    : inventory.prices;
+  return { ...inventory, schemaVersion: SCHEMA_VERSION_3, prices, characters, raids: raids || [], ...(observations ? { observations } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -460,14 +528,22 @@ function obsWho(w) {
                 name, surname: name ? obsText(w.surname, OBS_NAME) : undefined });
 }
 // An item's short link (3.3.0): exactly "|cffRRGGBB|Hitem:<id>|h[<name>]|h|r" for this item's own id, else nothing.
-const OBS_LINK = /^\|cff[0-9a-f]{6}\|Hitem:([0-9]{1,10})\|h\[[^\]|]{1,120}\]\|h\|r$/;
-const obsLink = (link, id) => {
-  const m = typeof link === "string" && link.length <= 200 ? OBS_LINK.exec(link) : null;
-  return m && Number(m[1]) === id ? link : undefined;
-};
+// Since KutzInventory 1.21.0 the saved link of a random-suffix copy also names the suffix,
+// "|Hitem:<id>::::::<suffix id>::::::<n>:<bonus ids>|h": the export (3.15.0) keeps the link in the first form and says
+// the suffix beside it ({ suffix?, bonus? }), so a suffixed copy is still that one item and an older reader is unmoved.
+const OBS_LINK = /^(\|cff[0-9a-f]{6}\|Hitem:)([0-9]{1,10})(?:::::::(-?[0-9]{1,10})?::::::(?:([0-9]{1,2}):([0-9]{1,10}(?::[0-9]{1,10}){0,15}))?)?(\|h\[[^\]|]{1,120}\]\|h\|r)$/;
+function obsLinkParts(link, id) {
+  const m = typeof link === "string" && link.length <= 400 ? OBS_LINK.exec(link) : null;
+  if (!m || Number(m[2]) !== id) return {};
+  const suffix = m[3] !== undefined ? Number(m[3]) : 0;
+  const bonus = m[5] !== undefined ? m[5].split(":").map(Number).sort((a, b) => a - b) : [];
+  const sound = (m[4] === undefined || Number(m[4]) === bonus.length) && Math.abs(suffix) <= 2147483647 && bonus.every((b) => b >= 1 && b <= 2147483647);
+  return pick({ link: m[1] + m[2] + m[6], suffix: sound && suffix !== 0 ? suffix : undefined, bonus: sound && bonus.length ? bonus : undefined });
+}
+const obsLink = (link, id) => obsLinkParts(link, id).link;
 // loot items only (3.7.0): won = true, this character won it by roll
 const obsItems = (list, loot) => asList(list).map((it) => (it && typeof it === "object"
-  ? pick({ id: obsInt(it.id, 1), n: obsInt(it.n, 1), link: obsLink(it.link, it.id), won: loot && it.won === true ? true : undefined })
+  ? pick({ id: obsInt(it.id, 1), n: obsInt(it.n, 1), ...obsLinkParts(it.link, it.id), won: loot && it.won === true ? true : undefined })
   : {}))
   .filter((it) => it.id !== undefined && it.n !== undefined).slice(0, 2000);
 // src: the GUID is kept only when it is a creature's or object's and agrees with the id; never a player's, pet's or item's
@@ -637,8 +713,7 @@ function observationEvent(e) {
     const items = asList(e.items).filter((it) => it && typeof it === "object" && obsInt(it.id, 1) !== undefined).slice(0, 500)
       .map((it) => {
         const cost = obsCost(it.cost);
-        const link = obsLink(it.link, it.id);
-        return { id: it.id, n: obsInt(it.n, 1) ?? 1, ...(link ? { link } : {}), price: obsInt(it.price) ?? 0, ...(cost.length ? { cost } : {}),
+        return { id: it.id, n: obsInt(it.n, 1) ?? 1, ...obsLinkParts(it.link, it.id), price: obsInt(it.price) ?? 0, ...(cost.length ? { cost } : {}),
                  limited: obsInt(it.limited) ?? null };
       });
     const rx = obsReaction(e.rx);
@@ -736,7 +811,28 @@ const OBS_NPC_CLASSES = ["normal", "elite", "rare", "rareelite", "worldboss", "t
 const OBS_NPC_DAY_MAX = 1157407;                       // 1e11 seconds (the events' time limit) in days
 const OBS_PREFIX = /^[0-9a-z]{4,16}$/;
 const OBS_CELL = /^([0-9]{1,10}):([0-9]{1,2}):([0-9]{1,2})$/;
-const OBS_NPC_KEYS = ["npc", "name", "lv", "boss", "cls", "ct", "fam", "rxA", "rxH", "sub", "svc", "spd", "day", "cells"];
+const OBS_NPC_KEYS = ["npc", "name", "lv", "boss", "cls", "ct", "fam", "rxA", "rxH", "sub", "svc", "spd", "day", "cells", "inst"];
+const OBS_NPC_INSTS = 8;
+const OBS_INST = /^([0-9]{1,10}):([0-9]{1,5})$/;
+// inst (3.15.0): where a creature was seen inside instances, [[instance map, difficulty, n]] from the addon's
+// "map:difficulty" -> n (or an exported list); the 8 most counted, sorted by place. Such a creature may have no cells.
+function obsNpcInst(v) {
+  const byKey = new Map();
+  const add = (map, difficulty, n) => {
+    if (obsInt(map, 1) === undefined || obsInt(difficulty) === undefined || difficulty > 99999 || obsInt(n, 1) === undefined) return;
+    const key = map + ":" + difficulty;
+    byKey.set(key, [map, difficulty, Math.min(2147483647, (byKey.get(key)?.[2] || 0) + n)]);
+  };
+  if (Array.isArray(v)) for (const c of v) { if (Array.isArray(c) && c.length === 3) add(...c); }
+  else if (v && typeof v === "object") {
+    for (const [key, n] of Object.entries(v)) {
+      const m = OBS_INST.exec(key);
+      if (m) add(Number(m[1]), Number(m[2]), n);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => b[2] - a[2] || a[0] - b[0] || a[1] - b[1]).slice(0, OBS_NPC_INSTS)
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
 // svc (3.11.0): the services the NPC was seen to offer, a set; exported as a sorted list of these values
 const OBS_NPC_SVC = ["vendor", "repair", "flight", "trainer", "bank", "guildbank", "inn", "auction", "stable", "battlemaster", "spirit",
   "guild", "tabard"];
@@ -775,20 +871,20 @@ function obsNpc(id, n) {
   if (npc === undefined || !n || typeof n !== "object" || !Number.isInteger(n.day) || n.day < 1 || n.day > OBS_NPC_DAY_MAX) return null;
   const lv = asList(n.lv);
   const lvOk = lv.length === 2 && lv.every((x) => Number.isInteger(x) && x >= 1 && x <= 255) && lv[0] <= lv[1];
-  const cells = obsNpcCells(n.cells);
+  const cells = obsNpcCells(n.cells), inst = obsNpcInst(n.inst);
   return pick({ npc, name: obsNpcText(n.name), lv: lvOk ? [lv[0], lv[1]] : undefined, boss: n.boss === true ? true : undefined,
                 cls: OBS_NPC_CLASSES.includes(n.cls) ? n.cls : undefined, ct: obsNpcKind(n.ct), fam: obsNpcKind(n.fam),
                 rxA: obsReaction(n.rxA), rxH: obsReaction(n.rxH), sub: obsNpcText(n.sub), svc: obsNpcSvc(n.svc),
                 spd: Number.isInteger(n.spd) && n.spd >= 10 && n.spd <= 2000 ? n.spd : undefined, day: n.day,
-                cells: cells.length ? cells : undefined });
+                cells: cells.length ? cells : undefined, inst: inst.length ? inst : undefined });
 }
 // The same creature in two installs: the level range, services and cells add up; the rest comes from the one seen last
 function mergeNpc(a, b) {
   const [newer, older] = b.day > a.day ? [b, a] : [a, b];
   const lv = a.lv && b.lv ? [Math.min(a.lv[0], b.lv[0]), Math.max(a.lv[1], b.lv[1])] : a.lv || b.lv;
-  const cells = obsNpcCells([...(a.cells || []), ...(b.cells || [])]);
+  const cells = obsNpcCells([...(a.cells || []), ...(b.cells || [])]), inst = obsNpcInst([...(a.inst || []), ...(b.inst || [])]);
   const out = { ...older, ...newer, lv, boss: a.boss || b.boss, svc: obsNpcSvc([...(a.svc || []), ...(b.svc || [])]), day: newer.day,
-                cells: cells.length ? cells : undefined };
+                cells: cells.length ? cells : undefined, inst: inst.length ? inst : undefined };
   return pick(Object.fromEntries(OBS_NPC_KEYS.map((k) => [k, out[k]])));
 }
 const byRecent = (a, b) => b.day - a.day || obsCellTotal(b.cells) - obsCellTotal(a.cells) || a.npc - b.npc;
@@ -815,6 +911,166 @@ function exportNpcs(obsDbs) {
   return npcs.length ? { install: installs.join("+"), npcs } : null;
 }
 
+// ---------------------------------------------------------------------------
+// Item facts (3.15.0; KutzInventory 1.21.0, Facts.lua): KutzInventoryObsDB.items[itemId] = { d, b, f, n, s, t, v }, what
+// the game says about an item, read once per item and game build from a link made of the item id (and suffix) alone.
+// Exported as observations.items[] = { id, day, build?, name, q?, bind?, cls?, sub?, ilvl?, req?, set?, slot?,
+// durability?, stats?, tip?, variants? }: tip is the tooltip after cleanTooltip (below), a line being a string or
+// [left, right]; variants are the random suffixes met, { suffix?, bonus?, name, stats? }: one item, never several.
+// The same item in two saved files: the one met last, with both files' variants. At most 4000 items (the most
+// recently met) and about 1.5 MB of JSON.
+// ---------------------------------------------------------------------------
+// >>> tooltip cleaner: begin (copied word for word into tools/convert.js)
+function cleanTooltipText(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .replace(/\|\|/g, "\u0000")                                  // an escaped pipe, put back at the end
+    .replace(/\|c[0-9a-fA-F]{8}/g, "").replace(/\|cn[A-Za-z0-9_]+:/g, "").replace(/\|r/g, "")
+    .replace(/\|T[^|]*\|t/g, "").replace(/\|A[^|]*\|a/g, "")
+    .replace(/\|H[^|]*\|h/g, "").replace(/\|h/g, "")
+    .replace(/\|n/g, " ")
+    .replace(/\|[A-Za-z]/g, "")                                  // any other code: the letter goes with its pipe
+    .replace(/\u0000/g, "|")
+    .replace(/[\u0001-\u001f\u007f\s]+/g, " ").trim();
+}
+const TOOLTIP_DURABILITY = /^Durability (\d{1,6}) \/ (\d{1,6})$/;
+const TOOLTIP_DROPPED = [/^Already known$/i, /^Cooldown remaining: /i, /^<[^<>]*\b(by|from) [^<>]+>$/i,
+                         /^Equipment Sets: /i, /^You(?: have|'ve|) (?:not |n't )?collected this appearance/i, /^You haven't collected this appearance/i];
+function cleanTooltip(lines) {
+  const out = [];
+  let durability;
+  for (const line of Array.isArray(lines) ? lines : []) {
+    let left = cleanTooltipText(Array.isArray(line) ? line[0] : line);
+    const right = Array.isArray(line) ? cleanTooltipText(line[1]) : "";
+    const worn = TOOLTIP_DURABILITY.exec(left);
+    if (worn && !right) { durability = Number(worn[2]); continue; }
+    if (TOOLTIP_DROPPED.some((re) => re.test(left))) continue;
+    left = left.replace(/ \((\d{1,2})\/(\d{1,2})\)$/, " ($2)");   // "Dreadmist Raiment (2/8)" -> "Dreadmist Raiment (8)"
+    if (!left && !right) continue;
+    out.push(right ? [left, right] : left);
+  }
+  return durability === undefined ? { lines: out } : { lines: out, durability };
+}
+// <<< tooltip cleaner: end
+
+const OBS_ITEMS_MAX = 4000;
+const OBS_ITEMS_MAX_CHARS = 1500000;
+const OBS_ITEM_LINES = 60;
+const OBS_ITEM_VARIANTS = 24;
+const OBS_BUILD = /^[0-9]{1,3}(\.[0-9]{1,6}){1,3}$/;
+const OBS_VARIANT = /^(-?[0-9]{1,10});((?:[0-9]{1,10})(?::[0-9]{1,10}){0,15})?$/;
+// "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478" -> { ITEM_MOD_STAMINA_SHORT: 3, RESISTANCE0_NAME: 478 }
+function obsItemStats(s) {
+  if (typeof s !== "string" || !s) return undefined;
+  const out = {};
+  for (const part of s.split(",").slice(0, 30)) {
+    const m = /^([A-Z0-9_]{1,60})=(-?[0-9]{1,9}(?:\.[0-9]{1,2})?)$/.exec(part);
+    if (m) out[m[1]] = Number(m[2]);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+// the saved tooltip string -> lines as the cleaner takes them: "-" / "!" start a line, ">" / "]" are its right text
+function obsItemTip(t) {
+  if (typeof t !== "string" || !t) return [];
+  const lines = [];
+  for (const raw of t.split("\n").slice(0, 2 * OBS_ITEM_LINES)) {
+    const flag = raw[0], text = raw.slice(1);
+    if (flag === "-" || flag === "!") lines.push(text);
+    else if ((flag === ">" || flag === "]") && lines.length && !Array.isArray(lines[lines.length - 1])) lines[lines.length - 1] = [lines[lines.length - 1], text];
+  }
+  return lines;
+}
+const obsTipText = (v) => typeof v === "string" && v.length <= 600 && !OBS_GUIDISH.test(v);
+function obsItemVariants(v) {
+  if (!v || typeof v !== "object") return [];
+  const out = [];
+  for (const [key, text] of Object.entries(v)) {
+    const m = OBS_VARIANT.exec(key);
+    if (!m || typeof text !== "string") continue;
+    const suffix = Number(m[1]), bonus = m[2] ? m[2].split(":").map(Number).sort((a, b) => a - b) : [];
+    const [name, stats] = text.split("\n");
+    if (Math.abs(suffix) > 2147483647 || bonus.some((b) => b < 1 || b > 2147483647) || (!suffix && !bonus.length) || !plainName(name) || OBS_GUIDISH.test(name)) continue;
+    out.push(pick({ suffix: suffix || undefined, bonus: bonus.length ? bonus : undefined, name: plainName(name), stats: obsItemStats(stats) }));
+  }
+  return out;
+}
+const variantKey = (x) => (x.suffix || 0) + ";" + (x.bonus || []).join(":");
+const byVariant = (a, b) => (a.suffix || 0) - (b.suffix || 0) || (variantKey(a) < variantKey(b) ? -1 : variantKey(a) > variantKey(b) ? 1 : 0);
+function obsItem(id, e, builds) {
+  const item = typeof id === "string" && /^[1-9][0-9]{0,9}$/.test(id) ? obsInt(Number(id), 1) : obsInt(id, 1);
+  if (item === undefined || !e || typeof e !== "object" || !Number.isInteger(e.d) || e.d < 1 || e.d > OBS_NPC_DAY_MAX) return null;
+  const f = typeof e.f === "string" ? e.f.split(":") : [];
+  const part = (i, max) => (/^[0-9]{1,9}$/.test(f[i] || "") && Number(f[i]) <= max ? Number(f[i]) : undefined);
+  const cleaned = cleanTooltip(obsItemTip(e.t));
+  const tip = cleaned.lines.filter((l) => (Array.isArray(l) ? obsTipText(l[0]) && obsTipText(l[1]) : obsTipText(l))).slice(0, OBS_ITEM_LINES);
+  const name = plainName(e.n) ?? (typeof tip[0] === "string" ? plainName(tip[0]) : null);
+  if (!name || OBS_GUIDISH.test(name)) return null;
+  const build = Number.isInteger(e.b) && e.b >= 1 ? builds[e.b - 1] : undefined;
+  const variants = obsItemVariants(e.v).sort(byVariant).slice(0, OBS_ITEM_VARIANTS);
+  return pick({ id: item, day: e.d, build: typeof build === "string" && OBS_BUILD.test(build) ? build : undefined, name,
+                q: part(0, 20), bind: part(1, 20), cls: part(2, 1000), sub: part(3, 1000), ilvl: part(4, 100000), req: part(5, 1000),
+                set: part(6, 2147483647) || undefined, slot: /^[A-Z0-9_]{1,40}$/.test(f[7] || "") ? f[7] : undefined,
+                durability: Number.isInteger(cleaned.durability) && cleaned.durability >= 1 ? cleaned.durability : undefined,
+                stats: obsItemStats(e.s), tip: tip.length ? tip : undefined, variants: variants.length ? variants : undefined });
+}
+// -> items[] by id, or null
+function exportItems(obsDbs) {
+  const byId = new Map();
+  for (const db of obsDbs || []) {
+    if (!db || typeof db !== "object" || !db.items || typeof db.items !== "object") continue;
+    const builds = asList(db.itemBuilds);
+    for (const [id, e] of Object.entries(db.items)) {
+      const item = obsItem(id, e, builds);
+      if (!item) continue;
+      const old = byId.get(item.id);
+      if (!old) { byId.set(item.id, item); continue; }
+      const [newer, older] = item.day > old.day ? [item, old] : [old, item];
+      const variants = new Map([...(older.variants || []), ...(newer.variants || [])].map((x) => [variantKey(x), x]));
+      byId.set(item.id, pick({ ...newer, variants: variants.size ? [...variants.values()].sort(byVariant).slice(0, OBS_ITEM_VARIANTS) : undefined }));
+    }
+  }
+  let items = [...byId.values()].sort((a, b) => b.day - a.day || a.id - b.id).slice(0, OBS_ITEMS_MAX);
+  let chars = items.reduce((n, e) => n + JSON.stringify(e).length + 1, 0);
+  while (chars > OBS_ITEMS_MAX_CHARS && items.length) chars -= JSON.stringify(items.pop()).length + 1;
+  items = items.sort((a, b) => a.id - b.id);
+  return items.length ? items : null;
+}
+
+// Kills per day (3.15.0; KutzInventory 1.21.0, Facts.lua): KutzInventoryObsDB.kills[day]["npc:level"] = count, creatures
+// that died to the player's group. Exported as observations.kills[] = { day, npc, lv?, n } (lv left out when the client
+// gave no level), by day, npc and level, with observations.killsInstall, the install ids whose counts they are (joined
+// by "+", like install for npcs): the counts are cumulative per install, so a later export replaces them. The same
+// install twice (a copied saved file): the larger count; two installs: added up. At most 30 days and 3000 numbers, the
+// newest days kept.
+const OBS_KILL = /^([1-9][0-9]{0,9}):([0-9]{1,3})$/;
+const OBS_KILLS_MAX = 3000;
+function exportKills(obsDbs) {
+  const byPrefix = new Map();                                   // install -> Map("day:npc:lv" -> n)
+  for (const db of obsDbs || []) {
+    if (!db || typeof db !== "object" || !db.kills || typeof db.kills !== "object" || typeof db.prefix !== "string" || !OBS_PREFIX.test(db.prefix)) continue;
+    const mine = byPrefix.get(db.prefix) || new Map();
+    for (const [dayKey, list] of Object.entries(db.kills)) {
+      const day = /^[1-9][0-9]{0,6}$/.test(dayKey) ? Number(dayKey) : 0;
+      if (!day || day > OBS_NPC_DAY_MAX || !list || typeof list !== "object") continue;
+      for (const [key, n] of Object.entries(list)) {
+        const m = OBS_KILL.exec(key);
+        if (!m || obsInt(n, 1) === undefined || Number(m[1]) > 2147483647 || Number(m[2]) > 255) continue;
+        const k = day + ":" + m[1] + ":" + Number(m[2]);
+        mine.set(k, Math.max(mine.get(k) || 0, n));
+      }
+    }
+    if (mine.size) byPrefix.set(db.prefix, mine);
+  }
+  if (!byPrefix.size) return null;
+  const total = new Map();
+  for (const mine of byPrefix.values()) for (const [k, n] of mine) total.set(k, Math.min(2147483647, (total.get(k) || 0) + n));
+  let kills = [...total.entries()].map(([k, n]) => { const [day, npc, lv] = k.split(":").map(Number); return pick({ day, npc, lv: lv || undefined, n }); });
+  const days = [...new Set(kills.map((k) => k.day))].sort((a, b) => b - a).slice(0, 30);
+  kills = kills.filter((k) => days.includes(k.day)).sort((a, b) => b.day - a.day || a.npc - b.npc || (a.lv || 0) - (b.lv || 0)).slice(0, OBS_KILLS_MAX)
+    .sort((a, b) => a.day - b.day || a.npc - b.npc || (a.lv || 0) - (b.lv || 0));
+  return kills.length ? { install: [...byPrefix.keys()].sort().join("+"), kills } : null;
+}
+
 const versionKey = (v) => String(v).split(".").map((x) => String(Number(x) || 0).padStart(6, "0")).join(".");
 // obsDbs: each saved file's KutzInventoryObsDB (plain objects). -> the observations section, or null when there is nothing
 function exportObservations(obsDbs) {
@@ -826,7 +1082,8 @@ function exportObservations(obsDbs) {
     for (const e of events) byId.set(e.id, e);
     const v = obsText(db.addon, /^[0-9]+(\.[0-9]+){0,3}$/);
     const npcs = db.npcs && typeof db.npcs === "object" && Object.entries(db.npcs).some(([id, n]) => obsNpc(id, n));
-    if ((events.length || npcs) && v && (!addon || versionKey(v) > versionKey(addon))) addon = v;
+    const facts = exportItems([db]) || exportKills([db]);
+    if ((events.length || npcs || facts) && v && (!addon || versionKey(v) > versionKey(addon))) addon = v;
   }
   let events = [...byId.values()].sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(-OBS_MAX_EVENTS);
   let chars = events.reduce((n, e) => n + JSON.stringify(e).length + 1, 0);
@@ -834,9 +1091,11 @@ function exportObservations(obsDbs) {
   while (chars > OBS_MAX_CHARS && drop < events.length) chars -= JSON.stringify(events[drop++]).length + 1;
   events = events.slice(drop);
   const summary = exportNpcs(obsDbs);
-  if (!events.length && !summary) return null;
+  const items = exportItems(obsDbs), kills = exportKills(obsDbs);
+  if (!events.length && !summary && !items && !kills) return null;
   return { v: OBSERVATIONS_VERSION, addon: addon || "unknown", ...(summary ? { install: summary.install } : {}), events,
-           ...(summary ? { npcs: summary.npcs } : {}) };
+           ...(summary ? { npcs: summary.npcs } : {}), ...(items ? { items } : {}),
+           ...(kills ? { killsInstall: kills.install, kills: kills.kills } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -906,7 +1165,7 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
     for (const [key, c] of Object.entries(db.chars || {})) {
       const prev = characters.get(key);
       if (prev && (prev.lastSeen || 0) >= (c.lastSeen || 0)) continue;   // same character in two accounts: newest wins
-      characters.set(key, c);
+      characters.set(key, ownRecipes(db, c));                           // unlearned recipes come from its own file's recipeBook
     }
     for (const [key, g] of Object.entries(db.guilds || {})) {
       const prev = guilds.get(key);
@@ -926,6 +1185,11 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
   for (const [key, c] of characters) {
     const at = plainName(c.hearth);
     if (at) hearths.set(key, at);
+  }
+  const statDays = new Map();                                   // character key -> statisticsDays (3.15.0; 2.x does not carry it)
+  for (const [key, c] of characters) {
+    const days = exportStatDays(c.statDays);
+    if (days) statDays.set(key, days);
   }
   const chars = [...characters.entries()].map(([key, c]) => {
     const u = c.updated || {};
@@ -1000,7 +1264,8 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
       tabs: containers(g.tabs, "guild").map((t) => ({ ...t, tab: t.bag, updated: iso(t.updated) })),
     })),
   };
-  const v3 = () => toFormat3(inventory, exportRaids(dbs), exportObservations(options.observations), crafted, hearths);
+  const more = { statDays, prices: Object.fromEntries([...ids].map((id) => [id, vendorDetails(book, id)])) };
+  const v3 = () => toFormat3(inventory, exportRaids(dbs), exportObservations(options.observations), crafted, hearths, more);
   return { inventory: format === 3 ? v3() : inventory, auctions: auctionScans(book), report,
            ahItems: Object.keys(book.ah).length };
 }
@@ -1094,5 +1359,6 @@ function convertSavedVariables(texts, options) {
 
 return { SCHEMA_VERSION, SCHEMA_VERSION_3, FORMATS, AUCTION_SCHEMA_VERSION, DROPPED_IN_3, MAX_TABLE_DEPTH,
   parseSavedVariables, plain, buildAll, build, toFormat3, auctionScans, exportRaids, RAID_STRING,
-  exportObservations, exportNpcs, OBSERVATIONS_VERSION, exportCrafted, exportUiHealth, newerUiHealth, convertSavedVariables };
+  exportObservations, exportNpcs, exportItems, exportKills, exportStatDays, cleanTooltip, cleanTooltipText,
+  OBSERVATIONS_VERSION, exportCrafted, exportUiHealth, newerUiHealth, convertSavedVariables };
 });

@@ -1,6 +1,6 @@
 # KutzUI Companion (KutzUploader)
 
-**Companion 0.12.5 bundles KutzInventory 1.20.1.** See [release notes](../CHANGELOG.md) for the public release.
+**Companion 0.12.6 bundles KutzInventory 1.21.0.** See [release notes](../CHANGELOG.md) for the public release.
 
 The Windows tray app uploads KutzInventory saves to [wow.cr0m.com](https://wow.cr0m.com), the optional receiving website. The site calls it **KutzUploader**; its launcher is **KutzUICompanion.exe**. The addon is usable without uploading. Read the [full addon/data guide](../README.md) before sharing a game client used by several people.
 

@@ -66,6 +66,7 @@ local function login(db, surname, guid, item, name, realm)
   local ns = {}
   assert(load([====[${source("KutzInventory")}]====], "@KutzInventory.lua", "t", G))("KutzInventory", ns)
   assert(load([====[${source("Raids")}]====], "@Raids.lua", "t", G))("KutzInventory", ns)
+  assert(load([====[${source("Saved")}]====], "@Saved.lua", "t", G))("KutzInventory", ns)
   local h = { ns = ns, G = G }
   function h.event(e, ...)
     for _, f in ipairs(frames) do if f.events[e] then f.event(f, e, ...) end end
@@ -209,6 +210,45 @@ assert(unknown.ns.CharacterKey() == "Examplehero-" and unknown.ns.Me().realm == 
 local split = { chars = { ["A-One"] = { guid = "Player-1-0000000A", realm = "One" }, ["B-Two"] = { guid = "Player-1-0000000B", realm = "Two" } } }
 assert(login(split, "First", FIRST_GUID, 25, nil, "").ns.RealmName() == "", "two realms under one number are not guessed between")
 print("OK   no realm name from the game: saved realm by GUID or realm number, no second record, orphan record adopted")
+
+-- 1.21.0 (Saved.lua): the first login moves every character's unlearned recipes into the account file's one table,
+-- the absent characters' too (their lists are read through it from then on), and drops statistics days past 30.
+local OTHER = "Otherhero-" .. REALM
+local old = { chars = {
+  [BASE] = { guid = FIRST_GUID, realm = REALM, statDays = { [1] = { [60] = 5 } },
+             recipes = { Tailoring = { professionID = 197, recipes = { { recipeID = 1, name = "Known" } },
+                                       unlearned = { { recipeID = 10, name = "Ten" }, { recipeID = 11, name = "Eleven" } } } } },
+  [OTHER] = { guid = "Player-1-00000009", realm = REALM,
+              recipes = { Tailoring = { unlearned = { { recipeID = 11, name = "Eleven" }, { recipeID = 12, name = "Twelve" } } } } } } }
+local otherWas = dump(old.chars[OTHER].recipes.Tailoring.unlearned)
+firstLogin = login(old, "First", FIRST_GUID, 25)
+local mineBook, otherBook = old.chars[BASE].recipes.Tailoring, old.chars[OTHER].recipes.Tailoring
+assert(not old.lastError, tostring(old.lastError))
+assert(mineBook.unlearned == nil and dump(mineBook.unlearnedIds) == "{[1]=10,[2]=11}" and dump(mineBook.recipes) == '{[1]={["name"]="Known",["recipeID"]=1}}',
+       "the list becomes ids; learned recipes stay the character's: " .. dump(mineBook))
+assert(otherBook.unlearned == nil and dump(otherBook.unlearnedIds) == "{[1]=11,[2]=12}", "an absent character's list too: " .. dump(otherBook))
+assert(count(old.recipeBook) == 3 and old.recipeBook[12].name == "Twelve", "each recipe once: " .. dump(old.recipeBook))
+assert(dump(firstLogin.ns.Saved.Unlearned(old, otherBook)) == otherWas, "the absent character's list reads back as it was")
+assert(old.chars[BASE].statDays == nil, "statistics days past 30 go at login")
+local again = dump(old.recipeBook) .. dump(mineBook) .. dump(otherBook)
+firstLogin = login(old, "First", FIRST_GUID, 25)
+assert(dump(old.recipeBook) .. dump(mineBook) .. dump(otherBook) == again and not old.lastError, "a second login changes nothing")
+-- A recipe scan saves the window's unlearned recipes as ids. A record the game now gives differently becomes the
+-- shared one, a recipe nobody lists any more is dropped, and the absent character's list still says what it said.
+firstLogin.G.C_TradeSkillUI = {
+  GetBaseProfessionInfo = function() return { professionName = "Tailoring", professionID = 197, skillLevel = 60, maxSkillLevel = 150 } end,
+  GetAllRecipeIDs = function() return { 1, 11, 13 } end,
+  GetRecipeInfo = function(id) return { name = id == 11 and "Eleven, renamed" or "Recipe " .. id, learned = id == 1 } end,
+  GetRecipeSchematic = function() return { reagentSlotSchematics = {} } end,
+}
+firstLogin.event("TRADE_SKILL_SHOW"); firstLogin.scan()
+mineBook = old.chars[BASE].recipes.Tailoring
+assert(mineBook.unlearned == nil and dump(mineBook.unlearnedIds) == "{[1]=11,[2]=13}" and #mineBook.recipes == 1 and mineBook.skill == 60,
+       "the scan writes ids: " .. dump(mineBook))
+assert(old.recipeBook[11].name == "Eleven, renamed" and old.recipeBook[13] and old.recipeBook[12] and old.recipeBook[10] == nil,
+       "the newest reading is shared; a recipe no list names is dropped: " .. dump(old.recipeBook))
+assert(dump(firstLogin.ns.Saved.Unlearned(old, otherBook)) == otherWas, "the absent character's list is unchanged by this character's scan")
+print("OK   1.21.0: a login moves every character's unlearned recipes into the account file's one table, a recipe scan writes ids; nothing is lost")
 return saved
 `;
 const L = lauxlib.luaL_newstate();

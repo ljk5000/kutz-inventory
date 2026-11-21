@@ -1,5 +1,23 @@
 # Release notes
 
+## Companion 0.12.6
+
+- Bundle KutzInventory 1.21.0 and send inventory export 3.15.0. New, all optional: each item's own facts (`observations.items`), kills per day (`observations.kills` with `killsInstall`), the random suffix beside loot, roll, quest and vendor item links (`suffix`, `bonus`), creatures seen inside instances (`npcs[].inst`), every vendor of an item with the day it was last seen (`prices[].vendors`, `vendorDay`, `vendorLimited`) and each character's statistics per day (`statisticsDays`). Nothing 3.14.0 had is changed or removed.
+- Read the new saved shape of unlearned recipes (KutzInventory 1.21.0 keeps each one once per account file). The export is the same from either shape. **Update the Companion before or together with the addon:** Companion 0.12.5 and older reading a file saved by 1.21.0 still export learned recipes, but no unlearned ones.
+- Item tooltips are cleaned before they are exported (`tools/tooltip_clean.js`, English client): colour codes, the durability line (its maximum becomes a field), how many pieces of a set are worn, "Already known", cooldowns, maker lines and the reading character's equipment sets and appearance collection are taken out, because they are the reading character's and not the item's.
+
+## KutzInventory 1.21.0
+
+- Record each item's own facts while drop tracking is on (`Facts.lua`). Every item met in bags, bank, warband and guild bank, worn gear, loot and roll lists, vendor stock and quest rewards is read once per item and game build: name, quality, binding, class and subclass, slot, item level, required level, set, stats and every tooltip line (left and right text, and whether the client showed it red). The read uses a link built from the item ID alone, never the copy in the bag, so no enchant, gem, maker or unique ID is involved. Items wait in a queue: one read per 0.25 s, none in combat, none while the frame rate is under 20, a 10 s pause after a read that took over 8 ms, and the queue stops for the session after three slow reads in a row. The table is capped at 200 kB of the saved file (about 730 items); the least recently met go first and are read again when met again.
+- A random-suffix item is one item with variants. The suffix (on this client a bonus ID on the link) is kept beside the item on loot, roll, quest and vendor links, and under the item's facts as a variant with its full name ("Soldier's Shield of Intellect") and, where the client gives numbers that differ from the plain item's, its stats. It never becomes an item of its own.
+- The NPC summary now also keeps creatures seen inside dungeons, raids and battlegrounds: name, level, type and classification as outside, and instead of map squares (the client gives no position there) the instance map and difficulty with a count.
+- Count kills per day, whether or not the corpse is looted: one number per day, creature ID and level, for creatures that died in front of you while you were fighting and that no other player had tapped. 30 days, at most 800 numbers. No corpse ID, no time of day, nothing about any player.
+- Keep statistics per day: the newest full list as before, and for the last 30 days the values that changed on each day.
+- Keep every vendor seen selling an item (up to nine, the cheapest first) with its NPC ID, price, limited-stock flag and when it was last seen. Earlier only the cheapest was kept.
+- Save unlearned recipes once per account file instead of once per character. The first login moves every character's lists; the lists read back record for record as they were (checked by `tools/check_facts.js`, which also compares the export before and after). On the six-character file this was measured on, that freed 275 kB, which is what the item table's cap was set from.
+- `/kinv perf` prints how many item facts are held and waiting, the kills counted today, and the worst and average time per frame the new code used this session. The numbers are also saved at logout (`KutzInventoryObsDB.perf`).
+- Not yet checked in game. The [1.21.0 checklist](docs/inventory-recording.md#wow-forever-1210-checklist) lists what to try before a release.
+
 ## Companion 0.12.5
 
 - Send inventory export 3.14.0: each character's statistics (the Statistics tab of the achievement window: kills, deaths, quests and the rest) are uploaded again, with the time they were read. Exports 3.0.0 to 3.13.0 left them out for cr0m to read from the Battle.net API, which has none for this client, so cr0m's Statistics tab stayed empty. KutzInventory already records them; no addon change. The bundled addon is still KutzInventory 1.20.1.

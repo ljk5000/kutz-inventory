@@ -95,6 +95,8 @@
 -- (the least recently seen go first), 40 cells each and its own ~500 KB cap, apart from the events' 2 MB: the summary
 -- is replaced, not added to, so it must not push drops out of the events' cap, nor drops push it out (3000 realistic
 -- NPCs with names are ~440 KB by Size below). spds is this file's own tally for spd (attack speed -> times seen), not exported.
+-- Since 1.21.0 a creature seen inside an instance is kept too, without cells: inst = { ["<instance map>:<difficulty>"] =
+-- count } says where (NPC.Inside). Item facts (items), per-day kill counts (kills) and the suffix on item links: Facts.lua.
 
 local ADDON, ns = ...
 
@@ -221,6 +223,8 @@ local function NewId(d)
     return d.prefix .. "-" .. string.format("%06d", d.n)
 end
 
+ns.ObsPrefix = Prefix                           -- Facts.lua names its per-day kill counts by the same install id
+
 local function Round4(v) return math.floor(v * 10000 + 0.5) / 10000 end
 
 local function Where()
@@ -295,13 +299,21 @@ local function ItemId(link)
     return type(link) == "string" and tonumber(link:match("|Hitem:(%d+)") or link:match("^item:(%d+)")) or nil
 end
 
--- An item link cut down to the item's own facts: "|cffa335ee|Hitem:19019|h[Thunderfury]|h|r", or nil.
+-- An item link cut down to the item's own facts: "|cffa335ee|Hitem:19019|h[Thunderfury]|h|r", or nil. A copy with a
+-- random suffix keeps what names the suffix and nothing else (1.21.0, Facts.lua): the link's suffix id and bonus ids,
+-- "|cff1eff00|Hitem:6560::::::::::::1:12729|h[Soldier's Shield of Intellect]|h|r": still item 6560, one item. Every item
+-- that passes here is also met by Facts.lua, which reads its facts once.
 local function ShortLink(link)
     if type(link) ~= "string" then return nil end
     local colour, id = link:match("|c[fF][fF](%x%x%x%x%x%x)"), link:match("|Hitem:(%d+)")
     local name = link:match("|h%[([^%]|]+)%]|h")
     if not (colour and id and name) or #name > 120 then return nil end
-    return "|cff" .. colour:lower() .. "|Hitem:" .. id .. "|h[" .. name .. "]|h|r"
+    local tail = ""
+    if ns.Facts and ns.Facts.Met then
+        local ok, t = pcall(ns.Facts.Met, link)
+        if ok and type(t) == "string" then tail = t end
+    end
+    return "|cff" .. colour:lower() .. "|Hitem:" .. id .. tail .. "|h[" .. name .. "]|h|r"
 end
 
 ---------------------------------------------------------------------------
@@ -1403,7 +1415,8 @@ end
 -- npcs: a summary of the creatures this player looks at, one entry per NPC id, updated in place (see the header)
 ---------------------------------------------------------------------------
 -- DAYS: an entry not seen for this long is dropped on load; SESSION: the session tables below are trimmed past this many npcs
-local NPC = { AGAIN = 30, CELL_AGAIN = 600, CELLS = 40, MAX = 3000, BYTES = 500000, SPEEDS = 4, DAYS = 180, SESSION = 4000 }
+local NPC = { AGAIN = 30, CELL_AGAIN = 600, CELLS = 40, MAX = 3000, BYTES = 500000, SPEEDS = 4, DAYS = 180, SESSION = 4000,
+              INSTS = 8 }
 local NPC_CLASS = { normal = true, elite = true, rare = true, rareelite = true, worldboss = true, trivial = true, minus = true }
 local NPC_RX = { Alliance = "rxA", Horde = "rxH" }      -- the reaction is kept per player faction
 local CT_BEAST, CT_COMPANION = 1, 12            -- UnitCreatureType ids: Beast; Non-combat Pet (someone's companion)
@@ -1634,6 +1647,28 @@ local function Cell(n, npc, w, now)
     cells[key] = (Int(cells[key]) or 0) + 1
 end
 
+-- Inside a dungeon, raid or battleground there are no coordinates (1.21.0): the creature is counted under the instance
+-- instead, n.inst["<instance map>:<difficulty>"] = times seen, at most once per npc and instance per 10 minutes and at
+-- most 8 instances per npc (the least counted goes). The position check never runs there, so seeing it is enough.
+function NPC.Inside(n, npc, w, now)
+    local key = string.format("%d:%d", w.map, w.difficulty or 0)
+    local mine = npcSeen.cells[npc]
+    if not mine then mine = {}; npcSeen.cells[npc] = mine end
+    if mine[key] and now - mine[key] < NPC.CELL_AGAIN then return end
+    mine[key] = now
+    local inst = n.inst
+    if type(inst) ~= "table" then inst = {}; n.inst = inst end
+    if not inst[key] then
+        local k, low, lowN = 0, nil, nil
+        for x, m in pairs(inst) do
+            k, m = k + 1, Int(m) or 0
+            if not lowN or m < lowN or (m == lowN and tostring(x) > tostring(low)) then low, lowN = x, m end
+        end
+        if k >= NPC.INSTS then inst[low] = nil end
+    end
+    inst[key] = (Int(inst[key]) or 0) + 1
+end
+
 -- unit: "target", "mouseover", "npc", "questnpc" or a loot corpse's unit; open: an interaction window is open with it;
 -- svc: the services that window shows it offers (a list), added to its entry even within the 30 s (always a near sighting)
 Sighting = function(unit, open, svc)
@@ -1675,7 +1710,8 @@ Sighting = function(unit, open, svc)
     end
     npcSeen.at[npc], npcSeen.near[npc] = now, near or false     -- also a try that stores nothing waits its 30 s
     local w = Where()
-    if not (w.uiMap and w.x and w.y) then return end            -- inside an instance, or no position
+    local inside = w.itype ~= nil and w.map ~= nil and w.map >= 1   -- in an instance: its map and difficulty stand for the place
+    if not (inside or (w.uiMap and w.x and w.y)) then return end   -- no position and no instance
     local ctName, ctId = Try(UnitCreatureType, unit)
     ctId, ctName = Int(ctId, 1), Label(ctName, 40)
     if ctId == CT_COMPANION then return end
@@ -1731,7 +1767,7 @@ Sighting = function(unit, open, svc)
     end
     if svc then Serve(n, svc) end
     n.day = math.floor(time() / 86400)
-    if near then Cell(n, npc, w, now) end
+    if inside then NPC.Inside(n, npc, w, now) elseif near then Cell(n, npc, w, now) end
     NpcSized(npc, n)
     if npcSeen.count > NPC.MAX or npcSeen.bytes > NPC.BYTES then PruneNpcs(d, true) end
 end
@@ -2609,7 +2645,11 @@ function handlers.START_LOOT_ROLL(rollID, _, ...)
 end
 
 function handlers.CHAT_MSG_LOOT(text) text = Plain(text); Won(text); credit.Loot(text) end
-handlers.UNIT_HEALTH = credit.Died
+function handlers.UNIT_HEALTH(unit)
+    credit.Died(unit)
+    local died = ns.Facts and ns.Facts.Died     -- Facts.lua: kills per day, also for corpses nobody loots
+    if died then pcall(died, unit) end
+end
 
 local function QuestGiverSeen()                 -- the quest window is open with it (questnpc, else npc)
     pcall(Sighting, "questnpc", true)

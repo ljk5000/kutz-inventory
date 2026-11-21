@@ -388,6 +388,14 @@ KutzInventoryDB = {
 					["value"] = 7,
 				}, -- [1]
 			},
+			["statDays"] = {
+				[20403] = {
+					[60] = 6,
+				},
+				[20404] = {
+					[60] = 7,
+				},
+			},
 			["achievementPoints"] = 0,
 			["pvp"] = {
 				["honorableKills"] = 12,
@@ -435,13 +443,8 @@ KutzInventoryDB = {
 							},
 						}, -- [1]
 					},
-					["unlearned"] = {
-						{
-							["recipeID"] = 3914,
-							["name"] = "Brown Linen Pants",
-							["outputItemID"] = 4343,
-							["source"] = "trainer",
-						}, -- [1]
+					["unlearnedIds"] = {
+						3914, -- [1]
 					},
 				},
 			},
@@ -574,11 +577,29 @@ KutzInventoryDB = {
 			},
 		},
 	},
+	["recipeBook"] = {
+		[3914] = {
+			["recipeID"] = 3914,
+			["name"] = "Brown Linen Pants",
+			["outputItemID"] = 4343,
+			["source"] = "trainer",
+		},
+	},
 	["prices"] = {
 		["vendor"] = {
 			["2320"] = {
 				["price"] = 10,
 				["vendor"] = "Some Trader",
+				["npc"] = 1250,
+				["t"] = 1762819200,
+				["also"] = {
+					["Another Trader"] = {
+						["price"] = 12,
+						["npc"] = 1251,
+						["limited"] = true,
+						["t"] = 1762732800,
+					},
+				},
 			},
 		},
 		["sell"] = {
@@ -674,9 +695,9 @@ KutzInventoryObsDB = {
 	["on"] = true,
 	["agreed"] = true,
 	["noted"] = true,
-	["addon"] = "1.20.0",
+	["addon"] = "1.21.0",
 	["prefix"] = "k1f9c2",
-	["n"] = 30,
+	["n"] = 31,
 	["events"] = {
 		{
 			["id"] = "k1f9c2-000017",
@@ -1153,6 +1174,37 @@ KutzInventoryObsDB = {
 			},
 		}, -- [14]
 		{
+			["id"] = "k1f9c2-000031",
+			["t"] = 1762906600,
+			["b"] = "1.60.1.70888",
+			["type"] = "loot",
+			["src"] = {
+				["kind"] = "mob",
+				["npc"] = 2958,
+				["guid"] = "Creature-0-4170-0-1234-2958-000012ABCF",
+				["level"] = 14,
+				["via"] = "slot",
+			},
+			["where"] = {
+				["map"] = 0,
+				["uiMap"] = 1429,
+				["x"] = 0.4219,
+				["y"] = 0.6784,
+			},
+			["who"] = {
+				["level"] = 14,
+				["class"] = 4,
+				["faction"] = "Alliance",
+			},
+			["items"] = {
+				{
+					["id"] = 6560,
+					["n"] = 1,
+					["link"] = "|cff1eff00|Hitem:6560::::::::::::1:12729|h[Soldier's Shield of Intellect]|h|r",
+				}, -- [1]
+			},
+		}, -- [15]
+		{
 			["id"] = "not an id",
 			["t"] = 1762905900,
 			["type"] = "loot",
@@ -1161,7 +1213,7 @@ KutzInventoryObsDB = {
 			},
 			["items"] = {
 			},
-		}, -- [15]
+		}, -- [16]
 	},
 	["npcs"] = {
 		[525] = {
@@ -1220,6 +1272,47 @@ KutzInventoryObsDB = {
 				14, -- [2]
 			},
 			["cls"] = "normal",
+		},
+		[11671] = {
+			["name"] = "Made-up Hound",
+			["lv"] = {
+				62, -- [1]
+				62, -- [2]
+			},
+			["cls"] = "elite",
+			["ct"] = 1,
+			["rxA"] = 2,
+			["day"] = 20404,
+			["inst"] = {
+				["409:9"] = 3,
+			},
+		},
+	},
+	["itemBuilds"] = {
+		"1.60.1.70888", -- [1]
+	},
+	["items"] = {
+		[6560] = {
+			["d"] = 20404,
+			["b"] = 1,
+			["f"] = "2:2:4:6:25:20::INVTYPE_SHIELD",
+			["s"] = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
+			["t"] = "-Soldier's Shield\n-Binds when equipped\n-Off Hand\n>Shield\n-478 Armor\n-+3 Stamina\n-Durability 85 / 85\n!Requires Level 20",
+			["v"] = {
+				["0;12729"] = "Soldier's Shield of Intellect\nITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478",
+			},
+		},
+		[2589] = {
+			["d"] = 20404,
+			["b"] = 1,
+			["f"] = "1:0:7:5:5:0::",
+			["t"] = "-Linen Cloth\n-|cff66bbffCrafting Reagent|r",
+		},
+	},
+	["kills"] = {
+		[20404] = {
+			["2958:14"] = 3,
+			["525:0"] = 1,
 		},
 	},
 }

@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.14.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
+| `inventory-export.v3.schema.json` | **3.15.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations, the NPC summary, item facts and kills per day |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -392,6 +392,78 @@ Labels follow the trainer label rules above (no `|` markup, control characters o
 
 No observation field is intended for coin loot, quest/player money, player chat, guild data or other players' names/GUIDs. Ordinary inventory, monitor errors and raids have different data and must be reviewed separately. Recording defaults on in new installs since addon 1.13.0; existing off choices persist. `/kinv track drops off` also stops the NPC summary; old retained events and the summary still export after it.
 
+### Item facts, random suffixes and kills (3.15.0)
+
+From 3.15.0 (KutzInventory 1.21.0) the observations section may carry `items`, and `kills` with `killsInstall`; `observations.v` stays `1` and an older reader ignores the new keys. A section may hold any of `npcs`, `items` and `kills` with an empty `events` array. All three are recorded only while drop tracking is on, and all of them still export after it is turned off.
+
+```text
+observations: { v: 1, addon, install?, killsInstall?, events: [...], npcs?, items?, kills? }
+items: [ 1-4000 of {                sorted by id; the most recently met kept; at most about 1.5 MB of JSON
+  id:    integer >= 1               the item's own id. One entry per item: a random suffix is a variant, never an entry
+  day:   integer 1-1157407          the last day the item was met: floor(unix time / 86400)
+  build?: string                    the game build the facts were read on ("1.60.1.71037")
+  name:  label 1-120                the item's name without a suffix
+  q?:    integer 0-20               quality (0 poor ... 5 legendary)
+  bind?: integer 0-20               GetItemInfo bindType: 0 none, 1 on pickup, 2 on equip, 3 on use, 4 quest
+  cls?, sub?: integer 0-1000        item class and subclass id
+  ilvl?: integer 0-100000           item level
+  req?:  integer 0-1000             required level (0: none)
+  set?:  integer >= 1               item set id
+  slot?: "INVTYPE_SHIELD"           equip location, when it can be worn
+  durability?: integer >= 1         the maximum, from the tooltip's "Durability n / m" line
+  stats?: { KEY: number }           GetItemStats: the client's stat key (ITEM_MOD_STAMINA_SHORT, RESISTANCE0_NAME for
+                                    armor) -> the number, two decimal places at most, at most 30 keys
+  tip?:  [ 1-60 of line ]           the tooltip top to bottom after the cleaner below; a line is its left text, or
+                                    [left, right] when it has a right text (["Off Hand", "Shield"]); 600 characters each
+  variants?: [ 1-24 of {            the random suffixes of this item that were met, sorted by suffix, then bonus ids
+    suffix?: integer, not 0           the link's suffix id (not used on the Forever client)
+    bonus?:  [ 1-16 of integer >= 1 ] the link's bonus ids, ascending (on the Forever client a suffix is a bonus id)
+    name:    label 1-120              the copy's full name as its link showed it ("Soldier's Shield of Intellect")
+    stats?:  { KEY: number }          GetItemStats for the suffixed link, only when the client answered with numbers
+                                      that differ from the plain item's. Absent means not known, never "the same"
+  } ]                               a variant has suffix, bonus or both
+} ]
+killsInstall: string                the install ids whose counts kills adds up, like install; present exactly when kills is
+kills: [ 1-3000 of {                sorted by day, npc and lv; the newest 30 days
+  day:   integer 1-1157407          floor(unix time / 86400)
+  npc:   integer >= 1               NPC ID from the creature's GUID (the GUID itself is never kept)
+  lv?:   integer 1-255              its level; absent when the client gave none (a skull)
+  n:     integer >= 1               kills counted that day
+} ]
+```
+
+**How an item is read.** The addon reads every item the player meets (bags, bank, warband and guild bank, worn gear, loot and roll lists, vendor stock, quest rewards), once per item and game build, from a link it builds from the item ID alone (`item:6560`), or from the ID and the suffix for a variant. It never reads the copy in the bag, so no enchant, gem, maker or unique ID is involved. The addon's table is capped by its size in the saved file (200 kB, about 730 items); the least recently met are dropped and read again when met again. **An export is therefore not the whole history: a receiver keeps what earlier uploads gave it** and replaces an item's facts when a newer `day` or `build` arrives. When one export merges several saved files, an item's facts come from the file that met it last and its variants from all of them.
+
+**The tooltip is the one the client showed the reading character.** `tools/tooltip_clean.js` takes out what is that character's and not the item's: colour codes and other markup (red only says the reader does not meet a requirement, so "Requires Level 40" stays as plain text), the "Durability n / m" line (its maximum becomes `durability`), how many pieces of a set are worn ("(2/8)" becomes "(8)"; which pieces are worn is told by colour alone), "Already known", "Cooldown remaining", maker and giver lines ("<Made by ...>"), "Equipment Sets: ..." and the appearance-collection line. White space is collapsed. The cleaner is a dependency-free CommonJS module a server can copy as it is; `convert.js` carries the same text and a test fails when the two differ. It knows the English client's lines named here; a line of the reader's own that it does not know stays, so a consumer should prefer the reading most installs agree on before publishing a tooltip.
+
+**A random-suffix item is one item.** "Soldier's Shield of Intellect" is item 6560 with a variant; no part of the export makes it an item of its own. In events, the items of a loot window or roll list, a quest's reward items and a vendor's stock rows may carry `suffix` (integer, not 0) and `bonus` (1-16 ascending integers) beside `id` and `link`; the link still names the plain item's ID and shows the copy's full name. The same pair identifies the variant under `items[].variants`.
+
+**Kills are counts per day, cumulative per install.** A creature is counted when it dies in front of the player (`UNIT_HEALTH` with `UnitIsDead`), no other player has tapped it (`UnitIsTapDenied` is a plain false) and the player is fighting or stopped within the last two seconds, whether or not anyone loots the corpse. The addon keeps 30 days and at most 800 numbers. A day's count only grows, so a later export from the same install **replaces** the counts of the days it lists; it must not be added to an earlier upload. Two installs merged into one export are added up and named in `killsInstall`, joined by "+"; a receiver that already holds counts for one of them alone cannot replace safely and may skip, as with `npcs`. `killsInstall` is separate from `install` because either list can be present without the other. No corpse GUID, no time of day and nothing about any player is kept. The attribution is a heuristic: a kill by another group that tapped nothing (a guard, for example) while the player fights nearby can be counted, and a kill the player never had as target, mouseover, focus or nameplate is not.
+
+**Creatures inside instances.** An `npcs[]` entry may carry `inst: [ 1-8 of [instance map, difficulty, n] ]`, sorted by map then difficulty: the instances it was seen in (`GetInstanceInfo` instance ID and difficulty ID) and how often, at most one count per NPC and instance per 10 minutes of a session, the 8 most counted. The client gives no position inside an instance, so such an entry has `inst` and no `cells` unless the creature was also seen outside.
+
+### Vendors, statistics per day and recipes (3.15.0)
+
+`prices[itemId]` keeps `vendorBuy` and `vendor` (the cheapest vendor seen) and may add:
+
+```text
+vendorDay?:     "YYYY-MM-DD"        the day (UTC) the cheapest vendor was last seen selling it; never a time of day
+vendorLimited?: true                its stock of the item was limited when last seen
+vendors?: [ 1-20 of {               every vendor seen selling it, cheapest first, then by name
+  name:  string 1-120               the vendor's name (an NPC)
+  npc?:  integer >= 1               its NPC ID, when the addon read it
+  price: copper                     what it charges per item
+  limited?: true
+  day?:  "YYYY-MM-DD"
+} ]
+```
+
+KutzInventory 1.21.0 keeps up to nine vendors per item in a saved file; a file saved by an older addon knows only the cheapest, which is then the one entry.
+
+`characters[].statisticsDays: [ 1-30 of { day, values: [ 1-400 of { id, value } ] } ]`, oldest day first, lists for each of the last 30 days the statistics whose value differed from the reading before, with the value of that day's last reading. `statistics` stays the newest full list; a first reading records no day, and a day on which nothing changed is absent. Values can include amounts of gold, like `statistics`.
+
+`characters[].recipes[].unlearned` is unchanged. KutzInventory 1.21.0 saves each unlearned recipe once per account file (`KutzInventoryDB.recipeBook`, with each character's list holding IDs) and the exporter writes the same list from either saved shape. An exporter older than 3.15.0 reading such a file writes no `unlearned` lists.
+
 ## Auction scans
 
 A document includes `schemaVersion`, region (client region mapped to `us/kr/eu/tw/cn`, default `us` if unknown), realm (the exact client string, e.g. `Example Realm`), house (`alliance/horde/neutral`), start/scan times, completion, queued/answered counts, addon identity/version and `items` keyed by item ID.
@@ -425,4 +497,4 @@ Consumers should tolerate unknown keys/types for forward compatibility; schema v
 
 ## Privacy for consumers
 
-Inventory is private user data, not a ready-made public profile. Require an explicit sharing policy before exposing GUIDs, location/hearth, money, banks/guild tabs, activity times, diagnostics, monitor messages/stacks, raids (other players and loot) or observations (identity and location history; the NPC summary's last-seen days and the squares stood in). Names/guilds and all the other character details also deserve intentional sharing controls. Auction documents omit these character fields, but the authenticated receiver can associate uploads with a key and connection metadata. This repository cannot guarantee server access controls or anonymous aggregation.
+Inventory is private user data, not a ready-made public profile. Require an explicit sharing policy before exposing GUIDs, location/hearth, money, banks/guild tabs, activity times, diagnostics, monitor messages/stacks, raids (other players and loot) or observations (identity and location history; the NPC summary's last-seen days and the squares stood in; which items the install's characters met and on which day last; what they killed on which day). Names/guilds and all the other character details also deserve intentional sharing controls. Auction documents omit these character fields, but the authenticated receiver can associate uploads with a key and connection metadata. This repository cannot guarantee server access controls or anonymous aggregation.

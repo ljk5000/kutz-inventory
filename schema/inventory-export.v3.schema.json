@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/inventory-export.v3.schema.json",
   "title": "KutzInventory export 3.x",
-  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, PvP or achievement points, and equipped items are only slotId, id and link (3.0.0 to 3.13.0 also left out statistics). Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took); npcs entries may carry svc, the services an NPC was seen to offer; quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin: the reputation changes, never a standing). 3.12.0: gossip and quest-greeting text game-authored readable pages and NPC spoken lines. Quest accepts may carry objective definitions and points of interest on the player's acceptance map. 3.13.0: tame observations (a hunter's tamed beast and what its new pet showed) and credit observations (which creature, item or object counted for a quest objective). 3.14.0: characters[].statistics is exported again, with its updated.statistics stamp.",
+  "description": "The JSON that tools/inventory_export.js --format 3 writes (export/inventory.json) and that the Companion uploads to cr0m. Version 3.x omits selected character-profile fields listed below. Since 3.0.0 there are no stats, sheet, talents, spec, role, reputation, PvP or achievement points, and equipped items are only slotId, id and link (3.0.0 to 3.13.0 also left out statistics). Money is in copper. Times are ISO-8601 UTC strings or null. Objects marked 'open' are copied from the game as-is and may gain keys in any 3.x release; readers must ignore keys they do not know. See schema/README.md for the versioning rules. 3.1.0 adds raids: the cr0m raids tracked with /kinv raid that recorded something. 3.2.0 adds observations: drop, quest and vendor events recorded while enabled (/kinv track; on by default for a new install since addon 1.13.0). Retained events export even after recording is turned off. 3.4.0 adds characters[].crafted: the items the character created, counted as they are made. 3.6.0: quest observations may carry text, the quest's own words as the game showed them. 3.7.0: loot observations may come from a corpse's group-loot roll list (src.via roll, src.threshold), name a boss's encounter (src.encounter), and mark the item the character won by roll (items[].won). Optional characters[].legacyTree added in inventory 2.1.0 / 3.8.0. 3.9.0: trainer observations (a class or profession trainer's list as the game showed it, with costs, spell ids and the trainer's reaction rx); vendor observations may carry rx and filtered. 3.10.0: observations may carry npcs, a cumulative per-install summary of the creatures the player looked at, with install naming the install it summarises. 3.11.0: taxi observations (a flight master's reachable nodes and prices) and flight observations (how long a flight between two nodes took); npcs entries may carry svc, the services an NPC was seen to offer; quest observations may carry lv, group, freq, timed and startItem (accept) and xp and rep (turnin: the reputation changes, never a standing). 3.12.0: gossip and quest-greeting text game-authored readable pages and NPC spoken lines. Quest accepts may carry objective definitions and points of interest on the player's acceptance map. 3.13.0: tame observations (a hunter's tamed beast and what its new pet showed) and credit observations (which creature, item or object counted for a quest objective). 3.14.0: characters[].statistics is exported again, with its updated.statistics stamp. 3.15.0 adds, all optional: observations.items, observations.kills (with killsInstall), npcs[].inst, suffix and bonus beside an observation item's link, characters[].statisticsDays, and vendorDay / vendorLimited / vendors on a price.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -327,6 +327,56 @@
         "vendorSell": {
           "$ref": "#/$defs/copperOrNull",
           "description": "What a vendor pays you per item (the game's sell price)."
+        },
+        "vendorDay": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Since 3.15.0: the day (UTC, YYYY-MM-DD) the cheapest vendor was last seen selling it. Never a time of day. Absent when no vendor was seen or the saved file has no time for it."
+        },
+        "vendorLimited": {
+          "const": true,
+          "description": "Since 3.15.0: the cheapest vendor's stock of it was limited when last seen. Absent otherwise."
+        },
+        "vendors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "description": "Since 3.15.0: every vendor seen selling it (KutzInventory 1.21.0 keeps up to 9 per saved file; older saved files know only the cheapest), cheapest first, then by name. A vendor is known by its name; npc is there when the addon read its id.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "price"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "The vendor's name (an NPC, never a player)."
+              },
+              "npc": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "The vendor's NPC ID, from its GUID (the GUID itself is never stored)."
+              },
+              "price": {
+                "$ref": "#/$defs/copper",
+                "description": "What it charges per item."
+              },
+              "limited": {
+                "const": true,
+                "description": "Its stock of the item was limited when last seen."
+              },
+              "day": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                "description": "The day (UTC) it was last seen selling it."
+              }
+            }
+          }
         }
       }
     },
@@ -663,6 +713,63 @@
         },
         "legacyTree": {
           "$ref": "#/$defs/legacyTree"
+        },
+        "statisticsDays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "description": "Since 3.15.0 (KutzInventory 1.21.0): the statistics whose value changed, per day, for the last 30 days, oldest day first. statistics stays the newest full list; this is the history a reader can draw a per-day line from. A day lists a statistic when a reading that day differed from the reading before it, with the value of the day's last reading. A first reading records no day. Values can include amounts of gold, like statistics; consumers must apply their own access controls.",
+          "items": {
+            "type": "object",
+            "required": [
+              "day",
+              "values"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "day": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1157407,
+                "description": "Whole days since 1970-01-01 (UTC), floor(unix time / 86400)."
+              },
+              "values": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 400,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9999999999,
+                      "description": "The statistic's id, as in statistics[].id."
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "pattern": "^[^|\\u0000-\\u001f]+$"
+                        }
+                      ],
+                      "description": "The game's own text or number, as in statistics[].value."
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -1294,7 +1401,7 @@
     },
     "observations": {
       "type": "object",
-      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Since 3.12.0 also game-authored gossip, quest greetings readable pages and lines spoken by identified NPCs. Since 3.13.0 also hunter tames and objective credit (which creature, item or object counted for a quest objective; never the progress numbers). Never gold (no coin loot, quest money or player money), player chat, mail or guild data. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know.",
+      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Since 3.12.0 also game-authored gossip, quest greetings readable pages and lines spoken by identified NPCs. Since 3.13.0 also hunter tames and objective credit (which creature, item or object counted for a quest objective; never the progress numbers). Never gold (no coin loot, quest money or player money), player chat, mail or guild data. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know. Since 3.15.0 also items (each item's own facts, read once per item and game build), kills (with killsInstall: creatures killed per day) and, on npcs, inst (creatures seen inside instances); events may be empty when any of them is present.",
       "required": [
         "v",
         "addon",
@@ -1335,6 +1442,30 @@
           "items": {
             "$ref": "#/$defs/observationNpc"
           }
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4000,
+          "description": "Since 3.15.0: the items' own facts, sorted by id, at most 4000 (the most recently met) and about 1.5 MB of JSON. The addon keeps what fits its saved-file budget and reads an item again when it is met after being dropped, so an export is not the whole history: a reader keeps what it was given before.",
+          "items": {
+            "$ref": "#/$defs/observationItem"
+          }
+        },
+        "killsInstall": {
+          "type": "string",
+          "pattern": "^[0-9a-z]{4,16}([+][0-9a-z]{4,16})*$",
+          "maxLength": 340,
+          "description": "Since 3.15.0, with kills: the install ids whose counts kills adds up, joined by \"+\" (the same ids as install)."
+        },
+        "kills": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3000,
+          "description": "Since 3.15.0: kills per day, sorted by day, npc and level, the last 30 days the addon kept. Cumulative per install: a later export from the same install replaces the counts of the days it lists (a day's count only grows).",
+          "items": {
+            "$ref": "#/$defs/observationKill"
+          }
         }
       },
       "dependentRequired": {
@@ -1343,6 +1474,12 @@
         ],
         "install": [
           "npcs"
+        ],
+        "kills": [
+          "killsInstall"
+        ],
+        "killsInstall": [
+          "kills"
         ]
       },
       "anyOf": [
@@ -1360,6 +1497,26 @@
           ],
           "properties": {
             "npcs": {
+              "type": "array"
+            }
+          }
+        },
+        {
+          "required": [
+            "items"
+          ],
+          "properties": {
+            "items": {
+              "type": "array"
+            }
+          }
+        },
+        {
+          "required": [
+            "kills"
+          ],
+          "properties": {
+            "kills": {
               "type": "array"
             }
           }
@@ -1447,7 +1604,7 @@
       "type": "string",
       "maxLength": 200,
       "pattern": "^\\|cff[0-9a-f]{6}\\|Hitem:[0-9]{1,10}\\|h\\[[^\\]|]{1,120}\\]\\|h\\|r$",
-      "description": "Since 3.3.0: the item's link cut down to its quality colour, id and name, e.g. |cffa335ee|Hitem:19019|h[Thunderfury, Blessed Blade]|h|r. The id is the item's own. Lets cr0m name an item no database has yet. The rest of the game's link (the player's level, spec, enchants) is never kept."
+      "description": "Since 3.3.0: the item's link cut down to its quality colour, id and name, e.g. |cffa335ee|Hitem:19019|h[Thunderfury, Blessed Blade]|h|r. The id is the item's own. Lets cr0m name an item no database has yet. The rest of the game's link (the player's level, spec, enchants) is never kept. A copy with a random suffix has the same link (the plain item's id); since 3.15.0 its suffix is said beside it, in suffix / bonus."
     },
     "observationEvent": {
       "description": "One recorded event. type picks the shape.",
@@ -1592,6 +1749,26 @@
                   "link": {
                     "$ref": "#/$defs/observationLink"
                   },
+                  "suffix": {
+                    "type": "integer",
+                    "minimum": -2147483647,
+                    "maximum": 2147483647,
+                    "not": {
+                      "const": 0
+                    },
+                    "description": "Since 3.15.0: this copy's random suffix id, from its link (\"of the Bear\"). The item is still id: a suffixed copy is a variant of that one item, never an item of its own. Absent for a copy with no suffix id."
+                  },
+                  "bonus": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "description": "Since 3.15.0: this copy's bonus ids, from its link, ascending. On the Forever client a random suffix is a bonus id (6560 with bonus [12729] is \"Soldier's Shield of Intellect\"). Same rule as suffix: one item, a variant."
+                  },
                   "won": {
                     "const": true,
                     "description": "Since 3.7.0: the recording character won this item by roll (its own \"You won\" loot line). Absent otherwise; who else won is never recorded."
@@ -1698,6 +1875,26 @@
                       },
                       "link": {
                         "$ref": "#/$defs/observationLink"
+                      },
+                      "suffix": {
+                        "type": "integer",
+                        "minimum": -2147483647,
+                        "maximum": 2147483647,
+                        "not": {
+                          "const": 0
+                        },
+                        "description": "Since 3.15.0: this copy's random suffix id, from its link (\"of the Bear\"). The item is still id: a suffixed copy is a variant of that one item, never an item of its own. Absent for a copy with no suffix id."
+                      },
+                      "bonus": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "description": "Since 3.15.0: this copy's bonus ids, from its link, ascending. On the Forever client a random suffix is a bonus id (6560 with bonus [12729] is \"Soldier's Shield of Intellect\"). Same rule as suffix: one item, a variant."
                       }
                     }
                   }
@@ -2034,6 +2231,26 @@
                   },
                   "link": {
                     "$ref": "#/$defs/observationLink"
+                  },
+                  "suffix": {
+                    "type": "integer",
+                    "minimum": -2147483647,
+                    "maximum": 2147483647,
+                    "not": {
+                      "const": 0
+                    },
+                    "description": "Since 3.15.0: this copy's random suffix id, from its link (\"of the Bear\"). The item is still id: a suffixed copy is a variant of that one item, never an item of its own. Absent for a copy with no suffix id."
+                  },
+                  "bonus": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "description": "Since 3.15.0: this copy's bonus ids, from its link, ascending. On the Forever client a random suffix is a bonus id (6560 with bonus [12729] is \"Soldier's Shield of Intellect\"). Same rule as suffix: one item, a variant."
                   },
                   "price": {
                     "type": "integer",
@@ -3212,6 +3429,38 @@
             "minItems": 4,
             "maxItems": 4
           }
+        },
+        "inst": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "description": "Since 3.15.0 (KutzInventory 1.21.0): the instances it was seen in, [[instance map, difficulty, n]], sorted by map then difficulty; the 8 most counted. Inside an instance the client gives no position, so a creature seen only there has inst and no cells. At most one count per instance per 10 minutes in a session.",
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": false,
+            "prefixItems": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "The instance's map ID: GetInstanceInfo() instanceID"
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 99999,
+                "description": "GetInstanceInfo() difficultyID"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "times counted"
+              }
+            ]
+          }
         }
       }
     },
@@ -3233,6 +3482,246 @@
         "pattern": "[|\\u0000-\\u0009\\u000b-\\u001f\\u007f]|[A-Za-z]+-[0-9]+-[0-9]+"
       },
       "description": "Game prose with line breaks, without UI markup, GUID-shaped strings or other control characters."
+    },
+    "observationItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "day",
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "Since 3.15.0 (KutzInventory 1.21.0): what the game itself says about one item, read once per item and game build from a link made of the item id alone (never from a character's copy: no enchant, gems, maker or unique id), and read again when the build changes. The addon reads every item the player meets (bags, bank, gear, loot, vendor stock, quest rewards), a few a second, never in combat. The tooltip is the one the client showed the reading character with what is that character's own taken out (see tip).",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Item ID. One entry per item: random suffixes are variants of it, never entries of their own."
+        },
+        "day": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1157407,
+          "description": "The last day the item was met: whole days since 1970-01-01 (UTC). Never a time of day."
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}(\\.[0-9]{1,6}){1,3}$",
+          "description": "The game build the facts were read on (GetBuildInfo version and build, \"1.60.1.71037\")."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[^|\\u0000-\\u001f]+$",
+          "description": "The item's name (GetItemInfo), without a suffix."
+        },
+        "q": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "description": "Quality (0 poor ... 5 legendary)."
+        },
+        "bind": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "description": "GetItemInfo bindType: 0 none, 1 on pickup, 2 on equip, 3 on use, 4 quest."
+        },
+        "cls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Item class ID."
+        },
+        "sub": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Item subclass ID."
+        },
+        "ilvl": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "Item level."
+        },
+        "req": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Required level (0: none)."
+        },
+        "set": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Item set ID, when it belongs to a set."
+        },
+        "slot": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{1,40}$",
+          "description": "Equip location (INVTYPE_SHIELD), when it can be worn."
+        },
+        "durability": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999999,
+          "description": "Maximum durability, from the tooltip's \"Durability n / m\" line (the line itself is left out of tip)."
+        },
+        "stats": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 30,
+          "propertyNames": {
+            "pattern": "^[A-Z0-9_]{1,60}$"
+          },
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "GetItemStats for the link: the client's stat key (ITEM_MOD_STAMINA_SHORT, RESISTANCE0_NAME for armor ...) -> the number, two decimal places at most."
+        },
+        "tip": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 60,
+          "description": "The tooltip's lines, top to bottom, after the cleaner in tools/tooltip_clean.js: a line is its left text, or [left, right] when it has a right text (\"Off Hand\" / \"Shield\"). English client. Taken out: colour codes and other markup (red only says the reading character does not meet a requirement), the durability line, set-piece counts (\"(2/8)\" becomes \"(8)\"), \"Already known\", cooldowns, maker or giver lines, \"Equipment Sets: ...\" and the appearance-collection line. Lines such as \"Requires Level 40\" or \"Classes: Mage\" are the item's own and stay.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+              },
+              {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 600,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                }
+              }
+            ]
+          }
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24,
+          "description": "The random suffixes of this item that were met, sorted by suffix then bonus ids. They belong to this one item: a reader must never make an item out of a variant.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "suffix"
+                ],
+                "properties": {
+                  "suffix": {
+                    "type": "integer"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "bonus"
+                ],
+                "properties": {
+                  "bonus": {
+                    "type": "array"
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "suffix": {
+                "type": "integer",
+                "minimum": -2147483647,
+                "maximum": 2147483647,
+                "not": {
+                  "const": 0
+                },
+                "description": "The link's suffix id (not used on the Forever client, whose suffixes are bonus ids)."
+              },
+              "bonus": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "description": "The link's bonus ids, ascending."
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^|\\u0000-\\u001f]+$",
+                "description": "The copy's full name as its link showed it (\"Soldier's Shield of Intellect\")."
+              },
+              "stats": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 30,
+                "propertyNames": {
+                  "pattern": "^[A-Z0-9_]{1,60}$"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "description": "GetItemStats for the suffixed link, when the client answered with numbers that differ from the plain item's (absent: not known, never \"the same\")."
+              }
+            }
+          }
+        }
+      }
+    },
+    "observationKill": {
+      "type": "object",
+      "required": [
+        "day",
+        "npc",
+        "n"
+      ],
+      "additionalProperties": false,
+      "description": "Since 3.15.0 (KutzInventory 1.21.0): how many of one creature died to the player's group on one day. Counted when a creature dies in front of the player while the player is fighting and no other player has tapped it, whether or not anyone loots it. One number per day, creature and level: no corpse GUID, no time of day, nothing about any player.",
+      "properties": {
+        "day": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1157407,
+          "description": "Whole days since 1970-01-01 (UTC)."
+        },
+        "npc": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "The creature's NPC ID, from its GUID (the GUID itself is never stored)."
+        },
+        "lv": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255,
+          "description": "Its level (UnitLevel). Absent when the client gave none (a skull)."
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Kills counted."
+        }
+      }
     }
   }
 }

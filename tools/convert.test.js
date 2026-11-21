@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.14.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.15.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -196,10 +196,10 @@ const WHO = `who = { level = 60, class = 4, faction = "Alliance" }`;
 
 test("observations: the example's events are exported in the documented shape; the broken one is not; 2.x has none", () => {
   const obs = convert.convertSavedVariables([LUA]).inventory.observations;
-  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.20.0");
+  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.21.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame", "30credit"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame", "30credit", "31loot"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
@@ -627,7 +627,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.14.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.15.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });
@@ -691,12 +691,13 @@ const npcFile = (npcs, extra = `prefix = "k1f9c2"`) =>
 test("observations 3.10.0: the example's npcs are exported sorted by npc with the install id; broken parts left out", () => {
   const obs = convert.convertSavedVariables([LUA]).inventory.observations;
   assert.equal(obs.install, "k1f9c2");
-  assert.deepEqual(Object.keys(obs), ["v", "addon", "install", "events", "npcs"]);
+  assert.deepEqual(Object.keys(obs), ["v", "addon", "install", "events", "npcs", "items", "killsInstall", "kills"]);
   assert.deepEqual(obs.npcs, [
     { npc: 525, name: "Made-up Wolf", lv: [10, 12], cls: "normal", ct: 1, fam: 1, rxA: 2, spd: 200, day: 20404, cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] },
     { npc: 1346, name: "Made-up Tailor", lv: [30, 30], cls: "normal", ct: 7, rxA: 5, sub: "Made-up Tailoring Supplies", svc: ["repair", "vendor"],
       day: 20405, cells: [[1453, 63, 72, 4]] },
-    { npc: 6109, name: "Made-up Dragon", boss: true, cls: "worldboss", ct: 2, rxA: 1, day: 20403 }], "no spds, no entry without a day, no junk cell");
+    { npc: 6109, name: "Made-up Dragon", boss: true, cls: "worldboss", ct: 2, rxA: 1, day: 20403 },
+    { npc: 11671, name: "Made-up Hound", lv: [62, 62], cls: "elite", ct: 1, rxA: 2, day: 20404, inst: [[409, 9, 3]] }], "no spds, no entry without a day, no junk cell");
 });
 
 test("observations 3.10.0: npcs keep only the documented fields with the right types and ranges", () => {
@@ -772,4 +773,252 @@ test("observations 3.10.0: at most 3000 npcs, the most recently seen kept; reali
   for (let i = 1; i <= 3000; i++) huge[i] = { day: 20400, cells: Object.fromEntries(Array.from({ length: 40 }, (_, j) => [`1429:${j}:${i % 100}`, 99])) };
   const capped = convert.exportObservations([{ prefix: "k1f9c2", npcs: huge }]);
   assert.ok(JSON.stringify(capped.npcs).length <= 1000000 && capped.npcs.length < 3000, "about 1 MB at most");
+});
+
+// ---------------------------------------------------------------------------
+// 3.15.0 (KutzInventory 1.21.0): item facts, kills per day, suffixes on links, creatures inside instances, every
+// vendor of an item, statistics per day, unlearned recipes saved once per account file
+// ---------------------------------------------------------------------------
+const factsFile = (body, extra = `prefix = "k1f9c2"`) =>
+  `KutzInventoryDB = { chars = {} }\nKutzInventoryObsDB = { v = 1, on = true, addon = "1.21.0", ${extra}, events = {}, ${body} }`;
+const SHIELD_ITEM = `[6560] = { d = 20404, b = 1, f = "2:2:4:6:25:20::INVTYPE_SHIELD", s = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
+  t = "-Soldier's Shield\\n-Binds when equipped\\n-Off Hand\\n>Shield\\n-478 Armor\\n-+3 Stamina\\n-Durability 65 / 65\\n!Requires Level 20",
+  v = { ["0;12729"] = "Soldier's Shield of Intellect\\nITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478", ["0;12741"] = "Soldier's Shield of the Bear\\n" } }`;
+
+test("observations 3.15.0: an item's facts are exported once, a random suffix as a variant of that one item", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([factsFile(`itemBuilds = { "1.60.1.71037" }, items = { ${SHIELD_ITEM},
+    [2589] = { d = 20403, b = 1, f = "1:0:7:5:5:0::", n = "Linen Cloth" },
+    [1] = { d = 20403, b = 9, f = "bad", n = "Named Only" },
+    [2] = { b = 1, n = "No day" }, [3] = { d = 20403, b = 1, f = "1:0:7:5:5:0::" }, [4] = "junk", ["x"] = { d = 20403, n = "Bad id" },
+    [5] = { d = 20403, n = "A|cffname" } }`)]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  const items = doc.observations.items;
+  assert.deepEqual(items.map((i) => i.id), [1, 2589, 6560], "by id; an entry without a day or a name, a bad id, markup in a name: left out");
+  assert.deepEqual(items[0], { id: 1, day: 20403, name: "Named Only" }, "facts that do not read as numbers, and a build the file does not list, are left out");
+  assert.deepEqual(items[1], { id: 2589, day: 20403, build: "1.60.1.71037", name: "Linen Cloth", q: 1, bind: 0, cls: 7, sub: 5, ilvl: 5, req: 0 });
+  assert.deepEqual(items[2], {
+    id: 6560, day: 20404, build: "1.60.1.71037", name: "Soldier's Shield", q: 2, bind: 2, cls: 4, sub: 6, ilvl: 25, req: 20, slot: "INVTYPE_SHIELD",
+    durability: 65, stats: { ITEM_MOD_STAMINA_SHORT: 3, RESISTANCE0_NAME: 478 },
+    tip: ["Soldier's Shield", "Binds when equipped", ["Off Hand", "Shield"], "478 Armor", "+3 Stamina", "Requires Level 20"],
+    variants: [{ bonus: [12729], name: "Soldier's Shield of Intellect", stats: { ITEM_MOD_INTELLECT_SHORT: 5, RESISTANCE0_NAME: 478 } },
+               { bonus: [12741], name: "Soldier's Shield of the Bear" }],
+  });
+  assert.equal(items.filter((i) => /Shield/.test(i.name)).length, 1, "a random-suffix item is one item, never several");
+  assert.equal(convert.convertSavedVariables([factsFile(`items = { ${SHIELD_ITEM} }`)], { format: 2 }).inventory.observations, undefined, "2.x has none");
+  // items alone are an observations section (no events, no npcs), and name the addon that read them
+  assert.deepEqual(Object.keys(doc.observations), ["v", "addon", "events", "items"]);
+  assert.equal(doc.observations.addon, "1.21.0");
+});
+
+test("observations 3.15.0: item variants keep only a sound key, name and numbers; 24 at most", () => {
+  const many = Array.from({ length: 30 }, (_, i) => `["0;${13000 + i}"] = "Shield ${i}\\n"`).join(", ");
+  const items = convert.exportItems([{ items: { 6560: { d: 20404, n: "Soldier's Shield", v: {
+    "0;12729": "Of Intellect\nITEM_MOD_INTELLECT_SHORT=5,bad key=1,OTHER=x,TOO=1.234", "1203;": "Old Suffix\n", "-12;": "Negative\n", "7;9:3": "Both\n",
+    "0;": "No suffix at all\n", "junk": "Junk\n", "0;1:2:3:4:5:6:7:8:9:10:11:12:13:14:15:16:17": "Too many\n", "0;5": 7, "0;6": "Player-1-0000002A\n", "0;7": "A|cffname\n",
+  } } } }]);
+  assert.deepEqual(items[0].variants, [{ suffix: -12, name: "Negative" }, { bonus: [12729], name: "Of Intellect", stats: { ITEM_MOD_INTELLECT_SHORT: 5 } },
+    { suffix: 7, bonus: [3, 9], name: "Both" }, { suffix: 1203, name: "Old Suffix" }]);
+  const capped = convert.convertSavedVariables([factsFile(`items = { [6560] = { d = 20404, n = "Soldier's Shield", v = { ${many} } } }`)]).inventory.observations.items;
+  assert.equal(capped.length, 1);
+  assert.equal(capped[0].variants.length, 24);
+});
+
+test("observations 3.15.0: the tooltip is cleaned on the way out: no prices, durability as a number, nothing of a character", () => {
+  const tip = ["-Made-up Blade", "-Binds when picked up", "-Unique", "-Main Hand", ">Sword", "-10 - 20 Damage", ">Speed 2.50", "-(6.0 damage per second)",
+    "-Durability 30 / 90", "-Classes: Warrior", "]Paladin", "!Requires Level 40", "-Equip: +10 Attack Power.", "-\"A made-up line of flavour.\"",
+    "-<Made by Exampleplayer>", "-Equipment Sets: Tank", "-You have not collected this appearance", "-|cff00ff00Use:|r Does|nsomething."].join("\n");
+  const item = convert.exportItems([{ items: { 100: { d: 20404, t: tip } } }])[0];
+  assert.equal(item.name, "Made-up Blade", "the name is the tooltip's first line when none was saved");
+  assert.equal(item.durability, 90);
+  const flat = JSON.stringify(item.tip);
+  for (const gone of ["Made by", "Exampleplayer", "Equipment Sets", "collected", "Durability", "|c", "|r", "|n"]) {
+    assert.ok(!flat.includes(gone), "not in the exported tooltip: " + gone + " " + flat);
+  }
+  assert.deepEqual(item.tip.slice(0, 5), ["Made-up Blade", "Binds when picked up", "Unique", ["Main Hand", "Sword"], ["10 - 20 Damage", "Speed 2.50"]]);
+  assert.ok(item.tip.some((l) => Array.isArray(l) && l[0] === "Classes: Warrior" && l[1] === "Paladin") && item.tip.includes("Requires Level 40"));
+});
+
+test("observations 3.15.0: two saved files' items merge: the newest reading, every variant; 4000 items at most", () => {
+  const a = factsFile(`itemBuilds = { "1.60.1.71037" }, items = { [6560] = { d = 20404, b = 1, n = "Soldier's Shield", f = "2:2:4:6:25:20::", v = { ["0;12729"] = "Of Intellect\\n" } },
+    [1] = { d = 20404, n = "Only in A" } }`, `prefix = "aa1100"`);
+  const b = factsFile(`itemBuilds = { "1.60.0.70000", "1.60.2.72000" }, items = { [6560] = { d = 20405, b = 2, n = "Soldier's Shield", f = "2:2:4:6:26:20::",
+    v = { ["0;12741"] = "Of the Bear\\n", ["0;12729"] = "Of Intellect\\nITEM_MOD_INTELLECT_SHORT=6" } } }`, `prefix = "bb2200"`);
+  for (const files of [[a, b], [b, a]]) {
+    const items = convert.convertSavedVariables(files).inventory.observations.items;
+    assert.deepEqual(items, [{ id: 1, day: 20404, name: "Only in A" },
+      { id: 6560, day: 20405, build: "1.60.2.72000", name: "Soldier's Shield", q: 2, bind: 2, cls: 4, sub: 6, ilvl: 26, req: 20,
+        variants: [{ bonus: [12729], name: "Of Intellect", stats: { ITEM_MOD_INTELLECT_SHORT: 6 } }, { bonus: [12741], name: "Of the Bear" }] }]);
+  }
+  const many = {};
+  for (let i = 1; i <= 4100; i++) many[i] = { d: i <= 100 ? 20300 : 20400, b: 1, f: "1:0:7:5:5:0::", n: "Item " + i, t: "-Item " + i + "\n-A line of text" };
+  const capped = convert.exportItems([{ itemBuilds: { 1: "1.60.1.71037" }, items: many }]);
+  assert.equal(capped.length, 4000);
+  assert.ok(capped.every((x) => x.id > 100) && capped.every((x, i) => i === 0 || capped[i - 1].id < x.id), "the most recently met are kept, sorted by id");
+  assert.equal(convert.exportItems([{ items: {} }, null, { items: "junk" }]), null);
+});
+
+test("observations 3.15.0: kills are counts per day, creature and level, named by install; never a corpse id or a name", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([factsFile(`kills = { [20404] = { ["2958:14"] = 3, ["2958:15"] = 1, ["525:0"] = 2, ["6:256"] = 1, ["0:5"] = 1, ["7:1"] = 0,
+    ["8:1"] = 1.5, ["Creature-0-1-2-3-9-000001"] = 4, junk = 1 }, [20403] = { ["2958:14"] = 5 }, ["x"] = { ["1:1"] = 1 }, [0] = { ["1:1"] = 1 } }`)]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  const obs = doc.observations;
+  assert.deepEqual(Object.keys(obs), ["v", "addon", "events", "killsInstall", "kills"], "kills alone are an observations section; install stays the npc summary's");
+  assert.equal(obs.killsInstall, "k1f9c2");
+  assert.deepEqual(obs.kills, [{ day: 20403, npc: 2958, lv: 14, n: 5 }, { day: 20404, npc: 525, n: 2 }, { day: 20404, npc: 2958, lv: 14, n: 3 },
+    { day: 20404, npc: 2958, lv: 15, n: 1 }], "by day, npc and level; no level when the client gave none; anything else is left out");
+  assert.ok(!JSON.stringify(obs).includes("Creature-"), "no GUID");
+  assert.equal(convert.exportKills([{ kills: { 20404: { "1:1": 1 } } }]), null, "counts without an install id cannot be told apart later: left out");
+  assert.equal(convert.exportKills([{ prefix: "not an id!", kills: { 20404: { "1:1": 1 } } }]), null);
+});
+
+test("observations 3.15.0: the same install twice counts once (the larger number); two installs add up; the newest 30 days", () => {
+  const older = factsFile(`kills = { [20404] = { ["2958:14"] = 3, ["6:1"] = 1 } }`, `prefix = "zz9900"`);
+  const newer = factsFile(`kills = { [20404] = { ["2958:14"] = 5 }, [20405] = { ["2958:14"] = 1 } }`, `prefix = "zz9900"`);
+  const other = factsFile(`kills = { [20404] = { ["2958:14"] = 2 } }`, `prefix = "aa1100"`);
+  for (const files of [[older, newer], [newer, older]]) {
+    const obs = convert.convertSavedVariables(files).inventory.observations;
+    assert.equal(obs.killsInstall, "zz9900");
+    assert.deepEqual(obs.kills, [{ day: 20404, npc: 6, lv: 1, n: 1 }, { day: 20404, npc: 2958, lv: 14, n: 5 }, { day: 20405, npc: 2958, lv: 14, n: 1 }]);
+  }
+  const both = convert.convertSavedVariables([newer, other]).inventory.observations;
+  assert.equal(both.killsInstall, "aa1100+zz9900");
+  assert.deepEqual(both.kills, [{ day: 20404, npc: 2958, lv: 14, n: 7 }, { day: 20405, npc: 2958, lv: 14, n: 1 }]);
+  const kills = {};
+  for (let d = 0; d < 40; d++) kills[20300 + d] = { "1:1": 1 };
+  const capped = convert.exportKills([{ prefix: "k1f9c2", kills }]).kills;
+  assert.deepEqual([capped.length, capped[0].day, capped[29].day], [30, 20310, 20339]);
+  const big = {};
+  for (let i = 1; i <= 3100; i++) big[i + ":1"] = 1;
+  const most = convert.exportKills([{ prefix: "k1f9c2", kills: { 20403: big, 20404: { "1:1": 1 } } }]).kills;
+  assert.equal(most.length, 3000);
+  assert.ok(most.some((k) => k.day === 20404), "the newest day is kept whole");
+  // an install that only counted kills does not rename the npc summary's install
+  const mixed = convert.convertSavedVariables([npcFile(`{ [6] = { day = 20400 } }`, `prefix = "aa1100"`), newer]).inventory.observations;
+  assert.deepEqual([mixed.install, mixed.killsInstall], ["aa1100", "zz9900"]);
+});
+
+test("observations 3.15.0: a random suffix rides beside the link on loot, quest reward and vendor items; the link stays the item's", () => {
+  const { validateExport } = require("./validate_export");
+  const plain = "|cff1eff00|Hitem:6560|h[Soldier's Shield of Intellect]|h|r";
+  const item = (tail, id = 6560) => `{ id = ${id}, n = 1, link = "|cff1eff00|Hitem:6560${tail}|h[Soldier's Shield of Intellect]|h|r" }`;
+  const doc = convert.convertSavedVariables([obsFile(`{
+    { id = "eeee-1", t = 100, type = "loot", src = { kind = "mob", npc = 1 }, ${WHO},
+      items = { ${item("::::::::::::1:12729")}, ${item("::::::1203::::::")}, ${item("::::::-7::::::2:300:100")}, ${item("")},
+                ${item("::::::::::::2:12729")}, ${item("::::::::60:::::")}, ${item("::::::::::::1:12729", 6561)}, ${item("::::::0::::::")} } },
+    { id = "eeee-2", t = 101, type = "quest", act = "turnin", quest = 5, ${WHO},
+      rewards = { items = { ${item("::::::::::::1:12729")}, ${item("::::::1203::::::")} }, choices = { 6560 } } },
+    { id = "eeee-3", t = 102, type = "vendor", npc = 3, ${WHO}, items = { { id = 6560, price = 100, stack = 1, link = "|cff1eff00|Hitem:6560::::::::::::1:12729|h[Soldier's Shield of Intellect]|h|r" } } },
+  }`)]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  const [loot, quest, vendor] = doc.observations.events;
+  assert.deepEqual(loot.items, [
+    { id: 6560, n: 1, link: plain, bonus: [12729] }, { id: 6560, n: 1, link: plain, suffix: 1203 }, { id: 6560, n: 1, link: plain, suffix: -7, bonus: [100, 300] },
+    { id: 6560, n: 1, link: plain }, { id: 6560, n: 1, link: plain }, { id: 6560, n: 1 }, { id: 6561, n: 1 }, { id: 6560, n: 1, link: plain },
+  ], "a count that does not match its ids says nothing of a suffix; a full link and another item's link are not kept at all");
+  assert.deepEqual(quest.rewards.items, [{ id: 6560, n: 1, link: plain, bonus: [12729] }, { id: 6560, n: 1, link: plain, suffix: 1203 }]);
+  assert.deepEqual(quest.rewards.choices, [6560]);
+  assert.deepEqual([vendor.items[0].link, vendor.items[0].bonus, vendor.items[0].suffix], [plain, [12729], undefined]);
+  assert.equal(new Set(doc.observations.events.flatMap((e) => (e.items || []).concat(e.rewards ? e.rewards.items : [])).filter((i) => i.link).map((i) => i.link)).size, 1,
+    "every suffix of the item carries the one link");
+});
+
+test("observations 3.15.0: a creature seen inside instances says where; installs add up; 8 places at most", () => {
+  const { validateExport } = require("./validate_export");
+  const a = npcFile(`{ [11671] = { lv = { 62, 62 }, cls = "elite", day = 20404, inst = { ["409:9"] = 3, ["409:0"] = 1, ["0:1"] = 5, ["409:x"] = 5, ["409:1"] = 0, junk = 2 } } }`, `prefix = "aa1100"`);
+  const b = npcFile(`{ [11671] = { day = 20405, inst = { ["409:9"] = 2, ["249:2"] = 4 } } }`, `prefix = "bb2200"`);
+  const one = convert.convertSavedVariables([a]).inventory;
+  assert.deepEqual(validateExport(one), []);
+  assert.deepEqual(one.observations.npcs, [{ npc: 11671, lv: [62, 62], cls: "elite", day: 20404, inst: [[409, 0, 1], [409, 9, 3]] }], "no cells: an instance has no world map place");
+  assert.deepEqual(convert.convertSavedVariables([a, b]).inventory.observations.npcs[0].inst, [[249, 2, 4], [409, 0, 1], [409, 9, 5]]);
+  const many = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`${100 + i}:1`, i + 1]));
+  const capped = convert.exportObservations([{ prefix: "k1f9c2", npcs: { 5: { day: 20404, inst: many } } }]).npcs[0].inst;
+  assert.deepEqual(capped.map((c) => c[0]), [104, 105, 106, 107, 108, 109, 110, 111], "the 8 most counted, by place");
+});
+
+test("inventory 3.15.0: every vendor of an item, the cheapest's day and limited stock; the three old fields unchanged; 2.x unmoved", () => {
+  const { validateExport } = require("./validate_export");
+  const file = `KutzInventoryDB = { chars = {}, prices = { sell = { [2320] = 2 }, ah = {}, vendor = {
+    [2320] = { price = 10, vendor = "Made-up Trader", npc = 1250, t = 1762819200, limited = true,
+               also = { ["Another Trader"] = { price = 12, npc = 1251, t = 1762732800 }, ["Third Trader"] = { price = 10, limited = true },
+                        ["Bad|cffTrader"] = { price = 1 }, ["No Price"] = { npc = 5 }, ["Free"] = { price = 0, npc = 0, t = -5 } } },
+    [2321] = { price = 100, vendor = "Old Entry", t = 1762819200 },
+    [2322] = { price = 7 } } } }`;
+  const doc = convert.convertSavedVariables([file]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  assert.deepEqual(doc.prices["2320"], { vendorBuy: 10, vendor: "Made-up Trader", vendorSell: 2, vendorDay: "2025-11-11", vendorLimited: true, vendors: [
+    { name: "Free", price: 0 }, { name: "Made-up Trader", npc: 1250, price: 10, limited: true, day: "2025-11-11" }, { name: "Third Trader", price: 10, limited: true },
+    { name: "Another Trader", npc: 1251, price: 12, day: "2025-11-10" }] });
+  assert.deepEqual(doc.prices["2321"], { vendorBuy: 100, vendor: "Old Entry", vendorSell: null, vendorDay: "2025-11-11", vendors: [{ name: "Old Entry", price: 100, day: "2025-11-11" }] });
+  assert.deepEqual(doc.prices["2322"], { vendorBuy: 7, vendor: null, vendorSell: null }, "a price with no vendor name has no list");
+  assert.deepEqual(convert.convertSavedVariables([file], { format: 2 }).inventory.prices["2320"], { vendorBuy: 10, vendor: "Made-up Trader", vendorSell: 2 });
+  // two account files: the same vendor's newest reading; the cheapest entry as before
+  const other = `KutzInventoryDB = { chars = {}, prices = { sell = {}, ah = {}, vendor = { [2320] = { price = 9, vendor = "Another Trader", npc = 1251, t = 1762905600 } } } }`;
+  const both = convert.convertSavedVariables([file, other]).inventory.prices["2320"];
+  assert.deepEqual(both.vendors.find((v) => v.name === "Another Trader"), { name: "Another Trader", npc: 1251, price: 9, day: "2025-11-12" });
+  assert.equal(both.vendors.filter((v) => v.name === "Another Trader").length, 1);
+});
+
+test("inventory 3.15.0: statistics per day ride beside the newest full list: changed values, the newest 30 days; 2.x has none", () => {
+  const { validateExport } = require("./validate_export");
+  const days = Array.from({ length: 35 }, (_, i) => `[${20370 + i}] = { [60] = ${i} }`).join(", ");
+  const file = (statDays) => `KutzInventoryDB = { chars = { ["Examplemage-Example Realm"] = { name = "Examplemage", realm = "Example Realm", level = 24, lastSeen = 1762819200,
+    statistics = { { id = 60, name = "Total deaths", category = "Deaths", value = 7 } }, statDays = ${statDays} } } }`;
+  const doc = convert.convertSavedVariables([file(`{ [20403] = { [60] = 6, [61] = "1g 2s", [62] = "bad|cff", [63] = true, x = 1, [0] = 1 }, [20404] = { [60] = 7 },
+    [20405] = {}, junk = { [60] = 1 }, [0] = { [60] = 1 } }`)]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  assert.deepEqual(doc.characters[0].statisticsDays, [{ day: 20403, values: [{ id: 60, value: 6 }, { id: 61, value: "1g 2s" }] }, { day: 20404, values: [{ id: 60, value: 7 }] }]);
+  assert.ok(Array.isArray(doc.characters[0].statistics) && doc.characters[0].statistics.length === 1, "the full list is exported as before");
+  const capped = convert.convertSavedVariables([file(`{ ${days} }`)]).inventory.characters[0].statisticsDays;
+  assert.deepEqual([capped.length, capped[0].day, capped[29].day], [30, 20375, 20404]);
+  assert.ok(!("statisticsDays" in convert.convertSavedVariables([file("{}")]).inventory.characters[0]) || convert.convertSavedVariables([file("{}")]).inventory.characters[0].statisticsDays == null);
+  assert.equal(convert.convertSavedVariables([file(`{ ${days} }`)], { format: 2 }).inventory.characters[0].statisticsDays, undefined);
+  assert.equal(convert.exportStatDays(null), null);
+  assert.equal(convert.exportStatDays("junk"), null);
+});
+
+test("recipes not learned yet: the export is the same whether the saved file keeps them per character (1.20) or once per account file (1.21.0)", () => {
+  const rec = (id, more = "") => `{ recipeID = ${id}, name = "Recipe ${id}", outputItemID = ${id + 1000}, source = "trainer", reagents = { { itemID = 2589, quantity = 2, name = "Linen Cloth" } }${more} }`;
+  const char = (name, unlearned) => `["${name}-Example Realm"] = { name = "${name}", realm = "Example Realm", level = 24, lastSeen = 1762819200,
+    recipes = { Tailoring = { professionID = 197, skill = 60, recipes = { ${rec(1)} }, ${unlearned} } } }`;
+  const old = `KutzInventoryDB = { chars = { ${char("Exampleone", `unlearned = { ${rec(10)}, ${rec(11)}, ${rec(12)} }`)},
+    ${char("Exampletwo", `unlearned = { ${rec(11)}, ${rec(12, `, makesMax = 2`)}, ${rec(10)}, ${rec(10)} }`)} } }`;
+  const shared = `KutzInventoryDB = { recipeBook = { [10] = ${rec(10)}, [11] = ${rec(11)}, [12] = ${rec(12)} }, chars = {
+    ${char("Exampleone", `unlearnedIds = { 10, 11, 12 }`)},
+    ${char("Exampletwo", `unlearnedIds = { 11, ${rec(12, `, makesMax = 2`)}, 10, ${rec(10)}, 99, "junk" }`)} } }`;
+  const sorted = (v) => (Array.isArray(v) ? v.map(sorted) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v);
+  for (const format of [2, 3]) {
+    const [a, b] = [old, shared].map((text) => {
+      const all = convert.convertSavedVariables([text], { format });
+      delete all.inventory.exportedAt;
+      return sorted(JSON.parse(JSON.stringify(all)));
+    });
+    assert.deepEqual(b, a, "format " + format);
+    const two = a.inventory.characters.find((c) => c.name === "Exampletwo").recipes[0].unlearned;
+    assert.deepEqual(two.map((u) => [u.recipeID, u.makesMax]), [[11, undefined], [12, 2], [10, undefined], [10, undefined]], "each list in its own order; an id the file does not hold is skipped");
+  }
+  // each account file's ids are read against its own shared records
+  const otherAccount = `KutzInventoryDB = { recipeBook = { [10] = ${rec(10, `, makesMax = 5`)} }, chars = { ${char("Examplethree", `unlearnedIds = { 10 }`)} } }`;
+  const merged = convert.convertSavedVariables([shared, otherAccount]).inventory.characters;
+  assert.equal(merged.find((c) => c.name === "Examplethree").recipes[0].unlearned[0].makesMax, 5);
+  assert.equal(merged.find((c) => c.name === "Exampleone").recipes[0].unlearned[0].makesMax, undefined);
+});
+
+test("observations 3.15.0: realistic sizes: a full item table of the addon (200 kB saved) and 30 days of kills", () => {
+  const items = {};
+  for (let i = 1; i <= 700; i++) {
+    items[i] = { d: 20404, b: 1, f: "2:2:4:6:25:20::INVTYPE_SHIELD", s: "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
+      t: ["-Made-up Shield " + i, "-Binds when equipped", "-Off Hand", ">Shield", "-478 Armor", "-+3 Stamina", "-Durability 65 / 65", "!Requires Level 20",
+          "-Equip: Increases the block value of your shield by 10."].join("\n"),
+      v: i % 10 === 0 ? { "0;12729": "Made-up Shield " + i + " of Intellect\nITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478" } : undefined };
+  }
+  const kills = {};
+  for (let d = 0; d < 30; d++) { kills[20375 + d] = {}; for (let i = 1; i <= 26; i++) kills[20375 + d][(1000 + i) + ":" + (10 + (i % 5))] = 3; }
+  const obs = convert.exportObservations([{ addon: "1.21.0", prefix: "k1f9c2", itemBuilds: { 1: "1.60.1.71037" }, items, kills }]);
+  const itemBytes = JSON.stringify(obs.items).length, killBytes = JSON.stringify(obs.kills).length;
+  assert.equal(obs.items.length, 700);
+  assert.equal(obs.kills.length, 780);
+  assert.ok(itemBytes < 320000, "700 items: " + itemBytes);
+  assert.ok(killBytes < 40000, "780 kill counts: " + killBytes);
 });

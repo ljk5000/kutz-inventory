@@ -69,6 +69,8 @@ KutzInventoryDB = {
       spells = { { name = "Fireball", spellID = 8400, rank = 5 }, { name = "Arcane Intellect", spellID = 1460, rank = 2 } },
       reputation = { { factionID = 72, name = "Stormwind", group = "Alliance", reaction = 5, standing = "Friendly", value = 4100, min = 3000, max = 9000 } },
       statistics = { { id = 60, name = "Total deaths", category = "Deaths", value = 7 } },
+      -- 1.21.0: the statistics that changed, per day (days since 1970), for the last 30 days
+      statDays = { [20403] = { [60] = 6 }, [20404] = { [60] = 7 } },
       achievementPoints = 0,
       pvp = { honorableKills = 12, dishonorableKills = 0, highestRank = 0, rated = {} },
       trainers = { Tailoring = { { name = "Red Linen Robe", skillReq = 40, cost = 200, reqLevel = 8, status = "used" } } },
@@ -76,7 +78,8 @@ KutzInventoryDB = {
         Tailoring = { professionID = 197, skill = 112, max = 150, updated = 1762900000,
           recipes = { { recipeID = 2385, name = "Brown Linen Vest", difficulty = 3, outputItemID = 2568, makesMin = 1, makesMax = 1,
                         reagents = { { itemID = 2996, name = "Bolt of Linen Cloth", quantity = 1 }, { itemID = 2320, name = "Coarse Thread", quantity = 1 } } } },
-          unlearned = { { recipeID = 3914, name = "Brown Linen Pants", outputItemID = 4343, source = "trainer" } } },
+          -- 1.21.0: recipes not learned yet are saved once per file, in recipeBook below; a book lists their ids
+          unlearnedIds = { 3914 } },
       },
     },
     ["Examplewarrior-Example Realm"] = {
@@ -100,7 +103,11 @@ KutzInventoryDB = {
     ["Example Guild-Example Realm"] = { money = 1250000, updated = 1762819200, tabs = {
       [1] = { name = "Mats", size = 98, updated = 1762819200, items = { [1] = { id = 4306, count = 60, name = "Silk Cloth", quality = 1, icon = 132905 } } } } },
   },
-  prices = { vendor = { ["2320"] = { price = 10, vendor = "Some Trader" } }, sell = { ["2568"] = 18, ["2589"] = 13 } },
+  recipeBook = { [3914] = { recipeID = 3914, name = "Brown Linen Pants", outputItemID = 4343, source = "trainer" } },
+  -- 1.21.0: the cheapest vendor with its id and the time it was seen, and the other vendors seen selling the item
+  prices = { vendor = { ["2320"] = { price = 10, vendor = "Some Trader", npc = 1250, t = 1762819200,
+                                     also = { ["Another Trader"] = { price = 12, npc = 1251, limited = true, t = 1762732800 } } } },
+             sell = { ["2568"] = 18, ["2589"] = 13 } },
   -- /kinv raid: a made-up raid (code, signature and players invented) and one tracked raid that has recorded nothing yet
   raids = {
     ["QX7K2M"] = { string = "KR1.QX7K2M.409.1762891200.MZXW6YTBOI4A", instanceId = 409, start = 1762891200, events = {
@@ -123,9 +130,10 @@ KutzInventoryDB = {
 -- /kinv track drops on: made-up observations (ids, GUIDs and timings invented). Includes a coins-only corpse (items = {}),
 -- the same corpse skinned, a quest accepted and turned in (with its level, group size, XP and reputation changes), a
 -- vendor, a class trainer, a flight master's map, a flight from it, game text, a hunter's tame and an objective credit
--- (1.20.0), and one broken event the exporter leaves out.
+-- (1.20.0), a drop with a random suffix (1.21.0: the link names the suffix, the item is still 6560), and one broken
+-- event the exporter leaves out.
 KutzInventoryObsDB = {
-  v = 1, on = true, agreed = true, noted = true, addon = "1.20.0", prefix = "k1f9c2", n = 30,
+  v = 1, on = true, agreed = true, noted = true, addon = "1.21.0", prefix = "k1f9c2", n = 31,
   events = {
     { id = "k1f9c2-000017", t = 1762905600, b = "1.60.1.70888", type = "loot",
       src = { kind = "boss", npc = 11502, guid = "Creature-0-4170-409-1234-11502-000012ABCD", via = "slot" },
@@ -188,6 +196,10 @@ KutzInventoryObsDB = {
     { id = "k1f9c2-000030", t = 1762906550, b = "1.60.1.70888", type = "credit", quest = 7788, i = 1, rows = 1, ot = "monster", npc = 2958,
       by = "name", where = { map = 0, uiMap = 1429, x = 0.4219, y = 0.6784 },
       who = { level = 14, class = 4, faction = "Alliance", name = "Exampleobserver", surname = "Examplefamily" } },
+    { id = "k1f9c2-000031", t = 1762906600, b = "1.60.1.70888", type = "loot",
+      src = { kind = "mob", npc = 2958, guid = "Creature-0-4170-0-1234-2958-000012ABCF", level = 14, via = "slot" },
+      where = { map = 0, uiMap = 1429, x = 0.4219, y = 0.6784 }, who = { level = 14, class = 4, faction = "Alliance" },
+      items = { { id = 6560, n = 1, link = "|cff1eff00|Hitem:6560::::::::::::1:12729|h[Soldier's Shield of Intellect]|h|r" } } },
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },
   -- the npcs summary (1.17.0): a beast with its attack speed (spds is the addon's own tally, not exported), a vendor with
@@ -201,5 +213,19 @@ KutzInventoryObsDB = {
                cells = { ["1453:63:72"] = 4, ["nowhere"] = 9 } },
     [6109] = { name = "Made-up Dragon", boss = true, cls = "worldboss", ct = 2, rxA = 1, day = 20403 },
     [2958] = { lv = { 14, 14 }, cls = "normal" },
+    -- 1.21.0: seen inside an instance, where there is no position: the instance map and difficulty, no cells
+    [11671] = { name = "Made-up Hound", lv = { 62, 62 }, cls = "elite", ct = 1, rxA = 2, day = 20404, inst = { ["409:9"] = 3 } },
   },
+  -- item facts (1.21.0): read once per item and game build from a link made of the item id alone. f is
+  -- "quality:bind:class:subclass:itemLevel:requiredLevel:setId:equipLoc", s the stats, t the tooltip (one text per line of
+  -- the string: "-" left, "!" left shown red, ">" the right text of the line before), v the random suffixes met.
+  itemBuilds = { "1.60.1.70888" },
+  items = {
+    [6560] = { d = 20404, b = 1, f = "2:2:4:6:25:20::INVTYPE_SHIELD", s = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
+               t = "-Soldier's Shield\n-Binds when equipped\n-Off Hand\n>Shield\n-478 Armor\n-+3 Stamina\n-Durability 85 / 85\n!Requires Level 20",
+               v = { ["0;12729"] = "Soldier's Shield of Intellect\nITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478" } },
+    [2589] = { d = 20404, b = 1, f = "1:0:7:5:5:0::", t = "-Linen Cloth\n-|cff66bbffCrafting Reagent|r" },
+  },
+  -- kills per day (1.21.0): day -> "npc:level" -> count (level 0: the client gave none)
+  kills = { [20404] = { ["2958:14"] = 3, ["525:0"] = 1 } },
 }

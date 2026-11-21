@@ -172,7 +172,15 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
     if (c3.hearth !== "Stormwind City") fail("inventory 3.x does not carry characters[].hearth: " + JSON.stringify(c3.hearth));
     if ("hearth" in c2) fail("inventory 2.x carries characters[].hearth");
     if (JSON.stringify(c3.equipped) !== JSON.stringify([{ slotId: 16, id: 25 }])) fail("3.x equipped is not the minimal list: " + JSON.stringify(c3.equipped));
-    if (JSON.stringify(data3.prices) !== JSON.stringify(data.prices) || JSON.stringify(data3.guildBanks) !== JSON.stringify(data.guildBanks)) fail("3.x changed prices or guild banks");
+    // 3.15.0: a 3.x price also says every vendor seen (and the day and limited stock, when the saved file knows them);
+    // the three fields 2.x has are unchanged
+    const priced3 = Object.fromEntries(Object.entries(data3.prices).map(([id, p]) => [id, { vendorBuy: p.vendorBuy, vendor: p.vendor, vendorSell: p.vendorSell }]));
+    if (JSON.stringify(priced3) !== JSON.stringify(data.prices) || JSON.stringify(data3.guildBanks) !== JSON.stringify(data.guildBanks)) fail("3.x changed prices or guild banks");
+    if (JSON.stringify(data3.prices["2996"].vendors) !== JSON.stringify([{ name: "Someone", price: 40 }])) fail("3.x prices[2996].vendors: " + JSON.stringify(data3.prices["2996"]));
+    for (const [id, p] of Object.entries(data3.prices)) {
+        const extra = Object.keys(p).filter((k) => !["vendorBuy", "vendor", "vendorSell", "vendorDay", "vendorLimited", "vendors"].includes(k));
+        if (extra.length) fail("3.x prices[" + id + "] carries " + extra);
+    }
     const p3 = validateExport(data3);
     if (p3.length) fail("inventory 3.x does not match its schema:\n  " + p3.slice(0, 20).join("\n  "));
     // Every dropped field is rejected by the 3.x schema, so an exporter can't send them by mistake.

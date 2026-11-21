@@ -133,7 +133,9 @@ local function CraftItems()
     for _, c in pairs((KutzInventoryDB or {}).chars or {}) do
         for _, book in pairs(c.recipes or {}) do
             for _, r in pairs(book.recipes or {}) do add(r.outputItemID); reagents(r.reagents) end
-            for _, r in pairs(book.unlearned or {}) do add(r.outputItemID); reagents(r.reagents) end
+            -- unlearned recipes are saved once per account file since 1.21.0 (Saved.lua); an old book has its own list
+            local unlearned = ns.Saved and ns.Saved.Unlearned(KutzInventoryDB, book) or book.unlearned or {}
+            for _, r in pairs(unlearned) do if type(r) == "table" then add(r.outputItemID); reagents(r.reagents) end end
         end
     end
     table.sort(ids)
@@ -142,11 +144,45 @@ end
 
 ---------------------------------------------------------------------------
 -- vendor buy prices: everything the open vendor sells for gold
+-- prices.vendor[itemId] = { price, vendor (name), npc (creature id), limited (true: limited stock), t (when seen),
+--   also = { [another vendor's name] = { price, npc, limited, t } } }: the entry is the cheapest vendor seen; since
+-- 1.21.0 every other vendor of the item stays listed under also (at most 8, the longest unseen goes).
 ---------------------------------------------------------------------------
+local ALSO_MAX = 8
+local function Also(entry, v)                   -- v: another vendor's reading of the same item
+    if type(v.vendor) ~= "string" or v.vendor == "" then return end
+    if type(entry.also) ~= "table" then entry.also = {} end
+    entry.also[v.vendor] = { price = v.price, npc = v.npc, limited = v.limited, t = v.t }
+    local n, oldest = 0, nil
+    for name, x in pairs(entry.also) do
+        n = n + 1
+        if not oldest or (x.t or 0) < (entry.also[oldest].t or 0) then oldest = name end
+    end
+    if n > ALSO_MAX then entry.also[oldest] = nil end
+end
+-- The entry's own vendor was seen again at a higher price: a listed vendor may now be the cheaper one, and then it
+-- becomes the entry (the entry is always the cheapest vendor known).
+local function Cheapest(entry)
+    if type(entry.also) ~= "table" then return entry end
+    local best
+    for name, x in pairs(entry.also) do
+        if type(x) == "table" and type(x.price) == "number" and x.price < entry.price
+           and (not best or x.price < entry.also[best].price) then best = name end
+    end
+    if not best then return entry end
+    local x, also = entry.also[best], entry.also
+    also[best], entry.also = nil, nil
+    local top = { price = x.price, vendor = best, npc = x.npc, limited = x.limited, t = x.t, also = also }
+    Also(top, entry)
+    return top
+end
+
 local function ScanVendor()
     local p = P()
     if not (p and GetMerchantNumItems) then return end
     local npc = Plain(UnitName("npc"))
+    local npcId = type(UnitGUID) == "function" and Plain(Try(UnitGUID, "npc")) or nil   -- the vendor's creature id, never its GUID
+    npcId = type(npcId) == "string" and tonumber(npcId:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-%x+$")) or nil
     for i = 1, (Try(GetMerchantNumItems) or 0) do
         local id = Plain(Try(GetMerchantItemID, i))
         local price, stack, available, extended
@@ -161,8 +197,16 @@ local function ScanVendor()
         if id and type(price) == "number" and price > 0 and not extended then
             local per = price / math.max(1, stack or 1)
             local old = p.vendor[id]
-            if not old or per <= old.price or old.vendor == npc then          -- keep the cheapest vendor
-                p.vendor[id] = { price = per, vendor = npc, limited = (Plain(available) or -1) >= 0 or nil, t = time() }
+            local seen = { price = per, vendor = npc, npc = npcId, limited = (Plain(available) or -1) >= 0 or nil, t = time() }
+            if not old or per <= old.price or old.vendor == npc then          -- the cheapest vendor is the entry itself
+                seen.also = old and old.also
+                if old and old.vendor ~= npc then Also(seen, old) end        -- the one it undercuts stays listed
+                if type(npc) == "string" and type(seen.also) == "table" then seen.also[npc] = nil end
+                seen = Cheapest(seen)
+                if seen.also and next(seen.also) == nil then seen.also = nil end
+                p.vendor[id] = seen
+            else
+                Also(old, seen)                                               -- a dearer vendor: listed beside it
             end
             RecordSell(id)
         end

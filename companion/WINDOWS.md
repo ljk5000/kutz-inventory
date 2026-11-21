@@ -2,9 +2,9 @@
 
 This is the uploader called KutzUploader on wow.cr0m.com. The portable package targets Windows 10/11 x64, includes its Node runtime, and uses Windows .NET Framework for the settings/tray UI. No separate Node/npm install or administrator access is needed. Addon and bundle versions are independent: `build.json` identifies the app build; `AddOns/KutzInventory/KutzInventory.toc` identifies the included addon.
 
-## Companion 0.12.5 · KutzInventory 1.20.1
+## Companion 0.12.6 · KutzInventory 1.21.0
 
-This release sends inventory export 3.14.0, which uploads each character's achievement statistics again (earlier 3.x exports left them out, so cr0m's Statistics tab stayed empty). It bundles KutzInventory 1.20.1, as 0.12.4 did. Like 0.12.2, it requires timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
+This release bundles KutzInventory 1.21.0 and sends inventory export 3.15.0: item facts, kills per day, random suffixes beside item links, creatures seen inside instances, every vendor of an item and statistics per day, all as new optional fields. It reads the saved shape 1.21.0 uses for unlearned recipes; Companion 0.12.5 and older reading such a file export no unlearned recipes, so update the Companion before or together with the addon. Like 0.12.2, it requires timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
 
 ## Install and connect
 

@@ -35,6 +35,9 @@ report("drop tracking: on by default for a new install, /kinv track, one-time no
 r = node([tool("check_crafts.js")]);
 report("items crafted: own 'You create' lines only, stacks, per-day counts, the 120-day window, export shape, nothing crafted unchanged",
     r.ok && /^OK/m.test(r.out) && !/^FAIL/m.test(r.out), r.out);
+r = node([tool("check_facts.js"), addon]);
+report("item facts: read once per item and game build from a link of id and suffix alone, queued, never in combat, capped by bytes; random suffixes as variants of one item; kills per day; /kinv perf; unlearned recipes saved once per account file (undone = the original, exports identical); statistics per day; every vendor of an item",
+    r.ok && /^OK/m.test(r.out) && !/^FAIL/m.test(r.out), r.out);
 r = node([tool("check_inventory_logout.js")]);
 report("reload, logout and exit snapshots; trainers (no Beast Training); reputation headers put back; Legacy tree ranks/events/nil APIs and guild loading", r.ok && /^OK/m.test(r.out), r.out);
 r = node([tool("check_character_identity.js")]);
@@ -45,6 +48,8 @@ r = node([tool("examples.js")]);
 report("schema/examples: inventory 2.x and 3.x examples match the exporter and their schemas", r.ok && /^OK/m.test(r.out), r.out);
 r = node(["--test", tool("convert.test.js")]);
 report("convert.js: runs with no Node globals, CLI output unchanged, the example .lua converts exactly, nesting limit", r.ok, r.out);
+r = node(["--test", tool("tooltip_clean.test.js")]);
+report("tooltip cleaner: what is the item's stays, what is the reading character's goes; the copy inside convert.js is the module's", r.ok, r.out);
 r = node(["--test", tool("export_queue.test.js"), tool("upload_outbox.test.js"), tool("auction_sender.test.js")]);
 report("export watch queue, retries, and auction scans sent once per scan", r.ok, r.out);
 if (Number(process.versions.node.split(".")[0]) >= 22) {
