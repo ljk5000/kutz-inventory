@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.13.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
+| `inventory-export.v3.schema.json` | **3.14.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations and the NPC summary |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -31,7 +31,7 @@ Common character fields include identity (`key`, `name`, optional `surname`, rea
 
 ### Format 3.x versus 2.x
 
-Format 3 removes `stats`, `sheet`, ordinary `talents`, `spec`, `role`, `reputation`, `statistics`, `pvp`, `achievementPoints`, and their associated update stamps (`stats`, `sheet`, `talents`, `reputation`, `statistics`, `pvp`). Equipped items reduce to `{ slotId, id, link }`; links can still contain enchant/suffix IDs. This reduces duplicate profile data for a receiving site that obtains it elsewhere; **the exporter itself never fetches a profile API**. The addon still records these fields locally; format 2 retains them.
+Format 3 removes `stats`, `sheet`, ordinary `talents`, `spec`, `role`, `reputation`, `pvp`, `achievementPoints`, and their associated update stamps (`stats`, `sheet`, `talents`, `reputation`, `pvp`). 3.0.0 to 3.13.0 also removed `statistics` and its stamp; 3.14.0 exports them again, because the receiving site has no other source for them, so a reader must treat a 3.x character without `statistics` as not exported rather than as having none. Equipped items reduce to `{ slotId, id, link }`; links can still contain enchant/suffix IDs. This reduces duplicate profile data for a receiving site that obtains it elsewhere; **the exporter itself never fetches a profile API**. The addon still records these fields locally; format 2 retains them.
 
 Format 3 additionally exports `raids` (an empty array if none recorded), `observations` when valid retained events exist, and optional character `crafted` and `hearth`. Turning off observation recording does not remove existing observations from export. Format 2 never includes these four additions. Both current formats support `legacyTree`.
 

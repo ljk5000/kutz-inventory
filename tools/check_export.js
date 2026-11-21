@@ -36,8 +36,9 @@ KutzInventoryDB = {
       faction = "Alliance", sex = 2, guid = "Player-1-00ABCDEF", money = 12345, xp = 10, xpMax = 100, lastSeen = 1700000000,
       location = { zone = "Elwynn Forest", subzone = "Goldshire", mapID = 1429, x = 42.1, y = 65.3 },
       hearth = "Stormwind City",
-      updated = { bags = 1700000000 },
+      updated = { bags = 1700000000, statistics = 1700000050 },
       bags = { [0] = { name = "Backpack", size = 16, items = { [1] = { id = 2589, count = 5, name = "Linen Cloth", quality = 1 } } } },
+      statistics = { { id = 60, name = "Total deaths", category = "Deaths", value = 7 } },
       equipped = { [16] = { id = 25, name = "Worn Shortsword", slot = "MainHandSlot", stats = { ITEM_MOD_STRENGTH_SHORT = 1 } } },
       recipes = { Tailoring = { professionID = 197, skill = 10, max = 75, updated = 1700000000,
         recipes = { { recipeID = 2385, name = "Brown Linen Vest", difficulty = 0, outputItemID = 2568, makesMin = 1,
@@ -163,6 +164,11 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
     for (const k of ["key", "name", "realm", "level", "class", "race", "faction", "money", "xp", "xpMax", "location", "containers", "recipes", "lastSeen"]) {
         if (JSON.stringify(c3[k]) !== JSON.stringify(c2[k])) fail("inventory 3.x changed characters[]." + k);
     }
+    // 3.14.0: statistics are exported again, with their stamp (the Battle.net API has none for this client).
+    if (!Array.isArray(c3.statistics) || !c3.statistics.length || JSON.stringify(c3.statistics) !== JSON.stringify(c2.statistics)) {
+        fail("inventory 3.x does not carry characters[].statistics as 2.x does: " + JSON.stringify(c3.statistics));
+    }
+    if (!c3.updated.statistics || c3.updated.statistics !== c2.updated.statistics) fail("inventory 3.x does not carry updated.statistics");
     if (c3.hearth !== "Stormwind City") fail("inventory 3.x does not carry characters[].hearth: " + JSON.stringify(c3.hearth));
     if ("hearth" in c2) fail("inventory 2.x carries characters[].hearth");
     if (JSON.stringify(c3.equipped) !== JSON.stringify([{ slotId: 16, id: 25 }])) fail("3.x equipped is not the minimal list: " + JSON.stringify(c3.equipped));
@@ -171,7 +177,7 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
     if (p3.length) fail("inventory 3.x does not match its schema:\n  " + p3.slice(0, 20).join("\n  "));
     // Every dropped field is rejected by the 3.x schema, so an exporter can't send them by mistake.
     const sample = { spec: "Fire", role: "DAMAGER", stats: { strength: 1 }, sheet: {}, talents: { system: "tabs" }, reputation: [],
-        statistics: [], achievementPoints: 10, pvp: { honorableKills: 1 } };
+        achievementPoints: 10, pvp: { honorableKills: 1 } };
     for (const k of DROPPED_IN_3) {
         if (!(k in sample)) fail("no sample value for dropped field " + k);
         const withIt = JSON.parse(JSON.stringify(data3));

@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.13.0",
+ "schemaVersion": "3.14.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": {
   "updatedAt": "2023-11-14T22:13:20.000Z",
@@ -139,6 +139,7 @@
    "currencies": [],
    "skills": [],
    "spells": [],
+   "statistics": [],
    "recipes": [
     {
      "profession": "Tailoring",

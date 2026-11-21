@@ -16,7 +16,7 @@
 // 2.0.1 / 3.7.1 clarify stable character keys; the existing pattern already permits surname/GUID disambiguation.
 const SCHEMA_VERSION = "2.1.0";
 // 3.0.0 (schema/inventory-export.v3.schema.json, written with --format 3): drops what cr0m reads from the Battle.net
-// API: stats, sheet, talents, spec, role, reputation, statistics, PvP, achievement points; equipped
+// API: stats, sheet, talents, spec, role, reputation, statistics (back since 3.14.0), PvP, achievement points; equipped
 // items keep only slotId, id and link. The default since cr0m's 3.x reader was deployed.
 // 3.1.0 adds raids[]: the cr0m raids tracked with /kinv raid that recorded something (KutzInventoryDB.raids).
 // 3.2.0 adds observations: drop / quest / vendor events (trainer events since 3.9.0) (KutzInventoryObsDB, /kinv track; default-on for new installs since addon 1.13.0).
@@ -41,7 +41,10 @@ const SCHEMA_VERSION = "2.1.0";
 // only) (KutzInventory 1.18.0). observations.v stays 1.
 // 3.12.0: game text observations and quest objective and map data (KutzInventory 1.19.0). observations.v stays 1.
 // 3.13.0: hunter tame and objective credit events (KutzInventory 1.20.0). observations.v stays 1.
-const SCHEMA_VERSION_3 = "3.13.0";
+// 3.14.0: characters[].statistics is exported again, with its updated.statistics stamp: the Statistics tab of the
+// achievement window (kills, deaths, quests, ...), which the Battle.net API does not serve for this client. Optional:
+// an export older than 3.14.0 has neither.
+const SCHEMA_VERSION_3 = "3.14.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).
@@ -354,8 +357,9 @@ function crafting(book, c) {
 
 // Inventory 3.x: the 2.x document without what the Battle.net API supplies. The API serves these
 // as of the character's last logout; the addon still records them in SavedVariables, they are just not exported.
-const DROPPED_IN_3 = ["spec", "role", "stats", "sheet", "talents", "reputation", "statistics", "achievementPoints", "pvp"];
-const DROPPED_SECTIONS_IN_3 = ["sheet", "stats", "talents", "reputation", "statistics", "pvp"];   // keys of characters[].updated
+// Statistics are not in that API for this client, so they are exported (3.0.0 to 3.13.0 left them out).
+const DROPPED_IN_3 = ["spec", "role", "stats", "sheet", "talents", "reputation", "achievementPoints", "pvp"];
+const DROPPED_SECTIONS_IN_3 = ["sheet", "stats", "talents", "reputation", "pvp"];   // keys of characters[].updated
 function toFormat3(inventory, raids, observations, crafted, hearths) {
   const characters = inventory.characters.map((c) => {
     const out = { ...c };

@@ -1,6 +1,6 @@
 # KutzUI Companion (KutzUploader)
 
-**Companion 0.12.4 bundles KutzInventory 1.20.1.** See [release notes](../CHANGELOG.md) for the public release.
+**Companion 0.12.5 bundles KutzInventory 1.20.1.** See [release notes](../CHANGELOG.md) for the public release.
 
 The Windows tray app uploads KutzInventory saves to [wow.cr0m.com](https://wow.cr0m.com), the optional receiving website. The site calls it **KutzUploader**; its launcher is **KutzUICompanion.exe**. The addon is usable without uploading. Read the [full addon/data guide](../README.md) before sharing a game client used by several people.
 
@@ -42,7 +42,7 @@ All app HTTP requests use the configured origin (default `https://wow.cr0m.com`)
 
 The UI requires HTTPS. The worker accepts HTTP loopback for local tests. Redirects are refused and requests time out after 20 seconds. There is no direct Battle.net network call in this app; account linking mentioned in server refusals happens on the website.
 
-Inventory includes **all saved characters** under that client: names/surnames, realm, guild, game GUIDs, gold/XP, possessions including shared banks, professions/recipes/trainers, skills/spells, Legacy Trees, last location/coordinates and hearth, craft history, timestamps/diagnostics, retained observations, tracked raid events and optional addon-monitor reports. Those reports can contain addon names, error messages/stacks and session/performance history. Inventory 3.x removes ordinary talents, stats/sheet, spec/role, reputation, achievement statistics/PvP and detailed equipped-item fields; [schema/README.md](../schema/README.md) gives the exact contract.
+Inventory includes **all saved characters** under that client: names/surnames, realm, guild, game GUIDs, gold/XP, possessions including shared banks, professions/recipes/trainers, skills/spells, achievement statistics (which can include amounts of gold), Legacy Trees, last location/coordinates and hearth, craft history, timestamps/diagnostics, retained observations, tracked raid events and optional addon-monitor reports. Those reports can contain addon names, error messages/stacks and session/performance history. Inventory 3.x removes ordinary talents, stats/sheet, spec/role, reputation, PvP and detailed equipped-item fields; [schema/README.md](../schema/README.md) gives the exact contract.
 
 Observations are on by default on a new addon install: loot/quest/vendor/trainer/taxi/flight events include time, map/coordinates and the recording character's **name/surname**, level, class and faction. Since addon 1.17.0 they also carry a per-install NPC summary (NPC name, level range, type, reaction, subtitle, services offered, last day seen and counts of map squares stood beside each creature; no player names, GUIDs or times of day) keyed by the install's random id. `/kinv track drops off` stops new events and the summary, but what is kept still uploads. Raids added with `/kinv raid` include group names and loot. Auction documents have realm/house, scan times, item names/categories/prices/stack variants and no character/player GUID/account-folder fields; the key still associates them with your account. The raw saved files, game-folder path and Windows settings are not sent as fields. The server sees your source IP and upload timing. Its privacy, retention and authorization behavior cannot be verified from this repo.
 

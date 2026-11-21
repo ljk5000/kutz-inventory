@@ -1,5 +1,10 @@
 # Release notes
 
+## Companion 0.12.5
+
+- Send inventory export 3.14.0: each character's statistics (the Statistics tab of the achievement window: kills, deaths, quests and the rest) are uploaded again, with the time they were read. Exports 3.0.0 to 3.13.0 left them out for cr0m to read from the Battle.net API, which has none for this client, so cr0m's Statistics tab stayed empty. KutzInventory already records them; no addon change. The bundled addon is still KutzInventory 1.20.1.
+- Statistics can include amounts of gold (for example the most gold ever owned). They are part of the inventory upload only; turn off character uploads to keep them on this PC.
+
 ## Companion 0.12.4
 
 - Bundle KutzInventory 1.20.1. The Companion program itself is unchanged from 0.12.3.

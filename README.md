@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.20.1** and Companion **0.12.4**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.20.1** and Companion **0.12.5**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)
@@ -133,7 +133,7 @@ The addon sends no HTTP requests. Its auction/item API queries go through the ga
 
 The Companion defaults to **https://wow.cr0m.com**, the optional receiving website, or an HTTPS origin you choose. CLI URLs must be supplied explicitly. Uploads are gzipped JSON with an `Authorization: Bearer` key; redirects are refused. HTTP loopback is allowed by the worker/CLI for local tests. The receiving service also sees the connection's source IP and upload times. This repo cannot establish the server's storage, sharing, retention or deletion behavior; check the service before uploading.
 
-The Companion reads **all accounts** under the selected client's `WTF/Account`, merging their `KutzInventory.lua` files and any sibling `KutzUI.lua` monitor findings. There is no per-character/account picker. The inventory snapshot contains names/surnames, realm, guild, GUIDs, gold/XP, bags/banks/gear, skills/spells/professions/recipes/trainers, Legacy Trees, latest location and hearth, timestamps/diagnostics, crafted history, tracked raids and retained observations. Monitor data can include other addon names, error messages and stacks, memory/performance and session history; free-text errors can contain sensitive context. Inventory 3.x omits detailed stats, sheet, ordinary talents, spec/role, reputation, statistics, PvP and achievement points; `--format 2` includes those but omits raids, observations, crafted history and hearth.
+The Companion reads **all accounts** under the selected client's `WTF/Account`, merging their `KutzInventory.lua` files and any sibling `KutzUI.lua` monitor findings. There is no per-character/account picker. The inventory snapshot contains names/surnames, realm, guild, GUIDs, gold/XP, bags/banks/gear, skills/spells/professions/recipes/trainers, achievement statistics (which can include amounts of gold), Legacy Trees, latest location and hearth, timestamps/diagnostics, crafted history, tracked raids and retained observations. Monitor data can include other addon names, error messages and stacks, memory/performance and session history; free-text errors can contain sensitive context. Inventory 3.x omits detailed stats, sheet, ordinary talents, spec/role, reputation, PvP and achievement points (and, before 3.14.0, statistics); `--format 2` includes those but omits raids, observations, crafted history and hearth.
 
 Auction documents have realm/region/house, scan times and item prices/supply, without character names, player GUIDs or account-folder names. They are still authenticated uploads linked to your key. The raw Lua file, Windows account name, game-folder path and settings file are not sent as upload fields. See [schemas and field privacy](schema/README.md); inspect local exports before sending them.
 
@@ -197,7 +197,7 @@ node tools/inventory_export.js --format 2 <path-to-KutzInventory.lua> <output.js
 
 With no input it looks for all accounts in the conventional Windows `Program Files (x86)/World of Warcraft/_forever_/WTF/Account` folder. Default output is `export/inventory.json` beside the source tree, with `auction-scans.json` alongside it. It prints a local crafting-profit/levelling estimate using observed vendor and AH prices (5% AH sale cut); these are estimates, not guaranteed sale prices. Add `--upload` only after setting `WOW_IMPORT_URL` and `WOW_IMPORT_TOKEN`. `--no-inventory` and `--no-auctions` select upload categories; local conversion still includes both. Details and all tooling: [tools/README.md](tools/README.md).
 
-[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.13.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
+[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.14.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
 
 From the repository root:
 

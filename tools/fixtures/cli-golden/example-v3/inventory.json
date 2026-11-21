@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.13.0",
+ "schemaVersion": "3.14.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": null,
  "prices": {
@@ -62,6 +62,7 @@
     "bags": "2025-11-12T00:00:00.000Z",
     "bank": "2025-11-11T00:00:00.000Z",
     "equipped": "2025-11-12T00:00:00.000Z",
+    "statistics": "2025-11-11T23:53:20.000Z",
     "money": "2025-11-12T00:00:00.000Z",
     "location": "2025-11-12T00:00:00.000Z",
     "professions": "2025-11-11T23:50:00.000Z",
@@ -281,6 +282,14 @@
      "rank": 2
     }
    ],
+   "statistics": [
+    {
+     "id": 60,
+     "name": "Total deaths",
+     "category": "Deaths",
+     "value": 7
+    }
+   ],
    "recipes": [
     {
      "profession": "Tailoring",
@@ -386,6 +395,7 @@
    "currencies": [],
    "skills": [],
    "spells": [],
+   "statistics": [],
    "recipes": []
   }
  ],
