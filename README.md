@@ -77,7 +77,7 @@ Only explicitly tracked raids record events. Up to 20 raids and 2,000 events per
 
 While enabled, it records:
 
-- Loot windows by source (creature/boss, chest, fishing, gathering, skinning or opened item), including empty/coins-only corpses without coin amounts. Known sources are deduplicated; skinning counts separately.
+- Loot windows by source (creature/boss, chest, fishing, gathering, skinning or opened item), including empty/coins-only corpses without coin amounts. Known sources are deduplicated; skinning counts separately. The window is read the moment the game has the loot, before auto-loot takes it.
 - Group-loot roll lists, including when another player opens the corpse, the loot threshold and boss encounter when identified. Your own system “You won” line adds a flag; other players' rolls/wins are not retained in observations.
 - NPC and object gossip or quest greetings, with your names replaced with `$N`. Amounts in gold, silver or copper and text that still contains roster or player target names are skipped.
 - Game-authored pages from world objects. The creator must be nil. Bag items, title-only reads and mail are excluded.

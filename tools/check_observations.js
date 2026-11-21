@@ -215,7 +215,9 @@ local function fresh(opts)
   function h.events() return (G.KutzInventoryObsDB or {}).events or {} end
   function h.last() return printed[#printed] or "" end
   function h.on() h.cmd("track drops yes") end
-  function h.loot(slots) s.slots = slots; h.event("LOOT_OPENED"); h.event("LOOT_CLOSED") end
+  -- a loot window as the game sends it: ready, opened, closed. h.lootOpened: a client that has no LOOT_READY
+  function h.loot(slots) s.slots = slots; h.event("LOOT_READY", false); h.event("LOOT_OPENED", false); h.event("LOOT_CLOSED") end
+  function h.lootOpened(slots) s.slots = slots; h.event("LOOT_OPENED"); h.event("LOOT_CLOSED") end
   h.event("ADDON_LOADED", "KutzInventory")
   return h
 end
@@ -830,6 +832,60 @@ do
   print("OK   loot: one event per source, coin-only opens, no coins or currencies, reopen once, skin / herb / mine / chest / fishing / container / boss")
 end
 
+-- 4b) read at LOOT_READY: auto-loot or a fast-loot addon takes the slots from there, so LOOT_OPENED sees an emptied
+-- window or never comes, and LOOT_CLOSED may not come either
+do
+  local A, B, C = "Creature-0-4170-0-1234-424-000012AA01", "Creature-0-4170-0-1234-424-000012AA02", "Creature-0-4170-0-1234-423-000012AA03"
+  local h = fresh(); h.on()
+  local function ids() local out = {}; for i, e in ipairs(h.events()) do out[i] = e.id:match("%-(%d+)$") end; return table.concat(out, ",") end
+  -- the slots are taken between the two events: the read is LOOT_READY's, with the items
+  h.s.units.target = { guid = A, dead = true, level = 16 }
+  h.s.slots = { item(2589, 2, { A, 2 }), { n = 0, from = { A, 0 } } }; h.event("LOOT_READY", true)
+  h.s.slots = {}; h.event("LOOT_OPENED", true); h.event("LOOT_CLOSED")
+  local ev = h.events()
+  assert(#ev == 1 and ev[1].src.guid == A and ev[1].src.via == "slot" and ev[1].src.level == 16 and #ev[1].items == 1 and ev[1].items[1].n == 2,
+         "the items as LOOT_READY had them: " .. dump(ev[1]))
+  -- a window that never opens and never closes: the next corpse's LOOT_READY is still read
+  h.s.units.target = { guid = B, dead = true, level = 17 }
+  h.s.slots = { item(2592, 1, { B, 1 }) }; h.event("LOOT_READY", true)
+  h.s.units.target = { guid = C, dead = true, level = 15 }
+  h.s.slots = { item(1212, 1, { C, 1 }) }; h.event("LOOT_READY", true)
+  ev = h.events()
+  assert(#ev == 3 and ev[2].src.guid == B and ev[3].src.guid == C and ev[3].items[1].id == 1212, "no LOOT_CLOSED between two corpses: " .. #ev)
+  -- LOOT_READY twice for one window, the second after the slots went, with another corpse targeted by then: nothing
+  -- more, and that other corpse is not marked opened and empty
+  local D = "Creature-0-4170-0-1234-424-000012AA04"
+  h.s.units.target = { guid = D, dead = true, level = 16 }
+  h.event("LOOT_READY", true)                                   -- C's window again, as it was
+  h.s.slots = {}; h.event("LOOT_READY", true); h.event("LOOT_OPENED", true)   -- and emptied
+  assert(#h.events() == 3, "a repeated LOOT_READY adds nothing: " .. #h.events())
+  h.event("LOOT_CLOSED")
+  h.s.slots = { item(2589, 1, { D, 1 }) }; h.event("LOOT_READY", true); h.event("LOOT_CLOSED")
+  ev = h.events()
+  assert(#ev == 4 and ev[4].src.guid == D and #ev[4].items == 1, "the other corpse's own loot is recorded: " .. dump(ev[#ev].src))
+  assert(ids() == "000001,000002,000003,000004", "an open that is not kept takes no id: " .. ids())
+  -- a source with no GUID to count it by (an opened bag item) is read once per window, however often LOOT_READY comes
+  h.s.units.target = nil
+  h.G.C_Item = { GetItemIDByGUID = function(g) if g == BAG then return 20708 end end }
+  h.s.slots = { item(2589, 4, { BAG, 4 }) }
+  h.event("LOOT_READY", true); h.event("LOOT_READY", true); h.event("LOOT_OPENED", true)
+  assert(#h.events() == 5 and h.events()[5].src.kind == "container", "one bag, one event: " .. #h.events())
+  h.event("LOOT_CLOSED"); h.event("LOOT_READY", true); h.event("LOOT_CLOSED")
+  assert(#h.events() == 6 and h.events()[6].src.item == 20708, "the next bag after the window closed: " .. #h.events())
+  -- nothing in the window at LOOT_READY: still an open of the dead target, once
+  h.s.units.target = { guid = "Creature-0-4170-0-1234-424-000012AA05", dead = true }
+  h.s.slots = {}; h.event("LOOT_READY", true); h.event("LOOT_OPENED", true); h.event("LOOT_CLOSED")
+  ev = h.events()
+  assert(#ev == 7 and ev[7].src.npc == 424 and ev[7].src.via == "target" and #ev[7].items == 0, "an empty window is an open: " .. dump(ev[#ev].src))
+  -- a client without LOOT_READY: LOOT_OPENED reads the window as before
+  local old = fresh(); old.on()
+  old.s.units.target = { guid = A, dead = true }
+  old.lootOpened({ item(2589, 1, { A, 1 }) }); old.lootOpened({ item(2592, 1, { B, 1 }) })
+  assert(#old.events() == 2 and old.events()[2].src.guid == B and old.events()[2].id:match("%-000002$"), "LOOT_OPENED alone: " .. #old.events())
+  assert(h.registered.LOOT_READY and h.registered.LOOT_OPENED and h.registered.LOOT_CLOSED, "the three loot events are registered")
+  print("OK   loot is read at LOOT_READY: before the slots are taken, without LOOT_OPENED or LOOT_CLOSED, once per window; LOOT_OPENED alone still reads")
+end
+
 -- 5) no GetLootSourceInfo: the dead target when the window opened (via = target), else no source
 do
   local h = fresh({ noSourceInfo = true }); h.on()
@@ -1081,6 +1137,7 @@ do
   assert(dump(ok.rep) == "{1={d=250,f=72}}", "the plain case: " .. dump(ok.rep))
   local function norep(what, ...) local q = turn(...); assert(q and not q.rep, what .. ": " .. dump(q)); return q end
   norep("loot before the turn-in", nil, function(x) x.event("LOOT_OPENED") end)
+  norep("loot that never opened a window before the turn-in", nil, function(x) x.event("LOOT_READY", true) end)
   norep("loot within the second", nil, nil, function(x) x.event("LOOT_OPENED") end)
   norep("combat before", nil, function(x) x.event("PLAYER_REGEN_DISABLED") end)
   norep("combat within the second", nil, nil, function(x) x.event("PLAYER_REGEN_DISABLED") end)

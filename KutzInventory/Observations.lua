@@ -19,7 +19,8 @@
 --   an item no database has yet (the rest of the game's link, with the player's level and spec, is dropped).
 --   loot    one per loot source in a loot window: src = { kind, npc|object|item, guid, level, via }, items = { { id, n, link } }
 --           (every window is an open: a coins-only corpse is items = {}; coins are never recorded. The same corpse
---           opened twice counts once; skinning it is a separate "skin" open)
+--           opened twice counts once; skinning it is a separate "skin" open. Read at LOOT_READY, before auto-loot or
+--           a fast-loot addon takes the slots; at LOOT_OPENED only where LOOT_READY did not come)
 --           src.encounter: the DungeonEncounter id, on a boss killed while recording (ENCOUNTER_END; Forever shows no
 --           boss1..5 units, so the boss is the dead creature the group targets).
 --           via = "roll": a corpse's group-loot roll list (START_LOOT_ROLL), recorded also when another player opened
@@ -328,7 +329,7 @@ local gatherNames                               -- the same, by the spells' name
 local lastCast = { kind = nil, at = -1000 }
 local bossNpcs = {}                             -- npc ids seen as boss1..boss5 this session
 local lastUsedItem = { id = nil, at = -1000 }   -- a container item just opened from the bags
-local lootDone = false
+local lootDone = false                          -- this loot window was read; false again once it closes
 local Sighting                                  -- (unit, open): the npcs summary's update, defined below
 -- objective credit (1.20.0), its functions below: WINDOW seconds of this player's own evidence, at most SAW entries;
 -- want = the objective types still open at the last scan (no evidence is kept for a type no objective needs)
@@ -469,8 +470,17 @@ local function Windowed(src, byId)
 end
 
 -- Every loot window is an open, coins-only ones too (items = {}): drops / opens is the rate. Coins are never recorded.
-local function RecordLoot()
-    if lootDone then return end
+-- Read at LOOT_READY (ready = true), the first moment the client has the loot. With auto-loot on, the game or a
+-- fast-loot addon starts taking the slots right there, so at LOOT_OPENED the window is half or wholly empty, or it
+-- never opens at all: reading there recorded kills with no items, or nothing. LOOT_OPENED reads only a window
+-- LOOT_READY did not (a client without that event).
+-- LOOT_READY can come again before the window closes (the client sends it twice for some corpses, and LOOT_CLOSED may
+-- not come for a window that never opened). Such a read (again) keeps only what cannot be a repeat or a guess: a
+-- source the client names by GUID, which Opened() counts once. Nothing without a GUID, no dead-target fallback (the
+-- target may be another corpse by now) and no empty open.
+local function RecordLoot(ready)
+    local again = lootDone
+    if again and not ready then return end
     lootDone = true
     local fishing = Plain(Try(IsFishingLoot)) == true
     local sources, order = {}, {}
@@ -511,13 +521,21 @@ local function RecordLoot()
             end
         end
     end
-    if #order == 0 then Of(Target(), "target") end           -- a loot window with nothing in it
+    if #order == 0 and not again then Of(Target(), "target") end   -- a loot window with nothing in it
     for _, key in ipairs(order) do
-        local s, e = sources[key], NewEvent("loot")
-        e.src, e.items = Source(s.guid, s.via, fishing), s.items
-        if e.src.guid then e.src.encounter = bossEncounter[e.src.guid] end
-        if not (e.src.guid and Opened(e.src.guid .. "|" .. e.src.kind)) then Add(e) end
-        if e.src.guid then Windowed(e.src, s.byId) end
+        local s = sources[key]
+        local src = Source(s.guid, s.via, fishing)
+        if src.guid then src.encounter = bossEncounter[src.guid] end
+        local skip = again and not (src.guid and s.via == "slot")
+        if not skip then
+            -- the event (and its id) is made only for an open that is kept
+            if not (src.guid and Opened(src.guid .. "|" .. src.kind)) then
+                local e = NewEvent("loot")
+                e.src, e.items = src, s.items
+                Add(e)
+            end
+            if src.guid then Windowed(src, s.byId) end
+        end
     end
 end
 
@@ -2589,7 +2607,8 @@ for event, kind in pairs(line.kinds) do
     end
 end
 
-function handlers.LOOT_OPENED() qx.Spoil(); RecordLoot() end
+function handlers.LOOT_READY() qx.Spoil(); RecordLoot(true) end
+function handlers.LOOT_OPENED() qx.Spoil(); RecordLoot(false) end
 function handlers.LOOT_CLOSED() lootDone = false end
 local function Cast(unit, _, spellId)
     if unit ~= "player" then return end
@@ -2785,7 +2804,10 @@ end
 function handlers.CONFIRM_BINDER() Sighting("npc", true, { "inn" }) end
 function handlers.HEARTHSTONE_BOUND() Sighting("npc", true, { "inn" }) end
 
-local RECORDING = { "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
+-- LOOT_READY is first so the loot read registers as early as it can. Where the client calls listeners in the order
+-- they registered, the read comes before another addon's slot-taking in the same event (not checked in the client).
+local RECORDING = { "LOOT_READY", "LOOT_OPENED", "LOOT_CLOSED",
+                    "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN", "QUEST_REMOVED",
                     "QUEST_DATA_LOAD_RESULT", "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "PLAYER_REGEN_ENABLED",
