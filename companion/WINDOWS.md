@@ -2,9 +2,9 @@
 
 This is the uploader called KutzUploader on wow.cr0m.com. The portable package targets Windows 10/11 x64, includes its Node runtime, and uses Windows .NET Framework for the settings/tray UI. No separate Node/npm install or administrator access is needed. Addon and bundle versions are independent: `build.json` identifies the app build; `AddOns/KutzInventory/KutzInventory.toc` identifies the included addon.
 
-## Companion 0.12.3 · KutzInventory 1.20.0
+## Companion 0.12.4 · KutzInventory 1.20.1
 
-This release bundles KutzInventory 1.20.0 and sends inventory export 3.13.0, so the observations recorded since 1.16.0 are uploaded. Like 0.12.2, it requires timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
+This release bundles KutzInventory 1.20.1, which no longer saves a character twice when the game gives no realm name; the Companion program is unchanged from 0.12.3 and sends inventory export 3.13.0. Like 0.12.2, it requires timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
 
 ## Install and connect
 
