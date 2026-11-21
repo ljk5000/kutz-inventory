@@ -3,6 +3,7 @@
 -- Account-wide, in KutzInventoryDB.prices:
 --   vendor[itemID] = { price = copper per item, vendor = NPC name, limited = true|nil, t = time }   what a vendor sells it for
 --   sell[itemID]   = copper per item                                                               what a vendor pays you (the game's sell price)
+--                    read again once each session, so a price the game changed is replaced
 --   ah[house][itemID] = { p = {3 lowest unit prices}, q = {their quantities}, n = result rows seen, t = time }
 --                    p empty = searched and none listed. An item that never answered is not stored at all.
 --   ah[house][itemID] also has c, s = the item's class / subclass (C_Item.GetItemInfoInstant), for AH categories,
@@ -107,14 +108,16 @@ ns.DetectHouse = DetectHouse
 
 ---------------------------------------------------------------------------
 -- vendor sell prices (from the game's item info; it may need a moment to load an item)
+-- Each item is asked once a session, not once ever: the game can change what a vendor pays, and a price kept from an
+-- older session would stay wrong. A stored price stays until the game gives a new answer.
 ---------------------------------------------------------------------------
-local wantSell = {}
+local wantSell, askedSell = {}, {}
 local function RecordSell(id)
     local p = P()
-    if not (p and id) or p.sell[id] then return end
+    if not (p and id) or askedSell[id] then return end
     local info = { Try(C_Item and C_Item.GetItemInfo or GetItemInfo, id) }
     local sellPrice = Plain(info[11])
-    if type(sellPrice) == "number" then p.sell[id] = sellPrice; wantSell[id] = nil
+    if type(sellPrice) == "number" then p.sell[id] = sellPrice; wantSell[id] = nil; askedSell[id] = true
     else
         wantSell[id] = true
         if C_Item and C_Item.RequestLoadItemDataByID then Try(C_Item.RequestLoadItemDataByID, id) end
