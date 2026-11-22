@@ -1005,6 +1005,28 @@ test("recipes not learned yet: the export is the same whether the saved file kee
   assert.equal(merged.find((c) => c.name === "Exampleone").recipes[0].unlearned[0].makesMax, undefined);
 });
 
+test("observations 3.15.0: saved-only last-met stamp m is never exported, day comes from d, and old entries without m still load", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([factsFile(`itemBuilds = { "1.60.1.71037" }, items = {
+    [2589] = { d = 20403, m = 20410, b = 1, f = "1:0:7:5:5:0::", n = "Linen Cloth" },
+    [4306] = { d = 20404, b = 1, f = "1:0:7:5:25:0::", n = "Silk Cloth" } }`)]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  const items = doc.observations.items;
+  assert.deepEqual(items, [
+    { id: 2589, day: 20403, build: "1.60.1.71037", name: "Linen Cloth", q: 1, bind: 0, cls: 7, sub: 5, ilvl: 5, req: 0 },
+    { id: 4306, day: 20404, build: "1.60.1.71037", name: "Silk Cloth", q: 1, bind: 0, cls: 7, sub: 5, ilvl: 25, req: 0 },
+  ]);
+  for (const it of items) assert.equal("m" in it, false, "m must never be exported");
+  // Merging two files compares changed day (d), not last-met day (m)
+  const fileA = factsFile(`itemBuilds = { "1.60.1.71037" }, items = { [2589] = { d = 20403, m = 20420, b = 1, f = "1:0:7:5:5:0::", n = "Old Text" } }`, `prefix = "aa1100"`);
+  const fileB = factsFile(`itemBuilds = { "1.60.1.71100" }, items = { [2589] = { d = 20405, m = 20405, b = 1, f = "1:0:7:5:5:0::", n = "New Text" } }`, `prefix = "bb2200"`);
+  const merged = convert.convertSavedVariables([fileA, fileB]).inventory;
+  assert.deepEqual(validateExport(merged), []);
+  assert.deepEqual(merged.observations.items, [
+    { id: 2589, day: 20405, build: "1.60.1.71100", name: "New Text", q: 1, bind: 0, cls: 7, sub: 5, ilvl: 5, req: 0 },
+  ]);
+});
+
 test("observations 3.15.0: realistic sizes: a full item table of the addon (200 kB saved) and 30 days of kills", () => {
   const items = {};
   for (let i = 1; i <= 700; i++) {

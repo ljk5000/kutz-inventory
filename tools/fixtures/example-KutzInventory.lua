@@ -216,15 +216,16 @@ KutzInventoryObsDB = {
     -- 1.21.0: seen inside an instance, where there is no position: the instance map and difficulty, no cells
     [11671] = { name = "Made-up Hound", lv = { 62, 62 }, cls = "elite", ct = 1, rxA = 2, day = 20404, inst = { ["409:9"] = 3 } },
   },
-  -- item facts (1.21.0): read once per item and game build from a link made of the item id alone. f is
+  -- item facts (1.21.0): read once per item and game build from a link made of the item id alone. d is the last day
+  -- the entry's exported content changed; m is the last day it was met (saved-only for pruning, never exported). f is
   -- "quality:bind:class:subclass:itemLevel:requiredLevel:setId:equipLoc", s the stats, t the tooltip (one text per line of
   -- the string: "-" left, "!" left shown red, ">" the right text of the line before), v the random suffixes met.
   itemBuilds = { "1.60.1.70888" },
   items = {
-    [6560] = { d = 20404, b = 1, f = "2:2:4:6:25:20::INVTYPE_SHIELD", s = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
+    [6560] = { d = 20404, m = 20404, b = 1, f = "2:2:4:6:25:20::INVTYPE_SHIELD", s = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
                t = "-Soldier's Shield\n-Binds when equipped\n-Off Hand\n>Shield\n-478 Armor\n-+3 Stamina\n-Durability 85 / 85\n!Requires Level 20",
                v = { ["0;12729"] = "Soldier's Shield of Intellect\nITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478" } },
-    [2589] = { d = 20404, b = 1, f = "1:0:7:5:5:0::", t = "-Linen Cloth\n-|cff66bbffCrafting Reagent|r" },
+    [2589] = { d = 20404, m = 20405, b = 1, f = "1:0:7:5:5:0::", t = "-Linen Cloth\n-|cff66bbffCrafting Reagent|r" },
   },
   -- kills per day (1.21.0): day -> "npc:level" -> count (level 0: the client gave none)
   kills = { [20404] = { ["2958:14"] = 3, ["525:0"] = 1 } },

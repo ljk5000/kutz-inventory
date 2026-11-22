@@ -345,3 +345,143 @@ test("size: 30-day export trimmed with marks from the day before is under one fi
   console.log(`30-day gzipped upload sizes: full=${fullGzip.length} B, trimmed=${trimmedGzip.length} B (${((trimmedGzip.length / fullGzip.length) * 100).toFixed(1)}%)`);
   assert.ok(trimmedGzip.length < fullGzip.length / 5, `expected trimmed (${trimmedGzip.length} B) < full/5 (${Math.floor(fullGzip.length / 5)} B)`);
 });
+
+test("end-to-end with Facts.lua and trimExport: meeting unchanged bag items on D+1 after ack day D exports no items; new item on D+1 is exported", () => {
+  const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require("fengari");
+  const convert = require("./convert");
+  const factsSrc = fs.readFileSync(path.join(__dirname, "..", "KutzInventory", "Facts.lua"), "utf8").replace(/\r\n/g, "\n");
+
+  const DAY_READ = 20453; // D - 1: bag items first read
+  const DAY_ACK = 20454;  // D: server acknowledged up to D (drops < D, keeps >= D)
+  const DAY_NEXT = 20455; // D + 1: bag items met again unchanged, then one new item met
+
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+  lua.lua_pushstring(L, to_luastring(factsSrc));
+  lua.lua_setglobal(L, to_luastring("FACTS_SRC"));
+
+  const driver = `
+    local function serialize(v)
+      if type(v) == "string" then
+        return '"' .. v:gsub('[\\\\"]', "\\\\%0"):gsub("\\n", "\\\\n"):gsub("\\r", "\\\\r") .. '"'
+      end
+      if type(v) ~= "table" then return tostring(v) end
+      local out = { "{" }
+      for k, x in pairs(v) do
+        local ks = type(k) == "string" and ('"' .. k .. '"') or tostring(k)
+        out[#out + 1] = "[" .. ks .. "] = " .. serialize(x) .. ","
+      end
+      out[#out + 1] = "}"
+      return table.concat(out, "\\n")
+    end
+
+    local function session(db, day)
+      local timers, clock = {}, 100
+      local G = setmetatable({}, { __index = _G })
+      G._G = G
+      G.time = function() return day * 86400 + 3600 end
+      G.GetTime = function() return clock end
+      G.GetBuildInfo = function() return "1.60.1", "71037", "Nov 1 2026", 16001 end
+      G.InCombatLockdown = function() return false end
+      G.UnitAffectingCombat = function() return false end
+      G.GetFramerate = function() return 60 end
+      G.debugprofilestop = function() return 0 end
+      G.C_Timer = { After = function(delay, fn) timers[#timers + 1] = { delay = delay, fn = fn } end }
+      local catalog = {
+        [2589] = { name = "Linen Cloth", q = 1, ilvl = 5, req = 0, cls = 7, sub = 5, bind = 0, tip = { { leftText = "Linen Cloth" }, { leftText = "Crafting Reagent" } } },
+        [4306] = { name = "Silk Cloth", q = 1, ilvl = 25, req = 0, cls = 7, sub = 5, bind = 0, tip = { { leftText = "Silk Cloth" }, { leftText = "Crafting Reagent" } } },
+        [6560] = { name = "Soldier's Shield", q = 2, ilvl = 25, req = 20, cls = 4, sub = 6, bind = 2, slot = "INVTYPE_SHIELD",
+                   tip = { { leftText = "Soldier's Shield" }, { leftText = "Off Hand", rightText = "Shield" }, { leftText = "Durability 85 / 85" } },
+                   stats = { ITEM_MOD_STAMINA_SHORT = 3, RESISTANCE0_NAME = 478 } },
+        [9999] = { name = "Fresh Drop", q = 3, ilvl = 40, req = 35, cls = 4, sub = 1, bind = 2, slot = "INVTYPE_HEAD",
+                   tip = { { leftText = "Fresh Drop" }, { leftText = "Binds when equipped" } },
+                   stats = { ITEM_MOD_INTELLECT_SHORT = 7 } },
+      }
+      G.C_Item = {
+        GetItemInfo = function(link)
+          local x = catalog[tonumber(link:match("^item:(%d+)"))]
+          if not x then return nil end
+          return x.name, nil, x.q, x.ilvl, x.req, "Type", "Sub", 1, x.slot or "", 1, 100, x.cls, x.sub, x.bind, 0, x.set
+        end,
+        GetItemStats = function(link)
+          local x = catalog[tonumber(link:match("^item:(%d+)"))]
+          return x and x.stats or nil
+        end,
+        RequestLoadItemDataByID = function() end,
+      }
+      G.C_TooltipInfo = {
+        GetHyperlink = function(link)
+          local x = catalog[tonumber(link:match("^item:(%d+)"))]
+          return x and { lines = x.tip } or nil
+        end,
+      }
+      G.KutzInventoryObsDB = db
+      local ns = {}
+      assert(load(FACTS_SRC, "@Facts.lua", "t", G))("KutzInventory", ns)
+      local function run()
+        while #timers > 0 do
+          local t = table.remove(timers, 1)
+          clock = clock + t.delay
+          t.fn()
+        end
+      end
+      return ns.Facts, run
+    end
+
+    local db = { v = 1, on = true, agreed = true, addon = "1.21.0", prefix = "k1f9c2", events = {} }
+    -- Day D-1: bag items first met and read
+    local F1, run1 = session(db, ${DAY_READ})
+    F1.Meet("|cffffffff|Hitem:2589::::::::60:::::|h[Linen Cloth]|h|r")
+    F1.Meet("|cffffffff|Hitem:4306::::::::60:::::|h[Silk Cloth]|h|r")
+    F1.Meet("|cff1eff00|Hitem:6560::::::::60:::::|h[Soldier's Shield]|h|r")
+    run1()
+    SAVED_READ = "KutzInventoryDB = { chars = {} }\\nKutzInventoryObsDB = " .. serialize(db)
+
+    -- Day D+1: fresh session, all bag items met again, none changed
+    local F2, run2 = session(db, ${DAY_NEXT})
+    F2.Meet("|cffffffff|Hitem:2589::::::::60:::::|h[Linen Cloth]|h|r")
+    F2.Meet("|cffffffff|Hitem:4306::::::::60:::::|h[Silk Cloth]|h|r")
+    F2.Meet("|cff1eff00|Hitem:6560::::::::60:::::|h[Soldier's Shield]|h|r")
+    run2()
+    SAVED_REMET = "KutzInventoryDB = { chars = {} }\\nKutzInventoryObsDB = " .. serialize(db)
+
+    -- Still on Day D+1: one brand-new item is met
+    F2.Meet("|cff0070dd|Hitem:9999::::::::60:::::|h[Fresh Drop]|h|r")
+    run2()
+    SAVED_WITH_NEW = "KutzInventoryDB = { chars = {} }\\nKutzInventoryObsDB = " .. serialize(db)
+  `;
+
+  assert.equal(lauxlib.luaL_loadbuffer(L, to_luastring(driver), null, to_luastring("@e2e")), 0);
+  assert.equal(lua.lua_pcall(L, 0, 0, 0), 0, () => to_jsstring(lua.lua_tostring(L, -1)));
+
+  const getGlobal = name => {
+    lua.lua_getglobal(L, to_luastring(name));
+    const s = to_jsstring(lua.lua_tostring(L, -1));
+    lua.lua_pop(L, 1);
+    return s;
+  };
+
+  const marks = { epoch: 1, events: {}, day: DAY_ACK };
+
+  // Save on D+1 after re-meeting all bag items unchanged: full export still has all 3 at day D-1 (and no m);
+  // trimmed export has no items (and omits observations altogether).
+  const remetFull = convert.convertSavedVariables([getGlobal("SAVED_REMET")]).inventory;
+  assert.deepEqual(validateExport(remetFull), []);
+  assert.equal(remetFull.observations.items.length, 3);
+  for (const it of remetFull.observations.items) {
+    assert.equal(it.day, DAY_READ);
+    assert.equal("m" in it, false);
+  }
+  const remetTrimmed = trimExport(remetFull, marks);
+  assert.deepEqual(validateExport(remetTrimmed), []);
+  assert.equal("observations" in remetTrimmed, false, "all unchanged bag items are trimmed away");
+
+  // Save on D+1 after also meeting one new item: trimmed export carries only the new item (day = D+1, no m).
+  const withNewFull = convert.convertSavedVariables([getGlobal("SAVED_WITH_NEW")]).inventory;
+  assert.deepEqual(validateExport(withNewFull), []);
+  assert.equal(withNewFull.observations.items.length, 4);
+  const withNewTrimmed = trimExport(withNewFull, marks);
+  assert.deepEqual(validateExport(withNewTrimmed), []);
+  assert.deepEqual(withNewTrimmed.observations.items.map(i => [i.id, i.day]), [[9999, DAY_NEXT]]);
+  assert.equal("m" in withNewTrimmed.observations.items[0], false);
+});
