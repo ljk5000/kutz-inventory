@@ -3,7 +3,8 @@
 -- is off, and everything lives in Observations.lua's saved table.
 --
 -- KutzInventoryObsDB.items[itemId] = {
---   d = day last met (days since 1970; the least recently met go first when the table is full),
+--   d = day the entry's exported content last changed (days since 1970; first read, changed field/build, or new/changed variant),
+--   m = day last met (days since 1970; saved-only for least-recently-met pruning, never exported),
 --   b = index into KutzInventoryObsDB.itemBuilds (the game build the facts were read on, "1.60.1.71037"),
 --   f = "quality:bind:class:subclass:itemLevel:requiredLevel:setId:equipLoc" (a part the client did not give is empty),
 --   n = name (left out when the tooltip's first line is the name),
@@ -194,6 +195,26 @@ local function Build(d)
     return buildAt
 end
 
+local function MetDay(e)
+    return type(e) == "table" and (Int(e.m) or Int(e.d)) or 0
+end
+
+local function Touch(e, today)
+    local old = e.m
+    if old == today then return end
+    if old == nil then index.bytes = index.bytes + 11 + Disk(today)
+    else index.bytes = index.bytes + Disk(today) - Disk(old) end
+    e.m = today
+end
+
+local function BuildName(d, i)
+    return type(d.itemBuilds) == "table" and Int(i, 1) and d.itemBuilds[i] or nil
+end
+
+local function SameItem(d, a, b)
+    return BuildName(d, a.b) == BuildName(d, b.b) and a.f == b.f and a.n == b.n and a.s == b.s and a.t == b.t
+end
+
 -- Over a cap: the least recently met go first (then the lower id), down to 90% so it does not run on every read
 local function PruneItems(d, headroom)
     local items = Items(d)
@@ -201,7 +222,7 @@ local function PruneItems(d, headroom)
     if headroom then max, bytes = math.floor(max * 0.9), math.floor(bytes * 0.9) end
     if index.count <= max and index.bytes <= bytes then return end
     local list = {}
-    for id, e in pairs(items) do list[#list + 1] = { id = id, day = type(e) == "table" and Int(e.d) or 0 } end
+    for id, e in pairs(items) do list[#list + 1] = { id = id, day = MetDay(e) } end
     table.sort(list, function(a, b)
         if a.day ~= b.day then return a.day < b.day end
         return tostring(a.id) < tostring(b.id)
@@ -300,9 +321,10 @@ local function Read(d, job)
     if job.var then                             -- a random suffix of an item already read on this build
         local e = items[job.id]
         if type(e) ~= "table" or e.b ~= build then return false end
+        local has = type(e.v) == "table" and type(e.v[job.var]) == "string" and e.v[job.var] or nil
         local count = 0
         if type(e.v) == "table" then for _ in pairs(e.v) do count = count + 1 end end
-        if count >= ITEMS.VARIANTS then return true end
+        if not has and count >= ITEMS.VARIANTS then return true end
         -- its name is the met link's own text; the client is asked only when the link had none (it may not answer
         -- for a link built here, and then the variant is not kept)
         local mine = type(job.name) == "string" and job.name ~= "" and job.name or Plain((Try(info, link)))
@@ -313,10 +335,16 @@ local function Read(d, job)
         -- A client that ignores the suffix on a link built here answers with the plain item's numbers: not this
         -- variant's, so they are left out rather than passed off as its own.
         if stats == (e.s or "") then stats = "" end
+        local val = mine .. LF .. stats
+        if has == val then
+            Touch(e, today)
+            return true
+        end
         index.bytes = index.bytes - EntryDisk(job.id, e)
         if type(e.v) ~= "table" then e.v = {} end
-        e.v[job.var] = mine .. LF .. stats
+        e.v[job.var] = val
         e.d = today
+        e.m = today
         index.bytes = index.bytes + EntryDisk(job.id, e)
         if index.bytes > ITEMS.BYTES then PruneItems(d, true) end
         return true
@@ -330,12 +358,21 @@ local function Read(d, job)
     name = Cut((name:gsub("[%c|]", "")), 120)
     slot = Plain(slot)
     slot = type(slot) == "string" and #slot <= 40 and slot:find("^[%u%d_]*$") and slot or ""
-    local e = { d = today, b = build,
+    local e = { d = today, m = today, b = build,
                 f = table.concat({ Part(quality), Part(bind), Part(class), Part(sub), Part(level), Part(req), Part(set), slot }, ":") }
     e.s = Stats(link)
     local ok, tip = pcall(Tooltip, link)
     if ok and tip then e.t = tip end
     if not (e.t and e.t:sub(1, #name + 1) == "-" .. name and (#e.t == #name + 1 or e.t:sub(#name + 2, #name + 2) == LF)) then e.n = name end
+    local old = items[job.id]
+    if type(old) == "table" then
+        if Int(old.d, 1) and SameItem(d, old, e) then
+            e.d = old.d
+            e.v = old.v
+        elseif BuildName(d, old.b) == BuildName(d, e.b) and type(old.v) == "table" then
+            e.v = old.v
+        end
+    end
     Store(d, job.id, e)
     return true
 end
@@ -437,9 +474,16 @@ function Facts.Meet(link)
         local today, build = Day(), Build(d)
         local e = Items(d)[id]
         local kept = true
-        if type(e) == "table" and e.b == build then
-            e.d = today
-            if var and not (type(e.v) == "table" and e.v[var]) then kept = Push(id, var, link:match("|h%[([^%]|]+)%]|h")) end
+        if type(e) == "table" and e.b == build and Int(e.d, 1) then
+            Touch(e, today)
+            if var then
+                local has = type(e.v) == "table" and type(e.v[var]) == "string" and e.v[var] or nil
+                local name = link:match("|h%[([^%]|]+)%]|h")
+                local cleanName = name and Cut((name:gsub("[%c|]", "")), 120) or ""
+                if not has or (cleanName ~= "" and has:sub(1, #cleanName + 1) ~= cleanName .. LF) then
+                    kept = Push(id, var, name)
+                end
+            end
         else
             kept = Push(id, nil)
             if var then kept = Push(id, var, link:match("|h%[([^%]|]+)%]|h")) and kept end

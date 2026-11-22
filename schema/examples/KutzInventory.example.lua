@@ -1330,6 +1330,7 @@ KutzInventoryObsDB = {
 	["items"] = {
 		[6560] = {
 			["d"] = 20404,
+			["m"] = 20404,
 			["b"] = 1,
 			["f"] = "2:2:4:6:25:20::INVTYPE_SHIELD",
 			["s"] = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
@@ -1340,6 +1341,7 @@ KutzInventoryObsDB = {
 		},
 		[2589] = {
 			["d"] = 20404,
+			["m"] = 20405,
 			["b"] = 1,
 			["f"] = "1:0:7:5:5:0::",
 			["t"] = "-Linen Cloth\n-|cff66bbffCrafting Reagent|r",

@@ -917,13 +917,14 @@ function exportNpcs(obsDbs) {
 }
 
 // ---------------------------------------------------------------------------
-// Item facts (3.15.0; KutzInventory 1.21.0, Facts.lua): KutzInventoryObsDB.items[itemId] = { d, b, f, n, s, t, v }, what
-// the game says about an item, read once per item and game build from a link made of the item id (and suffix) alone.
-// Exported as observations.items[] = { id, day, build?, name, q?, bind?, cls?, sub?, ilvl?, req?, set?, slot?,
-// durability?, stats?, tip?, variants? }: tip is the tooltip after cleanTooltip (below), a line being a string or
-// [left, right]; variants are the random suffixes met, { suffix?, bonus?, name, stats? }: one item, never several.
-// The same item in two saved files: the one met last, with both files' variants. At most 4000 items (the most
-// recently met) and about 1.5 MB of JSON.
+// Item facts (3.15.0; KutzInventory 1.21.0, Facts.lua): KutzInventoryObsDB.items[itemId] = { d, m, b, f, n, s, t, v },
+// what the game says about an item, read once per item and game build from a link made of the item id (and suffix)
+// alone. d is the last day the entry's exported content changed; m is the last day it was met (saved-only for pruning,
+// never exported). Exported as observations.items[] = { id, day, build?, name, q?, bind?, cls?, sub?, ilvl?, req?,
+// set?, slot?, durability?, stats?, tip?, variants? }: tip is the tooltip after cleanTooltip (below), a line being a
+// string or [left, right]; variants are the random suffixes met, { suffix?, bonus?, name, stats? }: one item, never
+// several. The same item in two saved files: the one whose entry changed last, with both files' variants. At most 4000
+// items (the most recently changed) and about 1.5 MB of JSON.
 // ---------------------------------------------------------------------------
 // >>> tooltip cleaner: begin (copied word for word into tools/convert.js)
 function cleanTooltipText(text) {

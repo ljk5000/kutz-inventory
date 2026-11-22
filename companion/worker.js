@@ -15,7 +15,7 @@ async function command(cmd) {
   const account = await verify(cmd.base, cmd.key);
   emit({ state: "connected", username: account.username, legacy: !!account.legacy, starting: cmd.action === "start" });
   if (cmd.action === "start") session = await createSession({
-    game: cmd.game, output: path.join(cmd.dataDirectory, "inventory.json"), base: cmd.base, key: cmd.key, report: emit,
+    game: cmd.game, output: path.join(cmd.dataDirectory, "inventory.json"), base: cmd.base, key: cmd.key, username: account.username, report: emit,
     sendInventory: cmd.sendInventory !== false, sendAuctions: cmd.sendAuctions !== false,
   });
 }

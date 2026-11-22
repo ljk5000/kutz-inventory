@@ -1,6 +1,7 @@
 "use strict";
 // Only this module knows the cr0m HTTP contract. Never expose response bodies to logs.
 const zlib = require("zlib");
+const { COMPANION_VERSION } = require("./version");
 function endpoint(base, route) {
   const url = new URL(base);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname))) throw new Error("Use HTTPS for cr0m.");
@@ -36,7 +37,7 @@ async function request(base, key, route, data, fetcher = fetch, signal) {
   try {
     res = await fetcher(url, {
       method: data === undefined ? "GET" : "POST", redirect: "error",
-      headers: { Authorization: "Bearer " + key, Accept: "application/json", ...(data === undefined ? {} : { "Content-Type": "application/json", "Content-Encoding": "gzip" }) },
+      headers: { Authorization: "Bearer " + key, Accept: "application/json", "X-Kutz-Uploader": COMPANION_VERSION, ...(data === undefined ? {} : { "Content-Type": "application/json", "Content-Encoding": "gzip" }) },
       // gzipped JSON, about 10x smaller; cr0m detects gzip by its first two bytes
       ...(data === undefined ? {} : { body: zlib.gzipSync(Buffer.from(JSON.stringify(data), "utf8")) }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
@@ -51,6 +52,8 @@ async function request(base, key, route, data, fetcher = fetch, signal) {
     // A receiver can echo the bearer key in an error. Redact before truncating or persisting it as auction state.
     let detail = null;
     if (!auth) { try { const e = (await res.json()).error; detail = typeof e === "string" ? e.split(key).join("[redacted]").slice(0, 200) : null; } catch { detail = null; } }
+    // cr0m no longer reads this Companion, addon or export format: its sentence says which one to update.
+    if (res.status === 426 && detail) throw Object.assign(new Error(detail), { status: 426, detail, retryAfter: null, retryable: false, authentication: false });
     throw Object.assign(new Error(auth ? "Key rejected or permission removed. Reconnect in Settings." : `Upload service returned HTTP ${res.status}${detail ? ": " + detail : ""}.`), {
       status: res.status, detail, retryAfter: Number(res.headers && res.headers.get ? res.headers.get("retry-after") : null) || null,
       retryable: res.status === 408 || res.status === 429 || res.status >= 500, authentication: auth,

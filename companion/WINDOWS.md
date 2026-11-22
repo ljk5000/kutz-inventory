@@ -2,9 +2,9 @@
 
 This is the uploader called KutzUploader on wow.cr0m.com. The portable package targets Windows 10/11 x64, includes its Node runtime, and uses Windows .NET Framework for the settings/tray UI. No separate Node/npm install or administrator access is needed. Addon and bundle versions are independent: `build.json` identifies the app build; `AddOns/KutzInventory/KutzInventory.toc` identifies the included addon.
 
-## Companion 0.12.6 · KutzInventory 1.21.0
+## Companion 0.12.7 · KutzInventory 1.21.0
 
-This release bundles KutzInventory 1.21.0 and sends inventory export 3.15.0: item facts, kills per day, random suffixes beside item links, creatures seen inside instances, every vendor of an item, statistics per day, and each character's current quest log and objective progress (`characters[].questLog`), all as new optional fields. It reads the saved shape 1.21.0 uses for unlearned recipes; Companion 0.12.5 and older reading such a file export no unlearned recipes, so update the Companion before or together with the addon. Like 0.12.2, it requires timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
+This release trims already-acknowledged `observations` before upload using the server's `ack` reply (`inventory.json.ack.json`, no API key stored), so repeat saves no longer re-send weeks of old events and summary rows; everything outside `observations` is still sent whole, and losing the state file simply sends everything once. It continues to bundle KutzInventory 1.21.0 and send inventory export 3.15.0 (item facts, kills per day, random suffixes beside item links, creatures seen inside instances, every vendor of an item, statistics per day, each character's current quest log and objective progress (`characters[].questLog`), and the 1.21.0 shared unlearned recipe shape; update Companion before or together with KutzInventory 1.21.0). Like 0.12.2, it requires timestamped Authenticode signing for both Windows executables. The release workflow verifies the signatures before packaging, calculating the checksum and generating ZIP provenance. It retains the 0.12.1 upload-key redaction and recording behavior. The original 0.12.1 release was unsigned; use the verification steps below for this download.
 
 ## Install and connect
 
@@ -46,6 +46,7 @@ Windows sign-in startup is **off by default** and requires a remembered key. Whe
 - `settings.json`: client path, site and remember/pause/upload preferences, never the key.
 - `inventory.json` and `auction-scans.json`: latest unencrypted private exports.
 - `inventory.json.pending.json`: unsent inventory, removed after success.
+- `inventory.json.ack.json`: server observation-acknowledgement marks, never the key.
 - `inventory.json.auctions-sent.json`: acknowledged/rejected scan times and rejection reasons. Interrupted writes can leave `.tmp` files.
 
 **Remember securely** stores the key and verified username in the current user's Windows Credential Manager as a generic credential named `KutzUI.Companion/<lowercase-site-origin>` using `CredentialStore.cs`. Unchecking Remember removes that site's saved key after verification; the session copy stays in process memory. Credential Manager is not protection against software running as your Windows user. Exports use ordinary filesystem permissions and are not encrypted. A `127.0.0.1` TCP listener on a path-derived port from 10000–29999 serves only as an exporter lock and closes connections immediately.

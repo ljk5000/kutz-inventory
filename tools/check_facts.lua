@@ -182,7 +182,7 @@ do
   h.F.Meet(link(6560, "Soldier's Shield"))
   assert(h.step() == nil and #h.s.reads == 1 and h.s.reads[1] == "item:6560", "one read, from the id alone: " .. dump(h.s.reads))
   local e = h.items()[6560]
-  assert(e and e.d == DAY0 and e.b == 1 and h.db().itemBuilds[1] == "1.60.1.71037", dump(e) .. dump(h.db().itemBuilds))
+  assert(e and e.d == DAY0 and e.m == DAY0 and e.b == 1 and h.db().itemBuilds[1] == "1.60.1.71037", dump(e) .. dump(h.db().itemBuilds))
   assert(e.f == "2:2:4:6:25:20::INVTYPE_SHIELD", e.f)
   assert(e.s == "ITEM_MOD_CRIT_RATING_SHORT=1.50,ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478", e.s)
   assert(e.t == table.concat({ "-Soldier's Shield", "-Off Hand", ">Shield", "!Requires Level 20", "-Classes: Warrior", "]Paladin", "-Use: one|ntwo", "-", ">Only right" }, LF), e.t)
@@ -299,23 +299,79 @@ do
 end
 
 ---------------------------------------------------------------------------
--- 4) sessions and builds: met again = the day only; a new game build = read again; a pruned item = read again
+-- 4) sessions, builds, and day-on-change: met again moves m only (d stays); a changed field, new build or variant moves d
 ---------------------------------------------------------------------------
 do
   local h = fresh(); shield(h); h.F.Meet(link(6560)); h.run()
   local db = h.db()
+  assert(db.items[6560].d == DAY0 and db.items[6560].m == DAY0, dump(db.items[6560]))
   local again = fresh({ db = db }); shield(again); again.s.now = again.s.now + 3 * 86400
   again.F.Meet(link(6560)); again.F.Meet(link(6560, "Soldier's Shield", ":55:::::::60:::::"))
-  assert(#again.s.timers == 0 and #again.s.reads == 0 and db.items[6560].d == DAY0 + 3, "a later session: the day moves, nothing is read")
-  local patch = fresh({ db = db }); shield(patch); patch.s.build = "71100"
+  assert(#again.s.timers == 0 and #again.s.reads == 0 and db.items[6560].d == DAY0 and db.items[6560].m == DAY0 + 3,
+         "a later session: m moves, exported d stays unchanged, nothing is read: " .. dump(db.items[6560]))
+  -- a new build moves d (and m), even if only the build changed
+  local patch = fresh({ db = db }); shield(patch); patch.s.now = patch.s.now + 4 * 86400; patch.s.build = "71100"
   patch.s.stats["item:6560"] = { ITEM_MOD_STAMINA_SHORT = 4, RESISTANCE0_NAME = 478 }
   patch.F.Meet(link(6560)); patch.run()
-  assert(#patch.s.reads == 1 and db.items[6560].b == 2 and dump(db.itemBuilds) == "{1=1.60.1.71037,2=1.60.1.71100}"
-         and db.items[6560].s == "ITEM_MOD_STAMINA_SHORT=4,RESISTANCE0_NAME=478", "a new build: read again: " .. dump(db.items[6560]))
+  assert(#patch.s.reads == 1 and db.items[6560].b == 2 and db.items[6560].d == DAY0 + 4 and db.items[6560].m == DAY0 + 4
+         and dump(db.itemBuilds) == "{1=1.60.1.71037,2=1.60.1.71100}"
+         and db.items[6560].s == "ITEM_MOD_STAMINA_SHORT=4,RESISTANCE0_NAME=478", "a new build: read again and d moves: " .. dump(db.items[6560]))
+  -- build-only change also moves d
+  local buildOnly = fresh({ db = db }); shield(buildOnly); buildOnly.s.now = buildOnly.s.now + 5 * 86400; buildOnly.s.build = "71200"
+  buildOnly.s.stats["item:6560"] = { ITEM_MOD_STAMINA_SHORT = 4, RESISTANCE0_NAME = 478 }
+  buildOnly.F.Meet(link(6560)); buildOnly.run()
+  assert(#buildOnly.s.reads == 1 and db.items[6560].b == 3 and db.items[6560].d == DAY0 + 5 and db.items[6560].m == DAY0 + 5,
+         "build-only change moves d: " .. dump(db.items[6560]))
+  -- re-read on same build (no GetBuildInfo, forced via missing b): identical content leaves d alone and keeps variants;
+  -- changing any exported field (name, quality, bind, class, subclass, ilvl, req, set, slot, durability, stats, tip) moves d
+  local function reread(mutate)
+    local x = fresh({ without = { "GetBuildInfo" } }); shield(x)
+    x.s.tips["item:6560"][#x.s.tips["item:6560"] + 1] = { leftText = "Durability 65 / 65" }
+    x.F.Meet(SHIELD); x.run()
+    local saved = x.db()
+    assert(saved.items[6560].d == DAY0 and saved.items[6560].m == DAY0 and saved.items[6560].v["0;12729"])
+    saved.items[6560].b = nil                   -- force a re-read while BuildName stays nil on both sides
+    local y = fresh({ db = saved, without = { "GetBuildInfo" } }); shield(y)
+    y.s.tips["item:6560"][#y.s.tips["item:6560"] + 1] = { leftText = "Durability 65 / 65" }
+    y.s.now = y.s.now + 6 * 86400
+    if mutate then mutate(y) end
+    y.F.Meet(link(6560)); y.run()
+    return saved.items[6560]
+  end
+  local same = reread(nil)
+  assert(same.d == DAY0 and same.m == DAY0 + 6 and same.v and same.v["0;12729"], "identical re-read leaves d alone and keeps variants: " .. dump(same))
+  for label, fn in pairs({
+    name = function(y) y.s.info[6560].name = "Renamed Shield" end,
+    quality = function(y) y.s.info[6560].q = 3 end,
+    bind = function(y) y.s.info[6560].bind = 1 end,
+    class = function(y) y.s.info[6560].cls = 2 end,
+    subclass = function(y) y.s.info[6560].sub = 7 end,
+    ilvl = function(y) y.s.info[6560].ilvl = 30 end,
+    req = function(y) y.s.info[6560].req = 25 end,
+    set = function(y) y.s.info[6560].set = 99 end,
+    slot = function(y) y.s.info[6560].slot = "INVTYPE_WEAPONOFFHAND" end,
+    durability = function(y) y.s.tips["item:6560"][4] = { leftText = "Durability 80 / 80" } end,
+    stats = function(y) y.s.stats["item:6560"] = { ITEM_MOD_STAMINA_SHORT = 9, RESISTANCE0_NAME = 478 } end,
+    tip = function(y) y.s.tips["item:6560"][2] = { leftText = "Off Hand", rightText = "Buckler" } end,
+  }) do
+    local changed = reread(fn)
+    assert(changed.d == DAY0 + 6 and changed.m == DAY0 + 6 and changed.v and changed.v["0;12729"],
+           "changed " .. label .. " moves d: " .. dump(changed))
+  end
+  -- old saved file (pre-m): loads without error, leaves d alone when met again, adds m, keeps Disk exact
+  local oldDb = { on = true, agreed = true, itemBuilds = { "1.60.1.71037" },
+                  items = { [6560] = { d = DAY0, b = 1, f = "2:2:4:6:25:20::INVTYPE_SHIELD", s = "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478",
+                                       t = "-Soldier's Shield" .. LF .. "-Off Hand" .. LF .. ">Shield" } } }
+  local loaded = fresh({ db = oldDb }); shield(loaded); loaded.s.now = (DAY0 + 7) * 86400
+  loaded.F.Meet(link(6560))
+  assert(#loaded.s.reads == 0 and not oldDb.lastError and oldDb.items[6560].d == DAY0 and oldDb.items[6560].m == DAY0 + 7,
+         "old saved file loads and adds m without moving d: " .. dump(oldDb.items[6560]))
+  assert(#written(oldDb.items) == loaded.F.Disk(oldDb.items), "Disk matches after adding m to old entry")
+  -- pruned item is read again when met
   db.items[6560] = nil
-  local back = fresh({ db = db }); shield(back); back.s.build = "71100"; back.F.Meet(link(6560)); back.run()
-  assert(#back.s.reads == 1 and db.items[6560] and db.items[6560].b == 2, "an item that was pruned is read when met again")
-  print("OK   an item is read once per game build; met again it only moves its day; a dropped item is read again when met")
+  local back = fresh({ db = db }); shield(back); back.s.build = "71200"; back.F.Meet(link(6560)); back.run()
+  assert(#back.s.reads == 1 and db.items[6560] and db.items[6560].b == 3, "an item that was pruned is read when met again")
+  print("OK   item day moves only on content change (first read, changed field/build/tip, variant); meeting again moves m only; old saved files load")
 end
 
 ---------------------------------------------------------------------------
@@ -330,24 +386,40 @@ do
   assert(e.f == "2:2:4:6:25:20::INVTYPE_SHIELD" and e.s == "ITEM_MOD_STAMINA_SHORT=3,RESISTANCE0_NAME=478" and e.n == nil, dump(e))
   assert(dump(e.v) == "{0;12729=Soldier's Shield of Intellect" .. LF .. "ITEM_MOD_INTELLECT_SHORT=5,RESISTANCE0_NAME=478}", dump(e.v))
   assert(h.s.statReads[#h.s.statReads] == SHIELD_VAR, "the suffix's stats are asked for with a link of id and suffix alone: " .. dump(h.s.statReads))
-  -- a second suffix of the same item, met as another character's worn copy (enchanted, another level)
+  -- a second suffix of the same item on a later day moves d; meeting a known variant again leaves d alone;
+  -- changing a variant's content moves d
   local BEAR = "|cff1eff00|Hitem:6560:929:::::::44:1489:::1:12741::::::|h[Soldier's Shield of the Bear]|h|r"
   h.s.stats["item:6560::::::::::::1:12741"] = { ITEM_MOD_STAMINA_SHORT = 3, RESISTANCE0_NAME = 478 }   -- the client ignored the suffix
+  h.s.now = (DAY0 + 2) * 86400
   h.F.Meet(BEAR); h.run()
-  assert(count(h.items()) == 1 and count(e.v) == 2 and e.v["0;12741"] == "Soldier's Shield of the Bear" .. LF,
-         "stats equal to the plain item's are not passed off as the suffix's: " .. dump(e.v))
-  h.F.Meet(SHIELD); h.F.Meet(BEAR); h.F.Meet(BEAR:gsub(":929:", ":1:")); assert(#h.s.timers == 0 and #h.s.reads == 1, "known variants are not read again")
+  assert(count(h.items()) == 1 and count(e.v) == 2 and e.v["0;12741"] == "Soldier's Shield of the Bear" .. LF
+         and e.d == DAY0 + 2 and e.m == DAY0 + 2,
+         "new variant moves d and stats equal to plain item are omitted: " .. dump(e))
+  h.s.now = (DAY0 + 3) * 86400
+  h.F.Meet(SHIELD); h.F.Meet(BEAR); h.F.Meet(BEAR:gsub(":929:", ":1:"))
+  assert(#h.s.timers == 0 and #h.s.reads == 1 and e.d == DAY0 + 2 and e.m == DAY0 + 3,
+         "known variants are not read again and leave d alone (only m moves): " .. dump(e))
+  -- a variant whose content changes (e.g. a fuller name arrives later) moves d
+  local BEAR_RENAMED = "|cff1eff00|Hitem:6560::::::::44:1489:::1:12741::::::|h[Soldier's Shield of the Grizzly]|h|r"
+  h.s.now = (DAY0 + 4) * 86400
+  h.F.Meet(BEAR_RENAMED); h.run()
+  assert(e.v["0;12741"] == "Soldier's Shield of the Grizzly" .. LF and e.d == DAY0 + 4 and e.m == DAY0 + 4,
+         "changed variant content moves d: " .. dump(e))
   assert(not dump(h.db()):find("929") and not dump(h.db()):find("1489"), "nothing of a copy's enchant or the looter's spec is stored")
   -- the older suffix field, and a variant whose link has no name: the client is asked
   local o = fresh(); shield(o)
   o.s.info[6560] = o.s.info[6560]
   o.F.Meet("item:6560::::::1203:55:20"); o.run()
   assert(count(o.items()) == 1 and o.items()[6560].v["1203;"] == "Soldier's Shield" .. LF, dump(o.items()[6560].v))
-  -- at most 24 variants an item
+  -- at most 24 variants an item; meeting a 25th on a later day does not move d
   local m = fresh(); shield(m)
-  for b = 1, 30 do m.F.Meet("|cff1eff00|Hitem:6560::::::::19:1489:::1:" .. (13000 + b) .. "::::::|h[Soldier's Shield " .. b .. "]|h|r") end
+  for b = 1, 24 do m.F.Meet("|cff1eff00|Hitem:6560::::::::19:1489:::1:" .. (13000 + b) .. "::::::|h[Soldier's Shield " .. b .. "]|h|r") end
   m.run()
-  assert(count(m.items()) == 1 and count(m.items()[6560].v) == 24, "24 variants: " .. count(m.items()[6560].v))
+  m.s.now = (DAY0 + 5) * 86400
+  for b = 25, 30 do m.F.Meet("|cff1eff00|Hitem:6560::::::::19:1489:::1:" .. (13000 + b) .. "::::::|h[Soldier's Shield " .. b .. "]|h|r") end
+  m.run()
+  assert(count(m.items()) == 1 and count(m.items()[6560].v) == 24 and m.items()[6560].d == DAY0 and m.items()[6560].m == DAY0 + 5,
+         "24 variants, 25th does not move d: " .. dump(m.items()[6560]))
   -- an item the client never loads: its suffix is not kept alone
   local lone = fresh(); lone.F.Meet(SHIELD); lone.run()
   assert(count(lone.items()) == 0 and not lone.db().lastError, "no variant without its item")
@@ -372,10 +444,24 @@ do
   for id in pairs(items) do oldest = math.min(oldest, id) end
   assert(kept >= 10 and oldest == 61 - kept, "the " .. kept .. " most recently met are kept: oldest " .. oldest)
   assert(select(1, h.F.Status()):find(kept .. " held"), (h.F.Status()))
-  -- the count cap
+  -- the count cap: drops least recently MET (m), not oldest d (an item read on day 1 and met again on day 30 survives)
   local n = fresh(); n.F.ITEMS.MAX = 10
-  for id = 1, 25 do known(n, id); n.s.now = (DAY0 + id) * 86400; n.F.Meet(link(id)); n.run() end
-  assert(count(n.items()) <= 10 and n.items()[25] and not n.items()[1], "at most 10: " .. count(n.items()))
+  for id = 1, 10 do known(n, id); n.s.now = (DAY0 + id) * 86400; n.F.Meet(link(id)); n.run() end
+  n.s.now = (DAY0 + 30) * 86400; n.F.Meet(link(1, "Item 1 again"))   -- d stays DAY0+1, m becomes DAY0+30
+  assert(n.items()[1].d == DAY0 + 1 and n.items()[1].m == DAY0 + 30, dump(n.items()[1]))
+  for id = 11, 20 do known(n, id); n.s.now = (DAY0 + id) * 86400; n.F.Meet(link(id)); n.run() end
+  assert(count(n.items()) <= 10 and n.items()[1] and n.items()[1].d == DAY0 + 1 and n.items()[20] and not n.items()[2],
+         "pruning keeps recently met item 1 despite oldest d: " .. dump(n.items()))
+  -- pre-m saved entries (no m) are pruned by their old d alongside new entries with m
+  local legacyDb = { on = true, agreed = true, itemBuilds = { "1.60.1.71037" }, items = {
+    [101] = { d = DAY0 + 1, b = 1, f = "1:0:7:5:10:0::", n = "Legacy Old" },
+    [102] = { d = DAY0 + 5, b = 1, f = "1:0:7:5:10:0::", n = "Legacy Mid" },
+    [103] = { d = DAY0 + 2, m = DAY0 + 9, b = 1, f = "1:0:7:5:10:0::", n = "Re-met Old" },
+  } }
+  local lp = fresh({ db = legacyDb }); lp.F.ITEMS.MAX = 3
+  known(lp, 104); lp.s.now = (DAY0 + 8) * 86400; lp.F.Meet(link(104)); lp.run()
+  assert(not lp.items()[101] and not lp.items()[102] and lp.items()[103] and lp.items()[104],
+         "pruning drops legacy oldest (101, 102) before re-met 103 (m=DAY0+9): " .. dump(lp.items()))
   -- a variant counts too
   local v = fresh(); v.F.ITEMS.BYTES = 100000; shield(v); v.F.Meet(SHIELD); v.run()
   assert(#written(v.items()) == v.F.Disk(v.items()), "with a variant")
@@ -385,12 +471,12 @@ do
     local x = fresh(); x.F.ITEMS.BYTES = cap; shield(x)
     for id = 1, 4 do known(x, id, { name = "Item \"" .. id .. "\"" }); x.s.now = (DAY0 + id) * 86400; x.F.Meet(link(id)); x.run() end
     x.s.now = (DAY0 + 5) * 86400; x.F.Meet(SHIELD); x.run()
-    x.s.now = (DAY0 + 6) * 86400; x.F.Meet(link(1, "Item 1 again"))      -- met again: only its day moves
+    x.s.now = (DAY0 + 6) * 86400; x.F.Meet(link(1, "Item 1 again"))      -- met again: only m moves, d stays
     return x
   end
   local exact = five(1000000).F.Disk(five(1000000).items()) - 4
   assert(count(five(exact).items()) == 5 and count(five(exact - 1).items()) < 5, "the cap is counted in the bytes written: " .. exact)
-  print("OK   cap: by bytes in the saved file (Disk = the size written), least recently met first, to 90%; a count cap as well")
+  print("OK   cap: by bytes in the saved file (Disk = the size written), least recently met (m) first, to 90%; a count cap as well")
 end
 
 ---------------------------------------------------------------------------
