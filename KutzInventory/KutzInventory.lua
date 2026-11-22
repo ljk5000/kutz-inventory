@@ -908,6 +908,228 @@ local function ScanPvP()
 end
 
 ---------------------------------------------------------------------------
+-- quest log: current quests and objective progress, in log order (at most 35 quests, 12 objectives each).
+-- Collapsed headers hide quests from the log APIs too, so out of combat they are expanded for the read
+-- and collapsed back afterwards (in combat, if any header is collapsed, the read waits for combat to end
+-- rather than mutating the quest log frame or saving a partial list).
+---------------------------------------------------------------------------
+local readingQuests, questsWaiting = false, false
+local questsToggledAt = -1e9   -- GetTime() of our own header expand/collapse: its QUEST_LOG_UPDATE comes a frame later
+
+local qlog = { MAX_QUESTS = 35, MAX_OBJ = 12, MAX_ROWS = 200 }
+
+function qlog.Int(v, min)
+    v = Plain(v)
+    if type(v) == "number" and v >= (min or 0) and v <= 2147483647 and v == math.floor(v) then return v end
+end
+
+function qlog.Cut(s, max)
+    if #s <= max then return s end
+    local i = max
+    while i > 0 and s:byte(i + 1) >= 128 and s:byte(i + 1) < 192 do i = i - 1 end
+    return s:sub(1, i)
+end
+
+function qlog.Text(s, max)
+    s = Plain(s)
+    if type(s) ~= "string" then return nil end
+    s = s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|A.-|a", "")
+         :gsub("|H.-|h", ""):gsub("|h", ""):gsub("|n", " "):gsub("[\r\n]", " "):gsub("%c", "")
+         :gsub("|", ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    if s == "" then return nil end
+    s = qlog.Cut(s, max):gsub("%s+$", "")
+    return s ~= "" and s or nil
+end
+
+function qlog.Mode()
+    local L = C_QuestLog
+    if type(L) == "table" and type(L.GetNumQuestLogEntries) == "function" and type(L.GetInfo) == "function" then
+        return "modern", L
+    end
+    if type(GetNumQuestLogEntries) == "function" and type(GetQuestLogTitle) == "function" then
+        return "legacy", nil
+    end
+    return nil, nil
+end
+
+function qlog.Counts(mode, L)
+    local shown, total
+    if mode == "modern" then shown, total = Try(L.GetNumQuestLogEntries)
+    else shown, total = Try(GetNumQuestLogEntries) end
+    shown = qlog.Int(shown, 0)
+    if not shown then return nil, nil end
+    return math.min(shown, qlog.MAX_ROWS), qlog.Int(total, 0)
+end
+
+function qlog.HeaderState(mode, L, i)
+    if mode == "modern" then
+        local info = Plain(Try(L.GetInfo, i))
+        if type(info) ~= "table" then return false, false, nil end
+        return Plain(info.isHeader) == true, Plain(info.isCollapsed) == true, Plain(info.title)
+    end
+    local title, _, _, isHeader, isCollapsed = Try(GetQuestLogTitle, i)
+    return Plain(isHeader) == true, Plain(isCollapsed) == true, Plain(title)
+end
+
+function qlog.Row(mode, L, i)
+    if mode == "modern" then
+        local info = Plain(Try(L.GetInfo, i))
+        if type(info) ~= "table" then return nil end
+        local isHeader = Plain(info.isHeader) == true
+        local isHidden = Plain(info.isHidden) == true or Plain(info.isInternalOnly) == true
+        local id = not isHeader and qlog.Int(info.questID, 1) or nil
+        local title = Plain(info.title)
+        if not isHeader and id and (type(title) ~= "string" or title == "") then
+            if type(L.GetTitleForQuestID) == "function" then title = Plain(Try(L.GetTitleForQuestID, id)) end
+            if (type(title) ~= "string" or title == "") and type(L.GetTitleForLogIndex) == "function" then
+                title = Plain(Try(L.GetTitleForLogIndex, i))
+            end
+        end
+        local failed = id and type(L.IsFailed) == "function" and Plain(Try(L.IsFailed, id)) == true or false
+        local done = false
+        if id and not failed then
+            if type(L.IsComplete) == "function" and Plain(Try(L.IsComplete, id)) == true then done = true
+            elseif type(L.ReadyForTurnIn) == "function" and Plain(Try(L.ReadyForTurnIn, id)) == true then done = true end
+        end
+        return { isHeader = isHeader, isHidden = isHidden, title = title, id = id,
+                 lv = qlog.Int(info.level, 1), done = done, failed = failed }
+    end
+    local title, level, _, isHeader, _, isComplete, _, questID = Try(GetQuestLogTitle, i)
+    isHeader = Plain(isHeader) == true
+    local comp = Plain(isComplete)
+    local failed = comp == -1
+    local done = (not failed) and (comp == 1 or comp == true)
+    return { isHeader = isHeader, isHidden = false, title = Plain(title),
+             id = not isHeader and qlog.Int(questID, 1) or nil,
+             lv = qlog.Int(level, 1), done = done, failed = failed }
+end
+
+function qlog.Objectives(L, id, logIndex)
+    local obj = {}
+    local getObj = (type(L) == "table" and L.GetQuestObjectives)
+                   or (type(C_QuestLog) == "table" and C_QuestLog.GetQuestObjectives) or nil
+    if type(getObj) == "function" then
+        local list = Plain(Try(getObj, id))
+        if type(list) == "table" then
+            for _, raw in ipairs(list) do
+                local r = Plain(raw)
+                if type(r) == "table" then
+                    local text = qlog.Text(r.text, 400)
+                    if text then
+                        local otype = Plain(r.type)
+                        if type(otype) ~= "string" or #otype > 40 or not otype:match("^[a-z][a-z0-9_%-]*$") then otype = nil end
+                        obj[#obj + 1] = {
+                            text = text,
+                            have = qlog.Int(r.numFulfilled, 0),
+                            need = qlog.Int(r.numRequired, 0),
+                            done = Plain(r.finished) == true,
+                            type = otype,
+                        }
+                        if #obj >= qlog.MAX_OBJ then break end
+                    end
+                end
+            end
+        end
+    elseif type(GetNumQuestLeaderBoards) == "function" and type(GetQuestLogLeaderBoard) == "function" then
+        local n = math.min(qlog.Int(Try(GetNumQuestLeaderBoards, logIndex), 0) or 0, 40)
+        for j = 1, n do
+            local desc, otype, finished = Try(GetQuestLogLeaderBoard, j, logIndex)
+            local text = qlog.Text(desc, 400)
+            if text then
+                otype = Plain(otype)
+                if type(otype) ~= "string" or #otype > 40 or not otype:match("^[a-z][a-z0-9_%-]*$") then otype = nil end
+                obj[#obj + 1] = { text = text, done = Plain(finished) == true, type = otype }
+                if #obj >= qlog.MAX_OBJ then break end
+            end
+        end
+    end
+    return obj
+end
+
+function qlog.Read(mode, L)
+    local shown, total = qlog.Counts(mode, L)
+    if not shown then return nil end
+    local quests, seen, header = {}, {}, nil
+    for i = 1, shown do
+        local r = qlog.Row(mode, L, i)
+        if r then
+            if r.isHeader then
+                header = qlog.Text(r.title, 120)
+            elseif not r.isHidden and r.id and not seen[r.id] then
+                local title = qlog.Text(r.title, 200)
+                if title then
+                    seen[r.id] = true
+                    quests[#quests + 1] = {
+                        id = r.id,
+                        title = title,
+                        lv = (r.lv and r.lv <= 255) and r.lv or nil,
+                        header = header,
+                        done = r.done and true or nil,
+                        failed = r.failed and true or nil,
+                        obj = qlog.Objectives(L, r.id, i),
+                    }
+                    if #quests >= qlog.MAX_QUESTS then break end
+                end
+            end
+        end
+    end
+    if #quests == 0 and ((total and total > 0) or (total == nil and shown > 0)) then return nil end
+    return { at = time(), quests = quests }
+end
+
+local function ScanQuestLog()
+    if not me or loggingOut or worldLeaving or readingQuests then return false end
+    local mode, L = qlog.Mode()
+    if not mode then return false end
+    local shown = qlog.Counts(mode, L)
+    if not shown then return false end
+    local hasCollapsed = false
+    for i = 1, shown do
+        local isH, isC = qlog.HeaderState(mode, L, i)
+        if isH and isC then hasCollapsed = true; break end
+    end
+    if hasCollapsed and Plain(Try(InCombatLockdown)) == true then
+        questsWaiting = true
+        return false
+    end
+    readingQuests = true
+    local opened = {}
+    local ok, snap = pcall(function()
+        if hasCollapsed and type(ExpandQuestHeader) == "function" and type(CollapseQuestHeader) == "function" then
+            local i, n = 1, shown
+            while i <= n do
+                local isH, isC, title = qlog.HeaderState(mode, L, i)
+                if isH and isC and type(title) == "string" and title ~= "" and not opened[title] then
+                    opened[title] = true
+                    Try(ExpandQuestHeader, i)
+                    n = (qlog.Counts(mode, L)) or n
+                end
+                i = i + 1
+            end
+        end
+        return qlog.Read(mode, L)
+    end)
+    if next(opened) then
+        local n = (qlog.Counts(mode, L)) or 0
+        local function close(idx)
+            local isH, isC, title = qlog.HeaderState(mode, L, idx)
+            if isH and not isC and type(title) == "string" and opened[title] then
+                Try(CollapseQuestHeader, idx)
+            end
+        end
+        for idx = n, 1, -1 do pcall(close, idx) end
+        questsToggledAt = GetTime()
+    end
+    readingQuests = false
+    if not ok then error(snap, 0) end
+    if not snap then return false end
+    questsWaiting = false
+    me.questLog = snap
+    me.updated.questLog = snap.at
+    return true
+end
+
+---------------------------------------------------------------------------
 -- talents: the modern trees (class / spec / hero) when the client has them, else the old talent tabs.
 -- Only the talents you have taken are stored (with rank), plus unspent points and the loadout name.
 ---------------------------------------------------------------------------
@@ -1145,11 +1367,12 @@ local function Checkpoint(reason)
                   and (Try(C_Container.GetContainerNumSlots, 0) or 0) > 0
     if ready then
         local keys = PendingKeys()
-        local failed = {}
+        local failed, ranQuests = {}, false
         for _, key in ipairs(keys) do
             local pending = pendingRun[key]
             if pending then
                 pendingRun[key] = nil       -- invalidate its timer before running it (a retry gets a new token)
+                if key == "quests" then ranQuests = true end
                 -- PLAYER_MONEY records spending immediately. A new zero during teardown is not fresh gold.
                 if key ~= "wallet" or Try(GetMoney) ~= 0 or not me.money or me.money == 0 then
                     local ok, err = pcall(pending.fn, pending.force)
@@ -1160,6 +1383,13 @@ local function Checkpoint(reason)
                 else
                     pendingRun[key] = pending  -- retain the skipped read in the final save diagnostics
                 end
+            end
+        end
+        if not ranQuests and reason ~= "PLAYER_ENTERING_WORLD" then
+            local ok, err = pcall(ScanQuestLog)
+            if not ok then
+                db.lastError = "quests: " .. tostring(err)
+                failed[#failed + 1] = "quests"
             end
         end
         me.recording = { checkpointAt = time(), checkpoint = reason, pending = PendingKeys(), failed = failed }
@@ -1208,6 +1438,7 @@ function handlers.PLAYER_LOGIN()
     Soon("spells", ScanSpells, 7)
     Soon("reps", ScanReputation, 8)
     Soon("pvp", ScanPvP, 8)
+    Soon("quests", ScanQuestLog, 8)
     Soon("statistics", function() ScanStatistics(true) end, 15)
     WantStats()
     for _, e in ipairs({ "BAG_UPDATE", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_MONEY", "PLAYER_XP_UPDATE",
@@ -1223,6 +1454,7 @@ function handlers.PLAYER_LOGIN()
                          "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "LEARNED_SPELL_IN_TAB",
                          "TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED", "NEW_RECIPE_LEARNED",
                          "UPDATE_FACTION", "PLAYER_PVP_KILLS_CHANGED", "HONOR_XP_UPDATE", "PVP_RATED_STATS_UPDATE",
+                         "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN",
                          "TRAINER_SHOW", "TRAINER_UPDATE", "UNIT_STATS", "UNIT_RESISTANCES", "UNIT_ATTACK_POWER",
                          "UNIT_RANGED_ATTACK_POWER", "COMBAT_RATING_UPDATE" }) do
         pcall(ev.RegisterEvent, ev, e)            -- an event this client lacks is simply skipped
@@ -1265,6 +1497,14 @@ function handlers.UPDATE_FACTION() if not readingReps then Soon("reps", ScanRepu
 function handlers.PLAYER_PVP_KILLS_CHANGED() Soon("pvp", ScanPvP, 5) end
 handlers.HONOR_XP_UPDATE = handlers.PLAYER_PVP_KILLS_CHANGED
 handlers.PVP_RATED_STATS_UPDATE = handlers.PLAYER_PVP_KILLS_CHANGED
+-- Our own expand/collapse fires QUEST_LOG_UPDATE after the read ends; without the 1 s quiet time a collapsed header would
+-- make the read reschedule itself every 2 s for ever. Accept, remove and turn-in are never ours, so they always read.
+function handlers.QUEST_LOG_UPDATE()
+    if not readingQuests and GetTime() - questsToggledAt >= 1 then Soon("quests", ScanQuestLog, 2) end
+end
+function handlers.QUEST_ACCEPTED() Soon("quests", ScanQuestLog, 2) end
+handlers.QUEST_REMOVED = handlers.QUEST_ACCEPTED
+handlers.QUEST_TURNED_IN = handlers.QUEST_ACCEPTED
 function handlers.PLAYER_LEVEL_UP() Soon("who", ScanIdentity, 2); Soon("wallet", ScanWallet, 2); WantStats() end
 function handlers.ACTIVE_TALENT_GROUP_CHANGED() Soon("who", ScanIdentity, 2); Soon("talents", ScanTalents, 3); WantStats() end
 handlers.PLAYER_SPECIALIZATION_CHANGED = handlers.ACTIVE_TALENT_GROUP_CHANGED
@@ -1279,6 +1519,7 @@ handlers.PLAYER_TALENT_UPDATE = handlers.TRAIT_CONFIG_UPDATED
 handlers.CHARACTER_POINTS_CHANGED = handlers.TRAIT_CONFIG_UPDATED
 function handlers.PLAYER_REGEN_ENABLED()
     if statsWaiting then WantStats() end
+    if questsWaiting then Soon("quests", ScanQuestLog, 1) end
     Soon("statistics", ScanStatistics, 5)               -- does nothing if read less than 10 minutes ago
 end
 function handlers.TRAINER_SHOW() if not readingTrainer then Soon("trainer", ScanTrainer, 0.5) end end
@@ -1382,7 +1623,7 @@ SlashCmdList.KUTZINVENTORY = function(msg)
     if ns.Facts and ns.Facts.Command and ns.Facts.Command(msg) then return end
     if msg == "scan" then
         ScanIdentity(); ScanWallet(); ScanBags(true); ScanGear(); ScanProfessions(); ScanCurrencies(); ScanTalents(); ScanSkills(); ScanSpells(); ScanStats(); ScanGuildBankTab(); ScanRecipes(true)
-        ScanReputation(); ScanPvP(); ScanStatistics(true)
+        ScanReputation(); ScanPvP(); ScanStatistics(true); ScanQuestLog()
         print("|cffd8b84aKutzInventory|r: everything rescanned. It reaches the file on /reload or logout.")
         return
     end

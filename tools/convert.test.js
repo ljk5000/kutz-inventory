@@ -1044,3 +1044,63 @@ test("observations 3.15.0: realistic sizes: a full item table of the addon (200 
   assert.ok(itemBytes < 320000, "700 items: " + itemBytes);
   assert.ok(killBytes < 40000, "780 kill counts: " + killBytes);
 });
+
+test("questLog 3.15.0: current quest log exports in order, sanitized and bounded; empty vs absent; 2.x omits it", () => {
+  const { validateExport } = require("./validate_export");
+  const lua = `KutzInventoryDB = { chars = {
+    ["First-Realm"] = { name = "First", realm = "Realm", questLog = {
+      at = 1762905600, extra = "dropped",
+      quests = {
+        { id = 33, title = "  Wolves for $N  ", lv = 5, header = "Elwynn Forest", extra = 1,
+          obj = { { text = "Tough Wolf Meat: 3/8", have = 3, need = 8, done = false, type = "item", bonus = 1 },
+                  { text = "Speak with Marshal", done = true, type = "event" },
+                  { text = "Bad|markup", done = false },
+                  { text = "Missing done", have = 1, need = 2 },
+                  { text = "Bad optional", have = -1, need = 1.5, done = false, type = "UPPER" } } },
+        { id = 33, title = "Duplicate ID dropped", obj = {} },
+        { id = 0, title = "Zero ID dropped", obj = {} },
+        { id = 463, title = "The Greenwarden", lv = 256, header = "|cffBad|r", done = true, obj = {} },
+        { id = 500, title = "Timed Escort", lv = 18, header = "Wetlands", done = true, failed = true, obj = {} },
+      },
+    } },
+    ["Empty-Realm"] = { name = "Empty", realm = "Realm", questLog = { at = 1762905601, quests = {} } },
+    ["Old-Realm"] = { name = "Old", realm = "Realm" },
+    ["Broken-Realm"] = { name = "Broken", realm = "Realm", questLog = { at = 0, quests = {} } },
+  } }`;
+  const v3 = convert.convertSavedVariables([lua]).inventory;
+  const v2 = convert.convertSavedVariables([lua], { format: 2 }).inventory;
+  const by = (doc, k) => doc.characters.find((c) => c.key === k);
+  assert.deepEqual(by(v3, "First-Realm").questLog, {
+    at: 1762905600,
+    quests: [
+      { id: 33, title: "Wolves for $N", lv: 5, header: "Elwynn Forest",
+        obj: [{ text: "Tough Wolf Meat: 3/8", have: 3, need: 8, done: false, type: "item" },
+              { text: "Speak with Marshal", done: true, type: "event" },
+              { text: "Bad optional", done: false }] },
+      { id: 463, title: "The Greenwarden", done: true, obj: [] },
+      { id: 500, title: "Timed Escort", lv: 18, header: "Wetlands", failed: true, obj: [] },
+    ],
+  });
+  assert.deepEqual(by(v3, "Empty-Realm").questLog, { at: 1762905601, quests: [] }, "recorded empty log keeps quests: []");
+  assert.ok(!("questLog" in by(v3, "Old-Realm")), "absent when not recorded");
+  assert.ok(!("questLog" in by(v3, "Broken-Realm")), "invalid snapshot dropped");
+  for (const c of v2.characters) assert.ok(!("questLog" in c), "2.x never carries questLog: " + c.key);
+  // caps: 35 quests and 12 objectives
+  const manyQ = Array.from({ length: 40 }, (_, i) => ({
+    id: i + 1, title: "Quest " + (i + 1),
+    obj: Array.from({ length: 15 }, (_, j) => ({ text: "Obj " + (j + 1), have: j, need: 15, done: false, type: "monster" })),
+  }));
+  const capped = convert.exportQuestLog({ at: 1762905600, quests: manyQ });
+  assert.equal(capped.quests.length, 35);
+  assert.equal(capped.quests[34].id, 35);
+  assert.equal(capped.quests[0].obj.length, 12);
+  assert.equal(capped.quests[0].obj[11].text, "Obj 12");
+  // schema accepts exported examples and capped questLog; 2.x schema rejects questLog
+  const ex3 = convert.convertSavedVariables([LUA]).inventory;
+  assert.deepEqual(validateExport(ex3), []);
+  ex3.characters[0].questLog = capped;
+  assert.deepEqual(validateExport(ex3), []);
+  const ex2 = convert.convertSavedVariables([LUA], { format: 2 }).inventory;
+  ex2.characters[0].questLog = capped;
+  assert.ok(validateExport(ex2).length > 0, "2.x schema refuses questLog");
+});

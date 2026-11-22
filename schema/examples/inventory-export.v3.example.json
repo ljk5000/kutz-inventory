@@ -365,7 +365,42 @@
       }
      ]
     }
-   ]
+   ],
+   "questLog": {
+    "at": 1762905600,
+    "quests": [
+     {
+      "id": 276,
+      "title": "Tramping Paws",
+      "lv": 24,
+      "header": "Wetlands",
+      "obj": [
+       {
+        "text": "Mosshide Gnoll slain: 6/15",
+        "have": 6,
+        "need": 15,
+        "done": false,
+        "type": "monster"
+       },
+       {
+        "text": "Mosshide Mongrel slain: 15/15",
+        "have": 15,
+        "need": 15,
+        "done": true,
+        "type": "monster"
+       }
+      ]
+     },
+     {
+      "id": 463,
+      "title": "The Greenwarden",
+      "lv": 21,
+      "header": "Wetlands",
+      "done": true,
+      "obj": []
+     }
+    ]
+   }
   },
   {
    "key": "Examplewarrior-Example Realm",

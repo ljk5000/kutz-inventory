@@ -32,7 +32,7 @@ local function fresh(env)
   G.GetSubZoneText = function() return env.subzone or "" end
   G.GetZoneText = function() return env.zone or "" end
   G.C_AddOns = { GetAddOnMetadata = function() return "1.3.0" end }
-  G.C_Item = { GetItemInfo = function() return nil end, RequestLoadItemDataByID = function(id) env.requested = env.requested or {}; env.requested[id] = true end,
+  G.C_Item = { GetItemInfo = function(id) local v = env.sell and env.sell[id]; if v then return "Item " .. id, nil, nil, nil, nil, nil, nil, nil, nil, nil, v end return nil end, RequestLoadItemDataByID = function(id) env.requested = env.requested or {}; env.requested[id] = true end,
                 GetItemNameByID = function(id) return env.cache and env.cache[id] end,
                 GetItemInfoInstant = function(id) if id == 9999 then return id, "Armor", "Plate", "INVTYPE_HEAD", 0, 4, 4 end return id, "Trade Goods", "Herb", "", 0, 7, 9 end }
   local queries = {}
@@ -247,7 +247,28 @@ do
   assert(ah[777], "an item missing from a partial download must keep its old price")
   assert(s and s.complete == false and s.scope == "all", "a partial download is recorded as incomplete")
 end
-print("OK prices per auction house, scan records, legacy migration, no-answer items left out, whole-AH scans, item names, exact supply")
+-- 11) what a vendor pays is read again each session: a stored price is replaced, kept while the game has no answer,
+--     and asked only once in a session
+do
+  local db = recipeDB({})
+  db.prices.sell[252563], db.prices.sell[4234], db.prices.sell[7070] = 8622, 150, 400
+  local env = { db = db, realm = REALM, player = "Alliance", npc = "Alliance", listings = {}, sell = { [252563] = 4387, [4234] = 150 } }
+  local h = fresh(env)
+  h.ns.RecordSell(252563); h.ns.RecordSell(4234); h.ns.RecordSell(7070)
+  assert(db.prices.sell[252563] == 4387, "a price the game changed must replace the stored one: " .. tostring(db.prices.sell[252563]))
+  assert(db.prices.sell[4234] == 150, "an unchanged price stays")
+  assert(db.prices.sell[7070] == 400 and env.requested[7070], "no answer yet: the stored price stays and the item is requested")
+  env.sell[252563] = 1                                         -- a second answer in the same session is not read
+  h.ns.RecordSell(252563)
+  assert(db.prices.sell[252563] == 4387, "an item is asked once a session")
+  env.sell[7070] = 380
+  h.event("GET_ITEM_INFO_RECEIVED", 7070)                      -- the item loaded: now it answers
+  assert(db.prices.sell[7070] == 380, "the price of an item that loaded later: " .. tostring(db.prices.sell[7070]))
+  local again = fresh(env)                                     -- the next session reads again
+  again.ns.RecordSell(252563)
+  assert(db.prices.sell[252563] == 1, "the next session must read the price again")
+end
+print("OK prices per auction house, scan records, legacy migration, no-answer items left out, whole-AH scans, item names, exact supply, vendor prices read again each session")
 `;
 
 const L = lauxlib.luaL_newstate();
