@@ -5,10 +5,11 @@ const path = require("path");
 // Contains inventory only, never credentials. Keep the exact snapshot until acknowledged.
 function createOutbox(file, upload) {
   async function flush() {
-    if (!fs.existsSync(file)) return;
+    if (!fs.existsSync(file)) return undefined;
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    await upload(data);
+    const result = await upload(data);
     fs.unlinkSync(file);
+    return result;
   }
   return {
     flush,
@@ -17,7 +18,7 @@ function createOutbox(file, upload) {
       const temporary = file + ".tmp";
       fs.writeFileSync(temporary, JSON.stringify(data), { mode: 0o600 });
       fs.renameSync(temporary, file);
-      await flush();
+      return flush();
     },
   };
 }

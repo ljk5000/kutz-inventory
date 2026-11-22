@@ -1,5 +1,11 @@
 # Release notes
 
+## Companion 0.12.7
+
+- Trim already-acknowledged `observations` before upload (`tools/upload_ack.js`). When `/api/wow/import` returns an `ack` (`epoch`, highest event counter per install prefix, and highest summary `day`), the Companion saves those marks beside the export in `<output>.ack.json` (never the API key), bound by a SHA-256 context digest of the site origin, verified username, sorted saved-file list, export schema version and Companion version. Later uploads omit events at or below the acknowledged counter (unless the install rolled back to a lower highest counter) and `npcs`, `items` and `kills` entries from days before the acknowledged day (keeping entries from that day itself and later). Emptied observation parts and their matching `install`/`killsInstall` keys (or `observations` itself when nothing remains) are omitted.
+- Everything outside `observations` (`characters`, `prices`, `warband`, `guildBanks`, `raids`, `uiHealth`, `statisticsDays`, ...) is still sent whole, unchanged, and the local `inventory.json` and the game's saved file remain complete. If the state file is missing or unreadable, the context changes, or the server raises `epoch`, the next upload carries everything once. Replayed pending snapshots never advance the marks, and a state-file write error does not fail or repeat an upload.
+- Continues to bundle KutzInventory 1.21.0 and send inventory export 3.15.0.
+
 ## Companion 0.12.6
 
 - Bundle KutzInventory 1.21.0 and send inventory export 3.15.0. New, all optional: each item's own facts (`observations.items`), kills per day (`observations.kills` with `killsInstall`), the random suffix beside loot, roll, quest and vendor item links (`suffix`, `bonus`), creatures seen inside instances (`npcs[].inst`), every vendor of an item with the day it was last seen (`prices[].vendors`, `vendorDay`, `vendorLimited`) and each character's statistics per day (`statisticsDays`). Nothing 3.14.0 had is changed or removed.

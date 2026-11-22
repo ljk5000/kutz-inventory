@@ -8,7 +8,7 @@ const http = require("http");
 const { once } = require("events");
 const { spawn } = require("child_process");
 const { verify, upload, uploadAuctions, endpoint } = require("./transport");
-const { createSession } = require("./session");
+const { createSession, COMPANION_VERSION } = require("./session");
 const { acquireOutputLock } = require("../tools/output_lock");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) { for (let i=0;i<150;i++) { if (fn()) return; await delay(20); } throw new Error("Timed out waiting for companion behavior"); }
@@ -332,4 +332,164 @@ test("Move-SiteOrigin moves only a saved https://cr0m.com", { skip: process.plat
     ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(run.stdout.trim().split(/\r?\n/), cases.map(([, expected]) => expected));
+});
+
+const obsDB = (counters, npcDays = [20404]) => {
+  const events = counters.map(n =>
+    `{ id = "k1f9c2-${String(n).padStart(6, "0")}", t = ${1762905600 + n}, b = "1.60.1.70888", type = "line", npc = 352, kind = "say", text = "Watch line ${n}.", where = { uiMap = 1453, x = 0.5, y = 0.5 }, who = { level = 20, class = 8, faction = "Alliance" } }`
+  ).join(",\n    ");
+  const npcs = npcDays.map((day, idx) => `[${500 + idx}] = { name = "Generated Mob ${idx}", day = ${day} }`).join(", ");
+  return `KutzInventoryDB = { chars = { ["A"] = { name = "A", realm = "Realm" } } }
+KutzInventoryObsDB = { addon = "1.21.0", prefix = "k1f9c2", events = {
+    ${events}
+  }, npcs = { ${npcs} } }`;
+};
+
+test("session ack trimming: second export sends only new events, deleting ack file sends everything, and local export stays complete", async t => {
+  const f = await fixture(t), uploads = [];
+  const key = "secret-ack-key";
+  fs.writeFileSync(f.input, obsDB([1, 2, 3], [20403, 20404]));
+  const session = await createSession({
+    ...f, base: "https://wow.cr0m.com", key, username: "PlayerOne", interval: 20, sendAuctions: false, report: () => {},
+    upload: async (_b, _k, data) => {
+      uploads.push(data);
+      const maxCounter = (data.observations?.events || []).reduce((m, e) => Math.max(m, Number(e.id.split("-")[1])), 0);
+      const maxDay = (data.observations?.npcs || []).reduce((m, n) => Math.max(m, n.day), 0);
+      const ack = { epoch: 1, ...(maxCounter ? { events: { k1f9c2: maxCounter } } : {}), ...(maxDay ? { day: maxDay } : {}) };
+      return { ok: true, ack };
+    },
+  });
+  t.after(() => session.stop());
+
+  await until(() => uploads.length === 1);
+  assert.deepEqual(uploads[0].observations.events.map(e => e.id), ["k1f9c2-000001", "k1f9c2-000002", "k1f9c2-000003"]);
+  assert.deepEqual(uploads[0].observations.npcs.map(n => n.day), [20403, 20404]);
+  const ackFile = f.output + ".ack.json";
+  assert.ok(fs.existsSync(ackFile));
+  const rawState = fs.readFileSync(ackFile, "utf8");
+  assert.equal(rawState.includes(key), false, "ack state must never store the API key");
+
+  // Add events 4 and 5: second upload sends only 4 and 5, and drops npc day 20403 (< 20404).
+  fs.writeFileSync(f.input, obsDB([1, 2, 3, 4, 5], [20403, 20404]));
+  await until(() => uploads.length === 2);
+  assert.deepEqual(uploads[1].observations.events.map(e => e.id), ["k1f9c2-000004", "k1f9c2-000005"]);
+  assert.deepEqual(uploads[1].observations.npcs.map(n => n.day), [20404]);
+  // Local inventory.json written on disk stays complete.
+  const localExport = JSON.parse(fs.readFileSync(f.output, "utf8"));
+  assert.equal(localExport.observations.events.length, 5);
+
+  // Delete the ack state file: next save uploads everything again.
+  fs.unlinkSync(ackFile);
+  fs.writeFileSync(f.input, obsDB([1, 2, 3, 4, 5, 6], [20403, 20404]));
+  await until(() => uploads.length === 3);
+  assert.deepEqual(uploads[2].observations.events.map(e => e.id), [
+    "k1f9c2-000001", "k1f9c2-000002", "k1f9c2-000003", "k1f9c2-000004", "k1f9c2-000005", "k1f9c2-000006",
+  ]);
+  assert.deepEqual(uploads[2].observations.npcs.map(n => n.day), [20403, 20404]);
+  await session.stop();
+});
+
+test("session ack: epoch change after a trimmed upload sends everything on the next save", async t => {
+  const f = await fixture(t), uploads = [];
+  let epoch = 1;
+  fs.writeFileSync(f.input, obsDB([1, 2], [20403, 20404]));
+  const session = await createSession({
+    ...f, base: "https://wow.cr0m.com", key: "k", username: "PlayerOne", interval: 20, sendAuctions: false, report: () => {},
+    upload: async (_b, _k, data) => {
+      uploads.push(data);
+      const maxCounter = (data.observations?.events || []).reduce((m, e) => Math.max(m, Number(e.id.split("-")[1])), 0);
+      return { ok: true, ack: { epoch, events: { k1f9c2: maxCounter }, day: 20404 } };
+    },
+  });
+  t.after(() => session.stop());
+  await until(() => uploads.length === 1);
+  assert.equal(uploads[0].observations.events.length, 2);
+
+  // Server bumps epoch to 2 while receiving trimmed upload #2.
+  epoch = 2;
+  fs.writeFileSync(f.input, obsDB([1, 2, 3], [20403, 20404]));
+  await until(() => uploads.length === 2);
+  assert.deepEqual(uploads[1].observations.events.map(e => e.id), ["k1f9c2-000003"]);
+
+  // Next upload (#3) must be complete because epoch changed after a trimmed upload.
+  fs.writeFileSync(f.input, obsDB([1, 2, 3, 4], [20403, 20404]));
+  await until(() => uploads.length === 3);
+  assert.deepEqual(uploads[2].observations.events.map(e => e.id), ["k1f9c2-000001", "k1f9c2-000002", "k1f9c2-000003", "k1f9c2-000004"]);
+  assert.deepEqual(uploads[2].observations.npcs.map(n => n.day), [20403, 20404]);
+  await session.stop();
+});
+
+test("session ack: a replayed pending snapshot (at startup or after link refusal) does not change marks", async t => {
+  const f = await fixture(t), uploads = [];
+  fs.writeFileSync(f.input, obsDB([1, 2], [20404]));
+  // Leftover pending snapshot from a previous run.
+  fs.writeFileSync(f.output + ".pending.json", JSON.stringify({ schemaVersion: "3.15.0", characters: [{ name: "PendingOld" }] }));
+  const ackFile = f.output + ".ack.json";
+
+  const session = await createSession({
+    ...f, base: "https://wow.cr0m.com", key: "k", username: "PlayerOne", interval: 20, sendAuctions: false, report: () => {},
+    upload: async (_b, _k, data) => {
+      uploads.push(data);
+      // Startup replay returns a high ack that must be ignored; fresh upload returns no ack.
+      if (uploads.length === 1) return { ok: true, ack: { epoch: 1, events: { k1f9c2: 999 }, day: 20999 } };
+      return { ok: true };
+    },
+  });
+  t.after(() => session.stop());
+  await until(() => uploads.length === 2);
+  assert.equal(uploads[0].characters[0].name, "PendingOld");
+  // Fresh upload #2 was NOT trimmed by the ignored replay ack, and no ack file was created.
+  assert.deepEqual(uploads[1].observations.events.map(e => e.id), ["k1f9c2-000001", "k1f9c2-000002"]);
+  assert.equal(fs.existsSync(ackFile), false);
+  await session.stop();
+
+  // Refused-snapshot flush also ignores its ack.
+  const f2 = await fixture(t), sent2 = [];
+  let refused = true;
+  fs.writeFileSync(f2.input, obsDB([1, 2], [20404]));
+  const session2 = await createSession({
+    ...f2, base: "https://wow.cr0m.com", key: "k", username: "PlayerOne", interval: 5000, resumeAfterMs: 60, sendAuctions: false, report: () => {},
+    upload: async (_b, _k, data) => {
+      sent2.push(data);
+      if (refused) { refused = false; throw linkRefusal(); }
+      return { ok: true, ack: { epoch: 1, events: { k1f9c2: 999 }, day: 20999 } };
+    },
+  });
+  t.after(() => session2.stop());
+  await until(() => sent2.length === 2 && !fs.existsSync(f2.output + ".pending.json"));
+  await delay(60);
+  assert.equal(fs.existsSync(f2.output + ".ack.json"), false, "refused-snapshot flush must not write marks");
+  await session2.stop();
+});
+
+test("session ack: a write failure of the state file does not fail or repeat the upload", async t => {
+  const f = await fixture(t), events = [], uploads = [];
+  fs.writeFileSync(f.input, obsDB([1, 2], [20404]));
+  // Put a directory at <output>.ack.json so renameSync fails.
+  fs.mkdirSync(f.output + ".ack.json");
+
+  const session = await createSession({
+    ...f, base: "https://wow.cr0m.com", key: "k", username: "PlayerOne", interval: 20, sendAuctions: false, report: e => events.push(e),
+    upload: async (_b, _k, data) => {
+      uploads.push(data);
+      return { ok: true, ack: { epoch: 1, events: { k1f9c2: 2 }, day: 20404 } };
+    },
+  });
+  t.after(() => session.stop());
+  await until(() => events.some(e => e.acknowledgedAt));
+  await delay(200);
+  assert.equal(uploads.length, 1, "upload must not be repeated when ack state write fails");
+  assert.equal(events.some(e => e.state === "attention" || e.state === "retrying"), false);
+  await session.stop();
+});
+
+test("Companion version stays consistent across session.js, package.json, package-lock.json and docs", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tools", "windows", "package.json"), "utf8"));
+  const lock = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tools", "windows", "package-lock.json"), "utf8"));
+  assert.equal(COMPANION_VERSION, pkg.version);
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[""].version, pkg.version);
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8").includes(`Companion **${pkg.version}**`));
+  assert.ok(source("README.md").includes(`Companion ${pkg.version} `));
+  assert.ok(source("WINDOWS.md").includes(`Companion ${pkg.version} `));
 });

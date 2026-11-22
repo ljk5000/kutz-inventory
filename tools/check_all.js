@@ -50,8 +50,8 @@ r = node(["--test", tool("convert.test.js")]);
 report("convert.js: runs with no Node globals, CLI output unchanged, the example .lua converts exactly, nesting limit", r.ok, r.out);
 r = node(["--test", tool("tooltip_clean.test.js")]);
 report("tooltip cleaner: what is the item's stays, what is the reading character's goes; the copy inside convert.js is the module's", r.ok, r.out);
-r = node(["--test", tool("export_queue.test.js"), tool("upload_outbox.test.js"), tool("auction_sender.test.js")]);
-report("export watch queue, retries, and auction scans sent once per scan", r.ok, r.out);
+r = node(["--test", tool("export_queue.test.js"), tool("upload_outbox.test.js"), tool("upload_ack.test.js"), tool("auction_sender.test.js")]);
+report("export watch queue, retries, upload acknowledgements, and auction scans sent once per scan", r.ok, r.out);
 if (Number(process.versions.node.split(".")[0]) >= 22) {
     r = node(["--test", path.join(root, "companion", "companion.test.js"), tool("package_release.test.js")]);
     report("companion HTTP, watch lifecycle, locks and distribution", r.ok, r.out);

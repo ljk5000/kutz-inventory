@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { exportAll } = require("../tools/inventory_export");
 const { createOutbox } = require("../tools/upload_outbox");
+const { ackContext, parseAck, mergeMarks, trimExport, readAckState, writeAckState } = require("../tools/upload_ack");
 const { createAuctionSender } = require("../tools/auction_sender");
 const { createExportQueue } = require("../tools/export_queue");
 const { acquireOutputLock } = require("../tools/output_lock");
@@ -14,20 +15,23 @@ function savedFiles(game) {
 }
 // Linking Battle.net on cr0m does not touch the game file, so after a link refusal the session tries again on its own.
 const RESUME_AFTER_MS = 5 * 60 * 1000;
-async function createSession({ game, output, base, key, report, upload = transport.upload, uploadAuctions = transport.uploadAuctions, interval = 1000, resumeAfterMs = RESUME_AFTER_MS, auctionGapMs = 10500, sendInventory = true, sendAuctions = true }) {
+const COMPANION_VERSION = "0.12.7";
+async function createSession({ game, output, base, key, username = "", companionVersion = COMPANION_VERSION, report, upload = transport.upload, uploadAuctions = transport.uploadAuctions, interval = 1000, resumeAfterMs = RESUME_AFTER_MS, auctionGapMs = 10500, sendInventory = true, sendAuctions = true }) {
   // What this PC shares: its characters (/api/wow/import), auction house prices (/api/wow/auctions), or both.
   // A price-gathering "service" character turns off the first; a player who doesn't share prices, the second.
   if (!sendInventory && !sendAuctions) throw new Error("Choose at least one thing to upload: your characters or auction house prices.");
   savedFiles(game); // Validate before acquiring a resource.
   const release = await acquireOutputLock(output);
   const abort = new AbortController();
+  const ackFile = output + ".ack.json";
   let stopped = false, blocked = false, signature = "", active = Promise.resolve(), timer, resumeTimer = null, refused = false, refusedSig = "";
   const notify = event => { if (!stopped) report(event); };
   const outbox = createOutbox(output + ".pending.json", async data => {
     notify({ state: "uploading" });
-    await upload(base, key, data, undefined, abort.signal);
+    const result = await upload(base, key, data, undefined, abort.signal);
     refused = false;
     notify({ state: "watching", acknowledgedAt: new Date().toISOString() });
+    return result;
   });
   // A wait that Pause / Exit cancels, so a 10 s gap or a Retry-After never holds the session open.
   const sleep = ms => new Promise((resolve, reject) => {
@@ -53,7 +57,24 @@ async function createSession({ game, output, base, key, report, upload = transpo
     if (sendInventory && sig !== deliveredFor) {
       try {
         // Unchanged since cr0m refused it: send that same pending snapshot again, not a fresh export.
-        if (sig === refusedSig && fs.existsSync(output + ".pending.json")) await outbox.flush(); else await outbox.send(all.inventory);
+        if (sig === refusedSig && fs.existsSync(output + ".pending.json")) {
+          await outbox.flush();
+        } else {
+          const ctx = ackContext({
+            origin: base, username, files,
+            schemaVersion: all.inventory && all.inventory.schemaVersion,
+            companionVersion,
+          });
+          const marks = readAckState(ackFile, ctx);
+          const payload = trimExport(all.inventory, marks);
+          const trimmed = payload !== all.inventory;
+          const answer = await outbox.send(payload);
+          const ack = parseAck(answer && typeof answer === "object" ? answer.ack : null);
+          if (ack) {
+            const next = mergeMarks(marks, ack, { trimmed });
+            if (next) { try { writeAckState(ackFile, ctx, next); } catch {} }
+          }
+        }
       } catch (error) { if (error && error.resumable === true) refusedSig = sig; throw error; }
       deliveredFor = sig; refusedSig = "";
     }
@@ -92,4 +113,4 @@ async function createSession({ game, output, base, key, report, upload = transpo
     report({ state: "paused" });
   } };
 }
-module.exports = { savedFiles, createSession };
+module.exports = { savedFiles, createSession, COMPANION_VERSION };

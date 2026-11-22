@@ -14,9 +14,13 @@ test("an unacknowledged snapshot survives restart and clears only after success"
     await assert.rejects(first.send(snapshot), /offline/);
     assert.deepEqual(JSON.parse(fs.readFileSync(file)), snapshot);
     const received = [];
-    const restarted = createOutbox(file, async data => { received.push(data); });
-    await restarted.flush();
+    const restarted = createOutbox(file, async data => { received.push(data); return { ok: true, ack: { epoch: 1 } }; });
+    const flushed = await restarted.flush();
+    assert.deepEqual(flushed, { ok: true, ack: { epoch: 1 } });
     assert.deepEqual(received, [snapshot]); assert.equal(fs.existsSync(file), false);
-    await restarted.flush(); assert.equal(received.length, 1);
+    assert.equal(await restarted.flush(), undefined); assert.equal(received.length, 1);
+    const sent = await restarted.send(snapshot);
+    assert.deepEqual(sent, { ok: true, ack: { epoch: 1 } });
+    assert.equal(fs.existsSync(file), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

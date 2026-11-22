@@ -1,6 +1,6 @@
 # KutzUI Companion (KutzUploader)
 
-**Companion 0.12.6 bundles KutzInventory 1.21.0.** See [release notes](../CHANGELOG.md) for the public release.
+**Companion 0.12.7 bundles KutzInventory 1.21.0.** See [release notes](../CHANGELOG.md) for the public release.
 
 The Windows tray app uploads KutzInventory saves to [wow.cr0m.com](https://wow.cr0m.com), the optional receiving website. The site calls it **KutzUploader**; its launcher is **KutzUICompanion.exe**. The addon is usable without uploading. Read the [full addon/data guide](../README.md) before sharing a game client used by several people.
 
@@ -59,6 +59,7 @@ Pause is remembered across restarts and preserves the startup preference. Window
 | `%LOCALAPPDATA%/KutzUI/Companion/settings.json` | Game path, site, remember/pause and upload preferences; never the key |
 | Same folder: `inventory.json`, `auction-scans.json` | Latest converted data, unencrypted |
 | Same folder: `inventory.json.pending.json` | Unacknowledged inventory snapshot, deleted after success |
+| Same folder: `inventory.json.ack.json` | Server observation-acknowledgement marks (no API key) |
 | Same folder: `inventory.json.auctions-sent.json` | Acknowledged/rejected scan timestamps and rejection reason |
 | Same folder: `.tmp` writes | Temporary files which may remain after interruption |
 | Windows Credential Manager, Generic Credentials: `KutzUI.Companion/<lowercase-site-origin>` | Remembered upload key and server-returned username for your Windows user (`CredentialStore.cs`) |
@@ -138,6 +139,6 @@ The smoke test exercises tray/window lifecycle, credential roundtrip with a synt
 
 ### Source-only legacy launcher
 
-`node tools/package_release.js <fresh-directory>` builds a **legacy PowerShell source package**, not the two native executables. It copies the addon, `Companion.ps1`, `Start.cmd`, credential helper and six local worker/exporter modules. It requires Node 22+ on PATH; keep `companion` and `tools` adjacent. `Start.cmd` runs Windows PowerShell without bypassing execution policy. That window has no native tray behavior: closing it stops its worker, Pause disables its Startup-folder shortcut, and it has no separate upload-category switches or persistent native pause preference. Use the portable executable for the documented tray behavior.
+`node tools/package_release.js <fresh-directory>` builds a **legacy PowerShell source package**, not the two native executables. It copies the addon, `Companion.ps1`, `Start.cmd`, credential helper and seven local worker/exporter modules. It requires Node 22+ on PATH; keep `companion` and `tools` adjacent. `Start.cmd` runs Windows PowerShell without bypassing execution policy. That window has no native tray behavior: closing it stops its worker, Pause disables its Startup-folder shortcut, and it has no separate upload-category switches or persistent native pause preference. Use the portable executable for the documented tray behavior.
 
 Report security issues privately through [SECURITY.md](../SECURITY.md). Please do not attach real keys, account folders, saved files or exports to public issues.
