@@ -36,6 +36,11 @@ KutzInventoryDB = {
       faction = "Alliance", sex = 2, guid = "Player-1-00ABCDEF", money = 12345, xp = 10, xpMax = 100, lastSeen = 1700000000,
       location = { zone = "Elwynn Forest", subzone = "Goldshire", mapID = 1429, x = 42.1, y = 65.3 },
       hearth = "Stormwind City",
+      questLog = { at = 1700000060, quests = {
+        { id = 33, title = "Wolves Across the Border", lv = 2, header = "Elwynn Forest",
+          obj = { { text = "Tough Wolf Meat: 3/8", have = 3, need = 8, done = false, type = "item" } } },
+        { id = 52, title = "Protect the Frontier", lv = 10, header = "Elwynn Forest", done = true, obj = {} },
+      } },
       updated = { bags = 1700000000, statistics = 1700000050 },
       bags = { [0] = { name = "Backpack", size = 16, items = { [1] = { id = 2589, count = 5, name = "Linen Cloth", quality = 1 } } } },
       statistics = { { id = 60, name = "Total deaths", category = "Deaths", value = 7 } },
@@ -171,6 +176,39 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
     if (!c3.updated.statistics || c3.updated.statistics !== c2.updated.statistics) fail("inventory 3.x does not carry updated.statistics");
     if (c3.hearth !== "Stormwind City") fail("inventory 3.x does not carry characters[].hearth: " + JSON.stringify(c3.hearth));
     if ("hearth" in c2) fail("inventory 2.x carries characters[].hearth");
+    // 3.15.0: questLog in 3.x only, never 2.x
+    if (!c3.questLog || c3.questLog.at !== 1700000060 || c3.questLog.quests.length !== 2 || c3.questLog.quests[0].id !== 33 || c3.questLog.quests[1].done !== true) {
+        fail("inventory 3.x does not carry characters[].questLog: " + JSON.stringify(c3.questLog));
+    }
+    if ("questLog" in c2) fail("inventory 2.x carries characters[].questLog");
+    const qlDoc = (ql) => { const d = JSON.parse(JSON.stringify(data3)); d.characters[0].questLog = ql; return d; };
+    for (const goodQl of [
+        { at: 1700000060, quests: [] },
+        { at: 1700000060, quests: [{ id: 1, title: "Failed Escort", failed: true, obj: [{ text: "Escort $N", done: false }] }] },
+    ]) {
+        const qlp = validateExport(qlDoc(goodQl));
+        if (qlp.length) fail("3.15.0 good questLog failed schema:\n  " + qlp.join("\n  "));
+    }
+    const baseQ = { id: 33, title: "Wolves", obj: [{ text: "Meat: 1/8", have: 1, need: 8, done: false, type: "item" }] };
+    const badQls = [
+        { at: 0, quests: [] }, { at: 1.5, quests: [] }, { at: 1700000060 }, { at: 1700000060, quests: [], extra: 1 },
+        { at: 1700000060, quests: Array.from({ length: 36 }, (_, i) => ({ ...baseQ, id: i + 1 })) },
+        { at: 1700000060, quests: [{ ...baseQ, id: 0 }] },
+        { at: 1700000060, quests: [{ ...baseQ, title: "" }] },
+        { at: 1700000060, quests: [{ ...baseQ, title: "|cffffff00Bad|r" }] },
+        { at: 1700000060, quests: [{ ...baseQ, lv: 0 }] },
+        { at: 1700000060, quests: [{ ...baseQ, lv: 256 }] },
+        { at: 1700000060, quests: [{ ...baseQ, done: false }] },
+        { at: 1700000060, quests: [{ ...baseQ, failed: false }] },
+        { at: 1700000060, quests: [{ ...baseQ, done: true, failed: true }] },
+        { at: 1700000060, quests: [{ ...baseQ, extra: true }] },
+        { at: 1700000060, quests: [{ ...baseQ, obj: undefined }] },
+        { at: 1700000060, quests: [{ ...baseQ, obj: Array.from({ length: 13 }, (_, i) => ({ text: "O" + i, done: false })) }] },
+        { at: 1700000060, quests: [{ ...baseQ, obj: [{ text: "No done" }] }] },
+        { at: 1700000060, quests: [{ ...baseQ, obj: [{ text: "Bad have", have: -1, done: false }] }] },
+        { at: 1700000060, quests: [{ ...baseQ, obj: [{ text: "Bad type", type: "BAD", done: false }] }] },
+    ];
+    badQls.forEach((ql, n) => { if (!validateExport(JSON.parse(JSON.stringify(qlDoc(ql)))).length) fail("the 3.x schema accepted bad questLog #" + n); });
     if (JSON.stringify(c3.equipped) !== JSON.stringify([{ slotId: 16, id: 25 }])) fail("3.x equipped is not the minimal list: " + JSON.stringify(c3.equipped));
     // 3.15.0: a 3.x price also says every vendor seen (and the day and limited stock, when the saved file knows them);
     // the three fields 2.x has are unchanged

@@ -4,8 +4,8 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.15.0**, default | Inventory, selected character records, Legacy Trees, tracked raids, crafted history, hearth, retained observations, the NPC summary, item facts and kills per day |
-| `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth |
+| `inventory-export.v3.schema.json` | **3.15.0**, default | Inventory, selected character records, Legacy Trees, current quest log, tracked raids, crafted history, hearth, retained observations, the NPC summary, item facts and kills per day |
+| `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth/questLog |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
 
@@ -33,7 +33,7 @@ Common character fields include identity (`key`, `name`, optional `surname`, rea
 
 Format 3 removes `stats`, `sheet`, ordinary `talents`, `spec`, `role`, `reputation`, `pvp`, `achievementPoints`, and their associated update stamps (`stats`, `sheet`, `talents`, `reputation`, `pvp`). 3.0.0 to 3.13.0 also removed `statistics` and its stamp; 3.14.0 exports them again, because the receiving site has no other source for them, so a reader must treat a 3.x character without `statistics` as not exported rather than as having none. Equipped items reduce to `{ slotId, id, link }`; links can still contain enchant/suffix IDs. This reduces duplicate profile data for a receiving site that obtains it elsewhere; **the exporter itself never fetches a profile API**. The addon still records these fields locally; format 2 retains them.
 
-Format 3 additionally exports `raids` (an empty array if none recorded), `observations` when valid retained events exist, and optional character `crafted` and `hearth`. Turning off observation recording does not remove existing observations from export. Format 2 never includes these four additions. Both current formats support `legacyTree`.
+Format 3 additionally exports `raids` (an empty array if none recorded), `observations` when valid retained events exist, and optional character `crafted`, `hearth` and `questLog`. Turning off observation recording does not remove existing observations from export. Format 2 never includes these five additions. Both current formats support `legacyTree`.
 
 Inventory 2.0 removed per-character computed `crafting`, plus AH/buy-price fields from inventory `prices`. Profit/levelling estimates remain a local report from `buildAll`, not an uploaded inventory section. Auction data are separate documents.
 
@@ -62,6 +62,33 @@ The addon reads trees 1187/1188/1189 (or client constants) with talents at login
 `characters[].crafted` contains `since`, `total`, `items: [{ itemId, name, count, crafts, lastAt }]` and `days: [{ date, items: [{ itemId, count }] }]`. Counts are items; crafts count the character's own “You create” messages (including conjuring). The addon counts from the first observed craft, always on, independent of drop tracking. Export keeps up to 5,000 most recently crafted item types, sorted by item ID, and the newest 120 crafting dates (`YYYY-MM-DD`, local date). Invalid entries are dropped; unusable names/times become null. Running `total` is not reduced by pruning.
 
 Optional `characters[].hearth` is the bind-location name from `GetBindLocation`, recorded after loading screens and `HEARTHSTONE_BOUND`; `updated.hearth` is its read time. Absent until a usable reading.
+
+### Quest log (3.15.0)
+
+Optional `characters[].questLog` (KutzInventory 1.21.0, format 3.x only):
+
+```text
+{
+  at: integer 1-100000000000       Unix seconds (time()) when the log was read
+  quests: [ 0-35 of {              in quest log order; [] = recorded and empty
+    id:      integer 1-2147483647  questID (C_QuestLog.GetInfo, else GetQuestLogTitle)
+    title:   string 1-200          quest log title, UI markup removed, character's own name replaced with $N
+    lv?:     integer 1-255         quest level as shown in the log
+    header?: string 1-120          preceding zone/category header in the log, UI markup removed, $N scrubbed
+    done?:   true                  complete, ready to turn in (C_QuestLog.IsComplete / ReadyForTurnIn, else isComplete == 1)
+    failed?: true                  failed, e.g. timer ran out (C_QuestLog.IsFailed, else isComplete == -1); never with done
+    obj: [ 0-12 of {               objectives in client order (C_QuestLog.GetQuestObjectives, else GetQuestLogLeaderBoard)
+      text:  string 1-400          objective text as the client shows it, e.g. "Kobold Vermin slain: 3/10", $N scrubbed
+      have?: integer 0-2147483647  numFulfilled (from C_QuestLog.GetQuestObjectives)
+      need?: integer 0-2147483647  numRequired (from C_QuestLog.GetQuestObjectives)
+      done:  boolean               whether this objective is finished
+      type?: string 1-40           objective type, e.g. "monster", "item", "event" (^[a-z][a-z0-9_-]{0,39}$)
+    } ]
+  } ]
+}
+```
+
+Absent `questLog` means not recorded (older addon or unavailable API); `quests: []` means recorded and the quest log is empty. The addon reads the log after login, on `QUEST_LOG_UPDATE`, `QUEST_ACCEPTED`, `QUEST_REMOVED` and `QUEST_TURNED_IN` (debounced), on `/kinv scan`, and at safe pre-logout checkpoints. Collapsed headers are expanded for the read and collapsed back afterwards when out of combat; in combat, a log with collapsed headers waits for combat to end. The exporter drops duplicate quest IDs and invalid entries, enforces the 35-quest and 12-objective caps, and omits `questLog` from format 2.
 
 ### Raids (3.1.0)
 

@@ -32,6 +32,42 @@ KutzInventoryDB = {
 				["y"] = 59.6,
 			},
 			["hearth"] = "Stormwind City",
+			["questLog"] = {
+				["at"] = 1762905600,
+				["quests"] = {
+					{
+						["id"] = 276,
+						["title"] = "Tramping Paws",
+						["lv"] = 24,
+						["header"] = "Wetlands",
+						["obj"] = {
+							{
+								["text"] = "Mosshide Gnoll slain: 6/15",
+								["have"] = 6,
+								["need"] = 15,
+								["done"] = false,
+								["type"] = "monster",
+							}, -- [1]
+							{
+								["text"] = "Mosshide Mongrel slain: 15/15",
+								["have"] = 15,
+								["need"] = 15,
+								["done"] = true,
+								["type"] = "monster",
+							}, -- [2]
+						},
+					}, -- [1]
+					{
+						["id"] = 463,
+						["title"] = "The Greenwarden",
+						["lv"] = 21,
+						["header"] = "Wetlands",
+						["done"] = true,
+						["obj"] = {
+						},
+					}, -- [2]
+				},
+			},
 			["legacyTree"] = {
 				["currency"] = {
 					["available"] = 12,

@@ -29,7 +29,8 @@ UnitName=function() return 'Tester' end; GetRealmName=function() return 'Realm' 
 UnitClass=function() return 'Warrior','WARRIOR' end;UnitRace=function() return 'Human' end
 UnitFactionGroup=function() return 'Alliance' end;UnitLevel=function() return 30 end;UnitSex=function() return 2 end
 UnitGUID=function() return loaded and 'Player-Test' or nil end;UnitExists=function() return loaded end
-InCombatLockdown=function() return false end
+local inCombat = false
+InCombatLockdown=function() return inCombat end
 GetMoney=function() return loaded and coins or 0 end
 UnitXPMax=function() return loaded and 1000 or 0 end;UnitXP=function() return loaded and xp or 0 end
 GetXPExhaustion=function() return loaded and 200 or nil end
@@ -203,6 +204,97 @@ do -- reputation: collapsed headers, one nested in another and one with no facti
  check(c.reputation[4].value==300,'and the next change is read again')
  C_Reputation=nil
 end
+do -- quest log: modern C_QuestLog, collapsed headers restored (also on error), combat defer, $N scrubbing, empty vs unloaded, legacy fallback
+ local qrows = {
+  { h = true, title = "Elwynn Forest", c = false },
+  { id = 33, title = "|cffffff00Wolves for Tester|r", lv = 5, p = 1 },
+  { id = 9999, title = "Hidden Tracking Quest", lv = 1, hidden = true, p = 1 },
+  { h = true, title = "Stormwind City", c = true },
+  { id = 463, title = "The Greenwarden", lv = 21, done = true, p = 4 },
+  { id = 500, title = "Timed Escort", lv = 18, failed = true, p = 4 },
+ }
+ local objs = {
+  [33] = { { text = "Tough Wolf Meat for Tester: 3/8", type = "monster", finished = false, numFulfilled = 3, numRequired = 8 },
+           { text = "Return to Goldshire", type = "event", finished = true } },
+  [463] = {},
+  [500] = { { text = "Escort complete", type = "event", finished = false, numFulfilled = 0, numRequired = 1 } },
+ }
+ local function qshown()
+  local out = {}
+  for _, r in ipairs(qrows) do
+   if not r.p or not qrows[r.p].c then out[#out + 1] = r end
+  end
+  return out
+ end
+ local function qtotal()
+  local n = 0
+  for _, r in ipairs(qrows) do if not r.h and not r.hidden then n = n + 1 end end
+  return n
+ end
+ local qLogEvents = 0
+ ExpandQuestHeader = function(i) qshown()[i].c = false; qLogEvents = qLogEvents + 1; emit('QUEST_LOG_UPDATE') end
+ CollapseQuestHeader = function(i) qshown()[i].c = true; qLogEvents = qLogEvents + 1; emit('QUEST_LOG_UPDATE') end
+ C_QuestLog = {
+  GetNumQuestLogEntries = function() return #qshown(), qtotal() end,
+  GetInfo = function(i)
+   local r = qshown()[i]
+   if not r then return nil end
+   return { title = r.title, questID = r.id or 0, level = r.lv or 0, isHeader = r.h or false,
+            isCollapsed = r.c or false, isHidden = r.hidden or false }
+  end,
+  IsComplete = function(id) for _, r in ipairs(qrows) do if r.id == id then return r.done or false end end return false end,
+  IsFailed = function(id) for _, r in ipairs(qrows) do if r.id == id then return r.failed or false end end return false end,
+  GetQuestObjectives = function(id) return objs[id] or {} end,
+ }
+ -- combat with a collapsed header: defers without expanding, resumes on PLAYER_REGEN_ENABLED
+ inCombat = true
+ emit('QUEST_LOG_UPDATE'); advance(2)
+ check(c.questLog == nil and qrows[4].c == true and qLogEvents == 0, 'collapsed quest header in combat defers without mutating UI')
+ inCombat = false
+ emit('PLAYER_REGEN_ENABLED'); advance(2)
+ check(c.questLog and c.questLog.at and #c.questLog.quests == 3, 'quest log read after combat ends: ' .. tostring(c.questLog and #c.questLog.quests))
+ check(qrows[4].c == true and not qrows[1].c, 'collapsed quest header put back as player left it')
+ local q1, q2, q3 = c.questLog.quests[1], c.questLog.quests[2], c.questLog.quests[3]
+ check(q1.id == 33 and q1.title == 'Wolves for $N' and q1.lv == 5 and q1.header == 'Elwynn Forest' and q1.done == nil and q1.failed == nil, 'first quest + $N + markup')
+ check(#q1.obj == 2 and q1.obj[1].text == 'Tough Wolf Meat for $N: 3/8' and q1.obj[1].have == 3 and q1.obj[1].need == 8 and q1.obj[1].done == false and q1.obj[1].type == 'monster', 'objective 1')
+ check(q1.obj[2].text == 'Return to Goldshire' and q1.obj[2].done == true and q1.obj[2].have == nil and q1.obj[2].need == nil and q1.obj[2].type == 'event', 'objective 2')
+ check(q2.id == 463 and q2.header == 'Stormwind City' and q2.done == true and q2.failed == nil and #q2.obj == 0, 'collapsed complete quest')
+ check(q3.id == 500 and q3.failed == true and q3.done == nil, 'failed quest')
+ -- error part-way through read still collapses opened headers back and allows later reads
+ local getInfo = C_QuestLog.GetInfo
+ local broken = setmetatable({}, { __index = function() error('quest read failed') end })
+ C_QuestLog.GetInfo = function(i) local f = getInfo(i); if f and f.questID == 463 then return broken end; return f end
+ local savedErr = KutzInventoryDB.lastError
+ emit('QUEST_ACCEPTED'); advance(2)
+ check(tostring(KutzInventoryDB.lastError):find('quest read failed'), 'quest read error reported')
+ check(qrows[4].c == true, 'failed quest read still collapses opened header back')
+ C_QuestLog.GetInfo = getInfo; KutzInventoryDB.lastError = savedErr
+ -- unloaded log (total > 0, GetInfo nil) preserves previous snapshot
+ C_QuestLog.GetNumQuestLogEntries = function() return 0, 3 end
+ emit('QUEST_REMOVED'); advance(2)
+ check(#c.questLog.quests == 3, 'unloaded quest log must not overwrite saved log with empty')
+ -- genuinely empty log records quests = {}
+ C_QuestLog.GetNumQuestLogEntries = function() return 0, 0 end
+ emit('QUEST_TURNED_IN'); advance(2)
+ check(c.questLog and #c.questLog.quests == 0, 'empty quest log records quests = {}')
+ -- legacy fallback when C_QuestLog is absent
+ C_QuestLog = nil
+ local legRows = {
+  { "Duskwood", 0, 0, true, false, nil, 0, 0 },
+  { "Night Watch for Tester", 22, 0, false, false, 1, 0, 56 },
+ }
+ GetNumQuestLogEntries = function() return #legRows, 1 end
+ GetQuestLogTitle = function(i) local r = legRows[i]; if r then return r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8] end end
+ GetNumQuestLeaderBoards = function(idx) return idx == 2 and 1 or 0 end
+ GetQuestLogLeaderBoard = function(j, idx) if idx == 2 and j == 1 then return "Skeletal Fighter slain: 8/8", "monster", true end end
+ emit('QUEST_LOG_UPDATE'); advance(2)
+ check(#c.questLog.quests == 1 and c.questLog.quests[1].id == 56 and c.questLog.quests[1].title == 'Night Watch for $N'
+       and c.questLog.quests[1].header == 'Duskwood' and c.questLog.quests[1].done == true
+       and #c.questLog.quests[1].obj == 1 and c.questLog.quests[1].obj[1].done == true and c.questLog.quests[1].obj[1].type == 'monster',
+       'legacy GetQuestLogTitle + GetQuestLogLeaderBoard fallback')
+ -- leave legacy APIs active across logout/checkpoint to verify checkpoint refresh and early-unload preservation
+ legRows[2][1] = "Night Watch Updated"
+end
 rank=7;emit('TRAIT_NODE_CHANGED')
 emit('PLAYER_EQUIPMENT_CHANGED')
 if '${mode}'~='NativeExit' then
@@ -215,11 +307,15 @@ emit('PLAYER_LEAVING_WORLD');check(c.location.x==${earlyUnload?42:43},'pre-leave
 ${earlyUnload?"":"check(#c.recording.pending==0,'checkpoint must finish safe queued scans')"}
 check(c.legacyTree.trees['1187'].nodes['100']==${earlyUnload && mode === 'NativeExit' ? 'nil' : '7'},'queued talent checkpoint records Legacy while APIs ready')
 local goodLegacy=c.legacyTree
+local goodQuests=c.questLog
+check(goodQuests and goodQuests.quests[1].title=='${earlyUnload && mode === 'NativeExit' ? 'Night Watch for $N' : 'Night Watch Updated'}','logout checkpoint refreshes questLog while APIs ready')
 local goodMoney,goodXP,goodBags=c.money,c.xp,c.bags
 loaded,mapReady=false,false
+GetNumQuestLogEntries=function() return 0, 0 end
 emit('PLAYER_MONEY');emit('PLAYER_XP_UPDATE','player')
 emit('PLAYER_LOGOUT');advance(100)
 check(c.legacyTree==goodLegacy,'late logout preserves Legacy snapshot')
+check(c.questLog==goodQuests,'late logout preserves questLog snapshot')
 check(c.location.x==${earlyUnload?42:43},'unavailable logout map must preserve position')
 check(c.money==goodMoney and c.xp==goodXP,'late zero wallet must not replace real values')
 check(c.hearth=='Stormwind City','an empty late answer must not erase the hearth')

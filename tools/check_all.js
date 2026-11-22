@@ -39,7 +39,7 @@ r = node([tool("check_facts.js"), addon]);
 report("item facts: read once per item and game build from a link of id and suffix alone, queued, never in combat, capped by bytes; random suffixes as variants of one item; kills per day; /kinv perf; unlearned recipes saved once per account file (undone = the original, exports identical); statistics per day; every vendor of an item",
     r.ok && /^OK/m.test(r.out) && !/^FAIL/m.test(r.out), r.out);
 r = node([tool("check_inventory_logout.js")]);
-report("reload, logout and exit snapshots; trainers (no Beast Training); reputation headers put back; Legacy tree ranks/events/nil APIs and guild loading", r.ok && /^OK/m.test(r.out), r.out);
+report("reload, logout and exit snapshots; trainers (no Beast Training); reputation and quest log headers put back; quest log modern/legacy reads; Legacy tree ranks/events/nil APIs and guild loading", r.ok && /^OK/m.test(r.out), r.out);
 r = node([tool("check_character_identity.js")]);
 report("same-name characters: GUID ownership, stable keys, isolated data and export", r.ok && /^OK/m.test(r.out), r.out);
 r = node([tool("check_export.js")]);

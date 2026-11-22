@@ -48,8 +48,11 @@ const SCHEMA_VERSION = "2.1.0";
 // item and game build, with its random-suffix variants), observations.kills (creatures killed per day, npc and level),
 // npcs[].inst (a creature seen inside an instance: the instance map and difficulty, no cells), suffix / bonus beside an
 // observation item's link (a random-suffix copy; the link itself stays the plain item's), characters[].statisticsDays
-// (the statistics that changed on each of the last 30 days), and on prices[id]: vendorDay, vendorLimited and vendors
-// (every vendor seen selling it). Unlearned recipes saved once per account file export exactly as before.
+// (the statistics that changed on each of the last 30 days), on prices[id]: vendorDay, vendorLimited and vendors
+// (every vendor seen selling it), and characters[].questLog (the character's current quest log snapshot: read time in
+// Unix seconds, up to 35 quests in log order with up to 12 objectives each and progress counts, character's own name
+// replaced with "$N"; absent = not recorded, quests: [] = recorded and empty; format 2 never carries it). Unlearned
+// recipes saved once per account file export exactly as before.
 const SCHEMA_VERSION_3 = "3.15.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
@@ -422,7 +425,7 @@ function crafting(book, c) {
 // Statistics are not in that API for this client, so they are exported (3.0.0 to 3.13.0 left them out).
 const DROPPED_IN_3 = ["spec", "role", "stats", "sheet", "talents", "reputation", "achievementPoints", "pvp"];
 const DROPPED_SECTIONS_IN_3 = ["sheet", "stats", "talents", "reputation", "pvp"];   // keys of characters[].updated
-// more (3.15.0): { statDays: Map(character key -> statisticsDays), prices: { itemId: vendorDetails } }
+// more (3.15.0): { statDays: Map(character key -> statisticsDays), questLogs: Map(character key -> questLog), prices: { itemId: vendorDetails } }
 function toFormat3(inventory, raids, observations, crafted, hearths, more) {
   const characters = inventory.characters.map((c) => {
     const out = { ...c };
@@ -437,6 +440,8 @@ function toFormat3(inventory, raids, observations, crafted, hearths, more) {
     if (hearth) out.hearth = hearth;
     const statDays = more && more.statDays && more.statDays.get(c.key);
     if (statDays) out.statisticsDays = statDays;
+    const questLog = more && more.questLogs && more.questLogs.get(c.key);
+    if (questLog) out.questLog = questLog;
     return out;
   });
   const prices = more && more.prices
@@ -1154,6 +1159,48 @@ function exportLegacyTree(v) {
   return { currency: { available, spent, max }, trees, choices: numericMap(v.choices) };
 }
 
+// ---------------------------------------------------------------------------
+// Quest log (inventory 3.15.0+, KutzInventory 1.21.0): KutzInventoryDB.chars[key].questLog = { at, quests[] }.
+// Exported on the character as { at, quests: [{ id, title, lv?, header?, done?, failed?, obj: [{ text, have?, need?,
+// done, type? }] }] } in log order, at most 35 quests and 12 objectives each. Absent = not recorded; quests: [] = empty.
+// ---------------------------------------------------------------------------
+const QUEST_LOG_MAX_QUESTS = 35;
+const QUEST_LOG_MAX_OBJ = 12;
+const questLogText = (v, max) => {
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  return s.length >= 1 && s.length <= max && !/[|\u0000-\u001f\u007f]/.test(s) ? s : undefined;
+};
+function exportQuestLog(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  if (!Number.isInteger(raw.at) || raw.at < 1 || raw.at > 1e11) return undefined;
+  if (!raw.quests || typeof raw.quests !== "object") return undefined;
+  const quests = [], seen = new Set();
+  for (const q of asList(raw.quests)) {
+    if (!q || typeof q !== "object") continue;
+    const id = obsInt(q.id, 1), title = questLogText(q.title, 200);
+    if (id === undefined || title === undefined || seen.has(id)) continue;
+    seen.add(id);
+    const lv = obsInt(q.lv, 1);
+    const header = questLogText(q.header, 120);
+    const failed = q.failed === true ? true : undefined;
+    const done = !failed && q.done === true ? true : undefined;
+    const obj = [];
+    for (const o of asList(q.obj)) {
+      if (!o || typeof o !== "object") continue;
+      const text = questLogText(o.text, 400);
+      if (text === undefined || typeof o.done !== "boolean") continue;
+      const have = obsInt(o.have, 0), need = obsInt(o.need, 0);
+      const type = obsText(o.type, OBS_OBJECTIVE_TYPE);
+      obj.push(pick({ text, have, need, done: o.done, type }));
+      if (obj.length === QUEST_LOG_MAX_OBJ) break;
+    }
+    quests.push(pick({ id, title, lv: lv <= 255 ? lv : undefined, header, done, failed, obj }));
+    if (quests.length === QUEST_LOG_MAX_QUESTS) break;
+  }
+  return { at: raw.at, quests };
+}
+
 // -> { inventory (inventory-export 2.x, or 3.x with { format: 3 }), auctions (auction-scan documents), report (local profit report per character) }
 function buildAll(dbs, uiHealthRaw, options = {}) {
   const format = options.format == null ? 3 : Number(options.format);
@@ -1190,6 +1237,12 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
   for (const [key, c] of characters) {
     const days = exportStatDays(c.statDays);
     if (days) statDays.set(key, days);
+  }
+  // Current quest log snapshot (inventory 3.15.0+; KutzInventory 1.21.0 records it). Absent when not recorded; 2.x never carries it.
+  const questLogs = new Map();
+  for (const [key, c] of characters) {
+    const ql = exportQuestLog(c.questLog);
+    if (ql) questLogs.set(key, ql);
   }
   const chars = [...characters.entries()].map(([key, c]) => {
     const u = c.updated || {};
@@ -1264,7 +1317,7 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
       tabs: containers(g.tabs, "guild").map((t) => ({ ...t, tab: t.bag, updated: iso(t.updated) })),
     })),
   };
-  const more = { statDays, prices: Object.fromEntries([...ids].map((id) => [id, vendorDetails(book, id)])) };
+  const more = { statDays, questLogs, prices: Object.fromEntries([...ids].map((id) => [id, vendorDetails(book, id)])) };
   const v3 = () => toFormat3(inventory, exportRaids(dbs), exportObservations(options.observations), crafted, hearths, more);
   return { inventory: format === 3 ? v3() : inventory, auctions: auctionScans(book), report,
            ahItems: Object.keys(book.ah).length };
@@ -1360,5 +1413,5 @@ function convertSavedVariables(texts, options) {
 return { SCHEMA_VERSION, SCHEMA_VERSION_3, FORMATS, AUCTION_SCHEMA_VERSION, DROPPED_IN_3, MAX_TABLE_DEPTH,
   parseSavedVariables, plain, buildAll, build, toFormat3, auctionScans, exportRaids, RAID_STRING,
   exportObservations, exportNpcs, exportItems, exportKills, exportStatDays, cleanTooltip, cleanTooltipText,
-  OBSERVATIONS_VERSION, exportCrafted, exportUiHealth, newerUiHealth, convertSavedVariables };
+  OBSERVATIONS_VERSION, exportCrafted, exportQuestLog, exportUiHealth, newerUiHealth, convertSavedVariables };
 });

@@ -11,6 +11,15 @@ KutzInventoryDB = {
       lastSeen = 1762905600,
       location = { zone = "Wetlands", subzone = "Menethil Harbor", mapID = 1437, x = 10.8, y = 59.6 },
       hearth = "Stormwind City",
+      questLog = {
+        at = 1762905600,
+        quests = {
+          { id = 276, title = "Tramping Paws", lv = 24, header = "Wetlands",
+            obj = { { text = "Mosshide Gnoll slain: 6/15", have = 6, need = 15, done = false, type = "monster" },
+                    { text = "Mosshide Mongrel slain: 15/15", have = 15, need = 15, done = true, type = "monster" } } },
+          { id = 463, title = "The Greenwarden", lv = 21, header = "Wetlands", done = true, obj = {} },
+        },
+      },
       legacyTree = {
         currency = { available = 12, spent = 4, max = 16 },
         trees = { ["1187"] = { spentInTree = 3, nodes = { ["100"] = 2, ["101"] = 1 } },

@@ -11,6 +11,7 @@ KutzInventory collects game data while playing. It checkpoints queued work befor
 | Gear | Equipment/inventory/durability events queue coalesced scans; safe checkpoints flush pending work. An empty gear read preserves an existing record. |
 | Gold/XP/rested XP | Delayed login reads, immediate money/XP/exhaustion events and manual scan. Reads stop while leaving; checkpoint handling avoids a new teardown zero overwriting gold. |
 | Professions, currencies, skills, spells, talents, reputation, PvP | Login/change events queue scans. A checkpoint can finish queued work while player data are usable; unavailable client APIs may leave fields absent or old. |
+| Quest log (`questLog`) | After login, on `QUEST_LOG_UPDATE` / `QUEST_ACCEPTED` / `QUEST_REMOVED` / `QUEST_TURNED_IN` (debounced), `/kinv scan`, and safe pre-logout checkpoints. Collapsed headers are expanded and restored out of combat; in combat with collapsed headers, the read waits for `PLAYER_REGEN_ENABLED`. Character names in titles, headers and objective text become `$N`. |
 | Stats/sheet | Latest safe out-of-combat reading; changes during combat can defer updates. Buffs at snapshot time count. |
 | Statistics/achievement points | Login, manual scan and post-combat reads throttled to once per ten minutes. From 1.21.0 each read also notes the values that changed since the read before under today (`chars[key].statDays[day][id]`), kept 30 days; the first read notes nothing. |
 | Character/warband bank | Requires the bank open and loaded. Cached values represent a visit, not a live view after closing it. |
@@ -126,3 +127,10 @@ Nothing in 1.21.0 was run in the game: it was written against the client's API d
 
 - With the reputation window open, confirm the addon does not rescan (opening and closing headers) every 5 seconds.
 - Collapse the Inactive header and nested headers (a header inside a collapsed one), with the window open and closed, and confirm each is put back as it was after a read.
+
+### WoW Forever 1.21.0 quest log checklist
+
+- Log in with quests under multiple headers, collapse at least one header, and verify `KutzInventoryDB.chars[key].questLog` records every quest in log order with its header, level, objectives (`have`/`need`/`done`/`type`), and that collapsed headers remain collapsed in the Quest Log window afterwards.
+- Verify a complete quest records `done = true`, a failed quest records `failed = true`, a breadcrumb quest with no objectives records `obj = {}`, and an empty quest log records `quests = {}`.
+- Accept, progress, abandon and turn in a quest; confirm `questLog` updates without Lua errors and that combat with a collapsed header defers the read until combat ends.
+- Check a quest whose title or objective contains your character's name or surname and confirm it is saved as `$N`.
