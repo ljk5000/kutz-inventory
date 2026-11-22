@@ -914,6 +914,7 @@ end
 -- rather than mutating the quest log frame or saving a partial list).
 ---------------------------------------------------------------------------
 local readingQuests, questsWaiting = false, false
+local questsToggledAt = -1e9   -- GetTime() of our own header expand/collapse: its QUEST_LOG_UPDATE comes a frame later
 
 local qlog = { MAX_QUESTS = 35, MAX_OBJ = 12, MAX_ROWS = 200 }
 
@@ -1133,6 +1134,7 @@ local function ScanQuestLog()
             end
         end
         for idx = n, 1, -1 do pcall(close, idx) end
+        questsToggledAt = GetTime()
     end
     readingQuests = false
     if not ok then error(snap, 0) end
@@ -1511,10 +1513,14 @@ function handlers.UPDATE_FACTION() if not readingReps then Soon("reps", ScanRepu
 function handlers.PLAYER_PVP_KILLS_CHANGED() Soon("pvp", ScanPvP, 5) end
 handlers.HONOR_XP_UPDATE = handlers.PLAYER_PVP_KILLS_CHANGED
 handlers.PVP_RATED_STATS_UPDATE = handlers.PLAYER_PVP_KILLS_CHANGED
-function handlers.QUEST_LOG_UPDATE() if not readingQuests then Soon("quests", ScanQuestLog, 2) end end
-handlers.QUEST_ACCEPTED = handlers.QUEST_LOG_UPDATE
-handlers.QUEST_REMOVED = handlers.QUEST_LOG_UPDATE
-handlers.QUEST_TURNED_IN = handlers.QUEST_LOG_UPDATE
+-- Our own expand/collapse fires QUEST_LOG_UPDATE after the read ends; without the 1 s quiet time a collapsed header would
+-- make the read reschedule itself every 2 s for ever. Accept, remove and turn-in are never ours, so they always read.
+function handlers.QUEST_LOG_UPDATE()
+    if not readingQuests and GetTime() - questsToggledAt >= 1 then Soon("quests", ScanQuestLog, 2) end
+end
+function handlers.QUEST_ACCEPTED() Soon("quests", ScanQuestLog, 2) end
+handlers.QUEST_REMOVED = handlers.QUEST_ACCEPTED
+handlers.QUEST_TURNED_IN = handlers.QUEST_ACCEPTED
 function handlers.PLAYER_LEVEL_UP() Soon("who", ScanIdentity, 2); Soon("wallet", ScanWallet, 2); WantStats() end
 function handlers.ACTIVE_TALENT_GROUP_CHANGED() Soon("who", ScanIdentity, 2); Soon("talents", ScanTalents, 3); WantStats() end
 handlers.PLAYER_SPECIALIZATION_CHANGED = handlers.ACTIVE_TALENT_GROUP_CHANGED
