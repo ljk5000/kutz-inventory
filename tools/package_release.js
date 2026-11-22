@@ -17,7 +17,7 @@ function packageRelease(destination) {
     fs.cpSync(path.join(root,addon),path.join(output,"AddOns",addon),{recursive:true});
   }
   fs.mkdirSync(path.join(output,"companion")); fs.mkdirSync(path.join(output,"tools"));
-  for (const name of ["Start.cmd","Companion.ps1","CredentialStore.cs","worker.js","session.js","transport.js"]) {
+  for (const name of ["Start.cmd","Companion.ps1","CredentialStore.cs","worker.js","session.js","transport.js","version.js"]) {
     fs.copyFileSync(path.join(root,"companion",name),path.join(output,"companion",name));
   }
   for (const name of ["inventory_export.js","convert.js","export_queue.js","upload_outbox.js","upload_ack.js","output_lock.js","auction_sender.js"]) {

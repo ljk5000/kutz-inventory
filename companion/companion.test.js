@@ -28,10 +28,12 @@ test("HTTP contract verifies username, authorizes uploads, rejects redirects and
   const key="private-test-key"; let mode="ok", posted;
   const server=http.createServer(async (req,res)=>{
     assert.equal(req.headers.authorization, "Bearer "+key);
+    assert.equal(req.headers["x-kutz-uploader"], COMPANION_VERSION);
     if (mode==="redirect") { res.writeHead(302,{Location:"/elsewhere"}); res.end(); return; }
     if (mode==="reject") { res.writeHead(403); res.end(key); return; }
     if (mode==="busy") { res.writeHead(503); res.end(key); return; }
     if (mode==="echo-key") { res.writeHead(422); res.end(JSON.stringify({error: "Rejected " + key + " / " + key})); return; }
+    if (mode==="outdated") { res.writeHead(426); res.end(JSON.stringify({error: "Update KutzUploader to 9.9.9 or newer to upload.", code: "update_required"})); return; }
     if (mode==="invalid") { res.end('{"ok":true}'); return; }
     if (req.method==="POST") {
       const chunks=[]; for await (const piece of req) chunks.push(piece);
@@ -52,6 +54,9 @@ test("HTTP contract verifies username, authorizes uploads, rejects redirects and
   mode="echo-key";
   await assert.rejects(uploadAuctions(base,key,{}), error=>error.status===422 &&
     !error.message.includes(key) && !error.detail.includes(key) && error.detail.includes("[redacted]"));
+  // cr0m retired this version: its own sentence is the message, and the session does not keep retrying.
+  mode="outdated"; await assert.rejects(upload(base,key,{}), error=>error.status===426 && error.retryable===false &&
+    error.message==="Update KutzUploader to 9.9.9 or newer to upload.");
   mode="invalid"; await assert.rejects(verify(base,key),/invalid acknowledgement/);
   mode="redirect"; await assert.rejects(verify(base,key),/Connection unavailable/);
   assert.throws(()=>endpoint("http://example.com","/api/wow/import"),/HTTPS/);

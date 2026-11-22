@@ -15,7 +15,7 @@ function savedFiles(game) {
 }
 // Linking Battle.net on cr0m does not touch the game file, so after a link refusal the session tries again on its own.
 const RESUME_AFTER_MS = 5 * 60 * 1000;
-const COMPANION_VERSION = "0.12.7";
+const { COMPANION_VERSION } = require("./version");
 async function createSession({ game, output, base, key, username = "", companionVersion = COMPANION_VERSION, report, upload = transport.upload, uploadAuctions = transport.uploadAuctions, interval = 1000, resumeAfterMs = RESUME_AFTER_MS, auctionGapMs = 10500, sendInventory = true, sendAuctions = true }) {
   // What this PC shares: its characters (/api/wow/import), auction house prices (/api/wow/auctions), or both.
   // A price-gathering "service" character turns off the first; a player who doesn't share prices, the second.
