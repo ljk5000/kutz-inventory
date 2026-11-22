@@ -95,6 +95,17 @@ Nothing in 1.21.0 was run in the game: it was written against the client's API d
 - Type `/reload`. Compare the saved file's size with the backup's: smaller by about what the unlearned recipes freed, plus what was recorded since. `/dump KutzInventoryObsDB.perf` after the reload shows the numbers of the session before. Export with the Companion or `node tools/inventory_export.js` and run `node tools/validate_export.js` on the result.
 - In a city with a full bag and bank open, watch for stutter while `M waiting` is above 0. Report the worst and average from `/kinv perf` after a normal play session of an hour.
 
+### WoW Forever 1.22.0 roll corpse checklist
+
+The rule was written from nine roll bursts logged in a five-player dungeon run on WoW Forever 1.60.1 (trash, a boss, a boss of two bodies) and checked in the offline harness; the build itself was not yet run in the game. In a group with group loot, at least 10 minutes after the last login or `/reload`:
+
+- Let another player open a corpse that holds an uncommon or better item, roll Need or Greed, and do not open that corpse yourself. After the rolls end, `/reload` and find the item in `KutzInventoryObsDB.events`: its `src` must have `via = "roll"`, the creature's `npc` and `guid`, and `by = "flip"`, `"sole"` or (a boss) `"end"`. Check the creature against what the group killed.
+- The same on a boss nobody had targeted when it died: `src.kind = "boss"` with `encounter` set and `by = "end"`, also right after a `/reload` as long as the kill itself was seen. On a boss of two bodies each roll list must name its own body.
+- Pass on a roll another player started. Note whether the list still gets its creature. If not, the game takes the flag off the corpse when you pass, and the list rightly stays without one.
+- A chest with an uncommon or better item in a group: note whether the list gets `kind = "chest"` with the chest's `object`, stays without a source, or (wrong) names a creature.
+- Have two players open two corpses with rolls at the same moment: the list must not name one creature for both.
+- Roll lists in the first 10 minutes after a `/reload` keep no creature unless you opened the corpse; that is intended.
+
 ### WoW Forever 1.20.0 hunter tame checklist
 
 - On a hunter with no pet, target a tameable beast and cast Tame Beast. Print the events the addon sees: confirm Tame Beast arrives as `UNIT_SPELLCAST_CHANNEL_START` (or `_START`) for `"player"` with spell 1515 or a spell of the same name, that `UnitGUID("target")` is a plain `Creature-` GUID at that moment, and that `UNIT_PET("player")` fires within 30 seconds of the start when the tame completes. Note whether `UNIT_SPELLCAST_INTERRUPTED` fires when the tame is broken by damage or movement.

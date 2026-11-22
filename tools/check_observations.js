@@ -1737,13 +1737,233 @@ do
   print("OK   rolls: a corpse's roll list with boss, encounter and threshold; once per corpse; no double count with our window; won as a flag")
 end
 
+-- 11b) rolls another player opened: the corpse from the game's loot flags (UNIT_LOOT) and the rolls' end
+--      (LOOT_ROLLS_COMPLETE), the boss from the loot history; anything unclear stays without a corpse
+do
+  local function guidOf(npc, n) return ("Creature-0-4170-36-1234-%d-00001C%04X"):format(npc, n) end
+  local A, B, C, BOSS = guidOf(634, 1), guidOf(598, 2), guidOf(1729, 3), guidOf(644, 4)
+  local CHEST = "GameObject-0-4170-36-1234-75293-00001C0005"
+  local function game(clock)
+    local h = fresh(); h.s.itype, h.s.iid, h.s.difficulty = "party", 36, 1
+    h.s.clock = clock or 1000                   -- past the warm-up (recording began at 100)
+    h.s.can, h.s.hist = {}, {}
+    h.G.CanLootUnit = function(guid) local v = h.s.can[guid]; if v ~= nil then return v, false end end
+    h.G.C_LootHistory = {
+      GetAllEncounterInfos = function()
+        local out = {}
+        for id in pairs(h.s.hist) do out[#out + 1] = { encounterID = id } end
+        return out
+      end,
+      GetSortedDropsForEncounter = function(id)
+        local out = {}
+        for _, key in ipairs(h.s.hist[id] or {}) do out[#out + 1] = { lootListKey = key } end
+        return out
+      end }
+    return h
+  end
+  local function flagged(h, guid, has) h.s.can[guid] = has; h.event("UNIT_LOOT", guid, has) end
+  local function tick(h, sec) h.s.clock = h.s.clock + sec end
+  -- START_LOOT_ROLL for each { item id, lootHandle }, filed in the loot history under enc (0: no encounter); then the
+  -- burst settles and is recorded: the event it made
+  local function start(h, list, enc)
+    for _, r in ipairs(list) do
+      h.s.nextRoll = (h.s.nextRoll or 0) + 1
+      h.s.rolls[h.s.nextRoll] = { link = item(r[1], 1).link, n = 1 }
+      if enc and r[2] then h.s.hist[enc] = h.s.hist[enc] or {}; table.insert(h.s.hist[enc], r[2]) end
+      h.event("START_LOOT_ROLL", h.s.nextRoll, 60000, r[2])
+    end
+    h.drain()
+    local ev = h.events()
+    return ev[#ev]
+  end
+  local function over(h, handle, after) tick(h, after or 20); h.event("LOOT_ROLLS_COMPLETE", handle) end
+  local function settle(h) tick(h, 0.4); h.drain(); h.drain() end
+  local function unknown(e) return e.src.kind == "other" and e.src.via == "roll" and not e.src.guid and not e.src.npc and not e.src.by end
+  local function fine(...) for _, h in ipairs({ ... }) do assert(not h.db().lastError, tostring(h.db().lastError)) end end
+
+  -- flip: of the corpses flagged when the rolls began, one loses its flag right as they end
+  local h = game()
+  assert(h.registered.UNIT_LOOT and h.registered.LOOT_ROLLS_COMPLETE, "flag events registered")
+  flagged(h, A, true); flagged(h, B, true)
+  local e = start(h, { { 10401, 501 } }, 0)
+  assert(unknown(e) and not e.src.encounter, dump(e.src))
+  over(h, 501); tick(h, 0.04); flagged(h, A, false)
+  assert(unknown(e), "not before a flip has had its time: " .. dump(e.src))
+  settle(h)
+  assert(e.src.kind == "mob" and e.src.npc == 634 and e.src.guid == A and e.src.by == "flip" and e.src.via == "roll"
+         and e.src.threshold == 2 and #e.items == 1 and e.items[1].id == 10401, dump(e))
+  -- two left and no flip; then two flips at once: no corpse
+  flagged(h, C, true)
+  e = start(h, { { 10402, 502 } }, 0); over(h, 502); settle(h)
+  assert(unknown(e), "two candidates, no flip: " .. dump(e.src))
+  e = start(h, { { 10403, 503 } }, 0); over(h, 503); tick(h, 0.05); flagged(h, B, false); flagged(h, C, false); settle(h)
+  assert(unknown(e), "two flips: " .. dump(e.src))
+  -- one emptied while the rolls ran (not near a roll's end) is out; the other's flip at the end still names it
+  flagged(h, B, true); flagged(h, C, true)
+  e = start(h, { { 10404, 504 } }, 0); tick(h, 5); flagged(h, C, false); over(h, 504); tick(h, 0.04); flagged(h, B, false); settle(h)
+  assert(e.src.guid == B and e.src.npc == 598 and e.src.by == "flip", dump(e.src))
+  -- a late flip (past FLIP seconds) names nothing, and a corpse's roll list counts once
+  flagged(h, C, true); flagged(h, A, true)
+  e = start(h, { { 10405, 505 } }, 0); over(h, 505); tick(h, 0.6); flagged(h, C, false); settle(h)
+  assert(unknown(e), "a late flip: " .. dump(e.src))
+  flagged(h, C, true)
+  e = start(h, { { 10406, 506 } }, 0); over(h, 506); tick(h, 0.04); flagged(h, A, false); settle(h)
+  assert(unknown(e), "A's roll list is recorded already: " .. dump(e.src))
+  -- a loot window of ours just then explains the lost flag: no flip
+  flagged(h, A, true)
+  e = start(h, { { 10407, 507 } }, 0); over(h, 507); tick(h, 0.02)
+  h.s.units.target = { guid = C, dead = true }
+  h.loot({ item(4500, 1, { C, 1 }) }); flagged(h, C, false); settle(h)
+  assert(unknown(e), "our own window emptied it: " .. dump(e.src))
+
+  -- sole: the only one flagged from start to end, nothing else lost its flag, and the game still says it holds loot
+  local s = game(); flagged(s, C, true)
+  e = start(s, { { 10410, 510 } }, 0); over(s, 510); settle(s)
+  assert(e.src.guid == C and e.src.npc == 1729 and e.src.kind == "mob" and e.src.by == "sole" and e.src.threshold == 2, dump(e.src))
+  flagged(s, C, false); flagged(s, B, true); s.s.can[B] = nil
+  e = start(s, { { 10411, 511 } }, 0); over(s, 511); settle(s)
+  assert(unknown(e), "the game no longer answers for it: " .. dump(e.src))
+  s.s.can[B] = true; flagged(s, A, true)
+  e = start(s, { { 10412, 512 } }, 0); tick(s, 5); flagged(s, A, false); over(s, 512); settle(s)
+  assert(unknown(e), "another lost its flag while the rolls ran: " .. dump(e.src))
+  e = start(s, { { 10413, 513 } }, 0); over(s, 513); settle(s)
+  assert(e.src.guid == B and e.src.by == "sole", dump(e.src))
+  -- a corpse flagged on another map is no candidate; a chest that is flagged is one
+  local m = game(); flagged(m, A, true); m.s.iid = 48; flagged(m, B, true)
+  e = start(m, { { 10414, 514 } }, 0); over(m, 514); settle(m)
+  assert(e.src.guid == B and e.src.by == "sole" and e.where.map == 48, dump(e))
+  flagged(m, CHEST, true)
+  e = start(m, { { 10415, 515 } }, 0); over(m, 515); tick(m, 0.04); flagged(m, CHEST, false); settle(m)
+  assert(e.src.kind == "chest" and e.src.object == 75293 and e.src.guid == CHEST and e.src.by == "flip", dump(e.src))
+
+  -- two corpses in one burst: one loses its flag right after one roll's end while another roll still runs
+  local x = game(); flagged(x, A, true); flagged(x, B, true)
+  e = start(x, { { 10420, 520 }, { 10421, 521 } }, 0)
+  assert(#e.items == 2, dump(e.items))
+  over(x, 520, 10); tick(x, 0.05); flagged(x, A, false); over(x, 521, 10); tick(x, 0.05); flagged(x, B, false); settle(x)
+  assert(unknown(e), "a mixed burst: " .. dump(e.src))
+  -- a roll without a handle, the warm-up after recording starts, and too many flags to hold: no corpse
+  flagged(x, A, true)
+  e = start(x, { { 10422, 522 }, { 10423 } }, 0); over(x, 522); tick(x, 0.04); flagged(x, A, false); settle(x)
+  assert(unknown(e), "a roll without a handle: " .. dump(e.src))
+  local warm = game(300); flagged(warm, A, true); flagged(warm, B, true)
+  e = start(warm, { { 10424, 524 } }, 0); over(warm, 524); tick(warm, 0.04); flagged(warm, A, false); settle(warm)
+  assert(unknown(e), "warm-up: " .. dump(e.src))
+  tick(warm, 600)
+  e = start(warm, { { 10425, 525 } }, 0); over(warm, 525); tick(warm, 0.04); flagged(warm, B, false); settle(warm)
+  assert(e.src.guid == B and e.src.by == "flip", "after the warm-up: " .. dump(e.src))
+  warm.cmd("track drops off"); warm.cmd("track drops on"); flagged(warm, C, true)
+  e = start(warm, { { 10426, 526 } }, 0); over(warm, 526); tick(warm, 0.04); flagged(warm, C, false); settle(warm)
+  assert(unknown(e), "switched off and on: the flags start again: " .. dump(e.src))
+  local full = game()
+  for i = 1, 401 do flagged(full, guidOf(598, 100 + i), true) end
+  flagged(full, A, true)
+  e = start(full, { { 10427, 527 } }, 0); over(full, 527); tick(full, 0.04); flagged(full, A, false); settle(full)
+  assert(unknown(e), "the flags overflowed: " .. dump(e.src))
+
+  -- the boss from the loot history: nobody targeted it at ENCOUNTER_END, so there is no kill to give the list to
+  local b = game(); flagged(b, BOSS, true); flagged(b, B, true)
+  e = start(b, { { 872, 530 }, { 873, 531 } }, 2741)
+  assert(e.src.kind == "other" and not e.src.guid and e.src.encounter == 2741 and #e.items == 2, dump(e))
+  over(b, 530, 10); settle(b)
+  assert(e.src.kind == "other", "one roll still runs: " .. dump(e.src))
+  over(b, 531, 5); tick(b, 0.04); flagged(b, BOSS, false); settle(b)
+  assert(e.src.kind == "boss" and e.src.npc == 644 and e.src.guid == BOSS and e.src.encounter == 2741 and e.src.by == "flip"
+         and e.src.threshold == 2, dump(e.src))
+  b.s.units.target = { guid = BOSS, dead = true }
+  b.loot({ item(4500, 1, { BOSS, 1 }) })
+  local w = b.events()[#b.events()]
+  assert(w.src.kind == "boss" and w.src.via == "slot" and w.src.encounter == 2741, "our own window on it after: " .. dump(w.src))
+  -- a kill found at ENCOUNTER_END gets only the rolls the history files under its encounter
+  local k = game(); k.s.units.party1target = { guid = BOSS }
+  k.event("ENCOUNTER_START", 2741, "Rhahk Zor", 1, 5)
+  k.event("ENCOUNTER_END", 2741, "Rhahk Zor", 1, 5, 1)
+  k.s.units.party1target.dead = true
+  k.drain()
+  e = start(k, { { 10430, 540 } }, 0)
+  assert(unknown(e), "a trash corpse after the kill is not the boss: " .. dump(e.src))
+  e = start(k, { { 872, 541 } }, 2741)
+  assert(e.src.kind == "boss" and e.src.guid == BOSS and e.src.encounter == 2741 and not e.src.by, dump(e.src))
+
+  -- a window of ours that shows one of the items names the list first; the flags change nothing after
+  local n = game(); flagged(n, A, true); flagged(n, B, true)
+  e = start(n, { { 10440, 550 } }, 0)
+  n.s.units.target = { guid = B, dead = true }
+  n.loot({ item(10440, 1, { B, 1 }) })
+  assert(e.src.guid == B and not e.src.by, dump(e.src))
+  over(n, 550); tick(n, 0.04); flagged(n, A, false); settle(n)
+  assert(e.src.guid == B and not e.src.by, dump(e.src))
+  -- a client without the loot history or CanLootUnit: the flip alone still names it, "sole" never
+  local old = game(); old.G.C_LootHistory, old.G.CanLootUnit = nil, nil
+  flagged(old, A, true)
+  e = start(old, { { 10450, 560 } }); over(old, 560); settle(old)
+  assert(unknown(e), "no CanLootUnit: " .. dump(e.src))
+  e = start(old, { { 10451, 561 } }); over(old, 561); tick(old, 0.04); flagged(old, A, false); settle(old)
+  assert(e.src.guid == A and e.src.by == "flip" and not e.src.encounter, dump(e.src))
+  -- what we emptied ourselves while the rolls ran is out but rules nothing out; and "sole" goes by what the game said
+  -- at the rolls' end, also when we empty that corpse right after
+  local mine = game(); flagged(mine, A, true); flagged(mine, B, true)
+  e = start(mine, { { 10460, 570 } }, 0); tick(mine, 5)
+  mine.s.units.target = { guid = B, dead = true }
+  mine.loot({ item(4500, 1, { B, 1 }) }); flagged(mine, B, false)
+  over(mine, 570); tick(mine, 0.1)
+  mine.s.units.target = { guid = A, dead = true }
+  mine.loot({ item(4501, 1, { A, 1 }) }); flagged(mine, A, false); settle(mine)
+  assert(e.src.guid == A and e.src.by == "sole", dump(e.src))
+  -- a flag lost as two bursts end together tells neither; lost as another burst ends, it rules nothing out here
+  local two = game(); flagged(two, A, true); flagged(two, B, true)
+  local e1 = start(two, { { 10470, 580 } }, 0); tick(two, 5)
+  local e2 = start(two, { { 10471, 581 } }, 0)
+  over(two, 580, 10); over(two, 581, 0.1); tick(two, 0.1); flagged(two, A, false); settle(two)
+  assert(unknown(e1) and unknown(e2), dump(e1.src) .. dump(e2.src))
+  flagged(two, C, true)                          -- B and C; the first burst is C's, the second B's
+  e1 = start(two, { { 10472, 582 } }, 0); tick(two, 5)
+  e2 = start(two, { { 10473, 583 } }, 0)
+  over(two, 582, 10); tick(two, 0.1); flagged(two, C, false)
+  over(two, 583, 5); settle(two)
+  assert(e1.src.guid == C and e1.src.by == "flip" and e2.src.guid == B and e2.src.by == "sole", dump(e1.src) .. dump(e2.src))
+
+  -- a boss encounter this session saw end: the corpse flagged right then is the one, at once (no kill was found)
+  local SHRED, SNEED = guidOf(642, 5), guidOf(643, 6)
+  local function killed(g, id, corpses)
+    g.event("ENCOUNTER_START", id, "Boss", 1, 5); tick(g, 60)
+    g.event("ENCOUNTER_END", id, "Boss", 1, 5, 1); tick(g, 0.03)
+    for _, c in ipairs(corpses) do flagged(g, c, true) end
+    g.drain(); tick(g, 8)
+  end
+  local one = game(300); flagged(one, B, true)   -- also inside the warm-up: the encounter's end was seen
+  killed(one, 2741, { BOSS })
+  e = start(one, { { 872, 590 } }, 2741)
+  assert(e.src.kind == "boss" and e.src.npc == 644 and e.src.guid == BOSS and e.src.encounter == 2741 and e.src.by == "end"
+         and e.src.threshold == 2, dump(e.src))
+  e = start(one, { { 10480, 591 } }, 0); over(one, 591); tick(one, 0.1); flagged(one, B, false); settle(one)
+  assert(unknown(e), "trash after it, inside the warm-up: " .. dump(e.src))
+  -- a boss of two bodies (Sneed's Shredder, then Sneed): two bursts, each to its own corpse
+  local sn = game(); flagged(sn, C, true)
+  killed(sn, 2742, { SHRED, SNEED })
+  e1 = start(sn, { { 1937, 601 } }, 2742); tick(sn, 7)
+  e2 = start(sn, { { 273293, 602 }, { 253912, 603 } }, 2742)
+  assert(e1.src.kind == "other" and e1.src.encounter == 2742 and e2.src.kind == "other" and #e2.items == 2, dump(e1.src) .. dump(e2.src))
+  over(sn, 603, 40); over(sn, 602, 0.8); tick(sn, 0.17); flagged(sn, SNEED, false)
+  over(sn, 601, 0.7); settle(sn)
+  assert(e2.src.kind == "boss" and e2.src.npc == 643 and e2.src.guid == SNEED and e2.src.by == "flip" and e2.src.encounter == 2742, dump(e2.src))
+  assert(e1.src.kind == "boss" and e1.src.npc == 642 and e1.src.guid == SHRED and e1.src.by == "sole" and e1.src.encounter == 2742, dump(e1.src))
+  -- the encounter ended in front of us but none of its corpses is flagged (any more): another corpse is never taken
+  local none = game(); flagged(none, B, true)
+  killed(none, 2741, {})
+  e = start(none, { { 872, 610 } }, 2741); over(none, 610); tick(none, 0.1); flagged(none, B, false); settle(none)
+  assert(e.src.kind == "other" and not e.src.guid and e.src.encounter == 2741, dump(e.src))
+  fine(h, s, m, x, warm, full, b, k, n, old, mine, two, one, sn, none)
+  print("OK   rolls another player opened: the corpse by its loot flag (flip, sole), the boss by the loot history; never a guess")
+end
+
 -- 10) a client without the APIs: nothing breaks, nothing bogus is stored
 do
   local h = fresh({ noApi = true })
   h.cmd("track drops on"); h.cmd("track drops yes")
   for _, e in ipairs({ "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_SUCCEEDED", "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE",
                        "QUEST_TURNED_IN", "MERCHANT_SHOW", "MERCHANT_CLOSED", "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_START",
-                       "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
+                       "ENCOUNTER_END", "START_LOOT_ROLL", "UNIT_LOOT", "LOOT_ROLLS_COMPLETE", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                        "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                        "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
                        "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED" }) do

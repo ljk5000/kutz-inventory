@@ -79,7 +79,7 @@ Only explicitly tracked raids record events. Up to 20 raids and 2,000 events per
 While enabled, it records:
 
 - Loot windows by source (creature/boss, chest, fishing, gathering, skinning or opened item), including empty/coins-only corpses without coin amounts. Known sources are deduplicated; skinning counts separately. The window is read the moment the game has the loot, before auto-loot takes it.
-- Group-loot roll lists, including when another player opens the corpse, the loot threshold and boss encounter when identified. Your own system “You won” line adds a flag; other players' rolls/wins are not retained in observations.
+- Group-loot roll lists, including when another player opens the corpse, the loot threshold and boss encounter when identified. From 1.22.0 the corpse of a list another player opened is told from the game's own loot flags when they leave no doubt, and stays unknown otherwise. Your own system “You won” line adds a flag; other players' rolls/wins are not retained in observations.
 - NPC and object gossip or quest greetings, with your names replaced with `$N`. Amounts in gold, silver or copper and text that still contains roster or player target names are skipped.
 - Game-authored pages from world objects. The creator must be nil. Bag items, title-only reads and mail are excluded.
 - NPC speech and emotes with identifiable creature speakers. The recorder scrubs player names it recognizes. An unknown lowercase name or a name that matches an allowed word can still appear in dialogue or gossip. See the [consumer guidance](schema/README.md#game-text-3120).

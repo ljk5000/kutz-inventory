@@ -27,6 +27,9 @@
 --           it: only the items at or above src.threshold (the group's loot threshold, 0-7) are in it. Items a loot
 --           window of ours showed already are not recorded again, and the same corpse's roll list counts once.
 --           An item this player won by roll carries won = true (from the player's own "You won: [item]" loot line).
+--           1.22.0: a roll list no window named gets its corpse from the game's loot flags (UNIT_LOOT), src.by =
+--           "end"|"flip"|"sole" saying how (see "Which corpse a roll list came from" below), and its boss from the
+--           game's loot history. src.by stays in the saved table; the export does not carry it yet.
 --   quest   act = "accept"|"turnin", quest, npc|object (the giver / ender), rewards = { items, choices, chose } on turnin,
 --           text = { title, details, objectives } on accept and { title, progress, completion } on turnin: the quest's
 --           words as the game showed them, with this character's own name put back to "$N". Once per quest and act
@@ -428,6 +431,9 @@ local rolled = {}                               -- { at, id, item }: items that 
 local pendingRolls, rollToken = {}, 0
 local bossKill                                  -- { guid, npc, encounter, map, at, claimed }: the last boss killed
 local bossEncounter = {}                        -- creature GUID -> encounter id, for the bosses killed this session
+-- the corpses the game flags as holding loot for this player, and the roll bursts they may be the corpse of (below)
+local flag = { on = {}, n = 0, MAX = 400, WARM = 600, FLIP = 0.5, OWN = 1, from = -1000, windowAt = -1000, open = false,
+               bursts = {}, burst = nil, ends = {} }
 
 local function Fresh(list)                      -- the entries of the last RECENT seconds
     local now, out = Now(), {}
@@ -463,7 +469,167 @@ local function Windowed(src, byId)
                 e.src = RollSource(src.guid)
                 Opened(src.guid .. "|roll")
                 table.remove(sourceless, i)
+                for _, b in ipairs(flag.bursts) do if b.e == e then b.named = true end end
                 break
+            end
+        end
+    end
+end
+
+-- Which corpse a roll list came from when another player opened it (1.22.0). The game says which corpses hold loot
+-- this player may take (UNIT_LOOT: guid, hasLoot), and a corpse holding an item that is being rolled on stays flagged
+-- until its rolls end, whatever else was taken from it. Seen on Forever 1.60.1 in nine roll bursts of one dungeon run:
+-- the corpse lost its flag 34 to 270 ms after its last LOOT_ROLLS_COMPLETE when nothing else on it was this player's,
+-- and kept it when something was. So the corpse of a roll list nothing else named is among those flagged when its
+-- rolls began (or while the burst settled) and still flagged when the last of them ended (LOOT_ROLLS_COMPLETE, by the
+-- roll's lootHandle). src.by says how it was told:
+--   "end":  the game's loot history files the rolls under a boss encounter this session saw end, and one corpse alone
+--           got its flag right as that encounter ended and still has it (see flag.OfEncounter);
+--   "flip": exactly one of them lost its flag within FLIP seconds of the rolls' end, no loot window of ours near it;
+--   "sole": no flip, it was the only one flagged from the rolls' start to their end, none other lost its flag
+--           meanwhile for no known reason, and the game said it held loot (CanLootUnit) when they ended.
+-- Anything else: no corpse, as before (never a guess). So too when the corpse could be one this session never saw
+-- flagged: in the first WARM seconds of recording (a corpse from before a reload), after the list of flags
+-- overflowed, for a roll without a handle, or when the rolls' end never comes. Flags are kept per map.
+-- A corpse that loses its flag while the rolls run is no candidate. When that has no known reason (not our own loot
+-- window, not the end of another burst's rolls) it also rules "sole" out: it is not known whether passing on a roll
+-- takes the flag off the rolls' own corpse (seen so far: a Greed roll does not).
+-- One that loses it within FLIP seconds of the end of one roll while others of the burst still run says the burst
+-- is two corpses' rolls (opened within ROLL_SETTLE seconds of each other): no corpse then. One that loses it within
+-- FLIP seconds of the end of two bursts tells neither of them anything.
+-- Not known yet either: whether a chest's roll list flags the chest (then it is a candidate like a corpse) or nothing.
+function flag.Map() local _, _, _, _, _, _, _, id = Try(GetInstanceInfo); return Int(id) end
+
+function flag.Reset()                           -- recording starts, or the flags can no longer be trusted to be whole
+    flag.on, flag.n, flag.from, flag.bursts, flag.burst, flag.ends, flag.open = {}, 0, Now(), {}, nil, {}, false
+end
+
+function flag.Window(open) flag.windowAt, flag.open = Now(), open end   -- a loot window of ours opens or closes
+
+-- A flag lost now is our own doing: a window of ours is open (LOOT_CLOSED may never come: a minute at most) or just closed.
+function flag.Ours(now) return now - flag.windowAt <= flag.OWN or (flag.open and now - flag.windowAt <= 60) end
+
+function flag.Ended(encounter)                  -- ENCOUNTER_END, a kill
+    if encounter then flag.ends[encounter] = { at = Now(), map = flag.Map() } end
+end
+
+function flag.Changed(guid, has)                -- UNIT_LOOT
+    guid, has = Plain(guid), Plain(has)
+    if not FromGuid(guid) then return end
+    local now = Now()
+    if has == true then
+        if not flag.on[guid] then
+            if flag.n >= flag.MAX then flag.Reset() end
+            flag.on[guid], flag.n = { at = now, map = flag.Map() }, flag.n + 1
+        end
+        local b = flag.burst                    -- a corpse flagged while the burst settles may be the one just opened
+        if b and flag.on[guid].map == b.map then b.cands[guid] = true end
+    elseif has == false then
+        if flag.on[guid] then flag.on[guid], flag.n = nil, flag.n - 1 end
+        local ours, ended = flag.Ours(now), {}
+        for _, b in ipairs(flag.bursts) do      -- the bursts whose rolls just ended and whose corpse it may be
+            if not b.named and b.cands[guid] and b.doneAt and now - b.doneAt <= flag.FLIP then ended[#ended + 1] = b end
+        end
+        if not ours then                        -- true: more than one flip, or one for two bursts, which tells nothing
+            for _, b in ipairs(ended) do b.flipped = (#ended > 1 or b.flipped) and true or guid end
+        end
+        for _, b in ipairs(flag.bursts) do
+            if not b.named and b.cands[guid] and not b.doneAt then   -- its rolls still run: not their corpse
+                b.cands[guid] = nil
+                if not ours and #ended == 0 then                     -- and nothing explains it (see above)
+                    b.gone = true
+                    if b.endAt and now - b.endAt <= flag.FLIP then b.mixed = true end
+                end
+            end
+        end
+    end
+end
+
+function flag.Roll(handle)                      -- START_LOOT_ROLL: the burst this roll is in
+    local b, now = flag.burst, Now()
+    if not b then
+        b = { at = now, map = flag.Map(), cands = {}, handles = {}, left = 0, warm = now - flag.from < flag.WARM }
+        for guid, f in pairs(flag.on) do if f.map == b.map then b.cands[guid] = true end end
+        local keep = {}
+        for _, x in ipairs(flag.bursts) do if now - x.at <= RECENT then keep[#keep + 1] = x end end
+        keep[#keep + 1] = b
+        flag.bursts, flag.burst = keep, b
+    end
+    if not handle then b.blind = true
+    elseif not b.handles[handle] then b.handles[handle], b.left, b.doneAt = true, b.left + 1, nil end
+    return b
+end
+
+-- The corpses of a boss encounter get their loot flag when the encounter ends, whenever they died (seen on Forever
+-- 1.60.1: Rhahk'Zor 33 ms after ENCOUNTER_END, Sneed's Shredder and Sneed both 25 ms after theirs), and their rolls
+-- are filed under the encounter in the loot history. So a list the history files under an encounter this session saw
+-- end is from one of the burst's candidates that were flagged right then: these, or nil when that is not known.
+function flag.OfEncounter(b, enc)
+    local ended = enc and flag.ends[enc]
+    if not (b and ended and ended.map == b.map) then return nil end
+    local out = {}
+    for guid in pairs(b.cands) do
+        local f = flag.on[guid]
+        if f and f.at >= ended.at - 0.5 and f.at <= ended.at + 1.5 then out[#out + 1] = guid end
+    end
+    return out
+end
+
+-- The encounter the game's loot history files a roll under: its id, 0 for none ("Miscellaneous"), nil when the client
+-- has no history or does not list the roll.
+function flag.Encounter(handle)
+    local H = C_LootHistory
+    if not (handle and H and H.GetAllEncounterInfos and H.GetSortedDropsForEncounter) then return nil end
+    local infos = Plain(Try(H.GetAllEncounterInfos))
+    if type(infos) ~= "table" then return nil end
+    for i = 1, math.min(#infos, 60) do
+        local id = type(infos[i]) == "table" and Int(infos[i].encounterID)
+        local drops = id and Plain(Try(H.GetSortedDropsForEncounter, id))
+        if type(drops) == "table" then
+            for j = 1, math.min(#drops, 80) do
+                if type(drops[j]) == "table" and Plain(drops[j].lootListKey) == handle then return id end
+            end
+        end
+    end
+end
+
+function flag.Later(b)                          -- Resolve once a flip has had its time
+    if C_Timer and C_Timer.After then
+        C_Timer.After(flag.FLIP + 0.05, function() if b.doneAt then pcall(flag.Resolve, b, b.doneAt + flag.FLIP) end end)
+    else flag.Resolve(b, b.doneAt + flag.FLIP) end
+end
+
+function flag.Resolve(b, at)                    -- the burst's list (b.e) has no corpse and its rolls have ended
+    if b.named or b.blind or b.warm or not b.e or not b.doneAt then return end
+    if (at or Now()) - b.doneAt < flag.FLIP then return flag.Later(b) end   -- a flip may still come
+    b.named = true                              -- settled now, corpse or not
+    if b.mixed then return end
+    local guid, by = nil, nil
+    if b.flipped and b.flipped ~= true then guid, by = b.flipped, "flip"
+    elseif not b.flipped and not b.gone then
+        local n = 0
+        for g in pairs(b.cands) do n, guid = n + 1, g end
+        if n == 1 and b.had and b.had[guid] then by = "sole" else guid = nil end
+    end
+    if not guid or Opened(guid .. "|roll") then return end   -- that corpse's roll list is recorded already: not this one
+    local what, npc = FromGuid(guid)
+    if b.enc and what == "npc" then bossNpcs[npc], bossEncounter[guid] = true, bossEncounter[guid] or b.enc end
+    local threshold = b.e.src.threshold
+    b.e.src = RollSource(guid)
+    b.e.src.threshold, b.e.src.by = threshold, by
+    for i = #sourceless, 1, -1 do if sourceless[i].e == b.e then table.remove(sourceless, i) end end
+end
+
+function flag.Done(handle)                      -- LOOT_ROLLS_COMPLETE
+    handle = Int(Plain(handle))
+    if not handle then return end
+    for _, b in ipairs(flag.bursts) do
+        if b.handles[handle] then
+            b.handles[handle], b.left, b.endAt = nil, b.left - 1, Now()
+            if b.left == 0 then                 -- the last of them: which candidates hold loot right now (for "sole")
+                b.doneAt, b.had = b.endAt, {}
+                for guid in pairs(b.cands) do b.had[guid] = Plain(Try(CanLootUnit, guid)) == true end
+                flag.Later(b)
             end
         end
     end
@@ -542,8 +708,8 @@ end
 -- One burst of rolls, read ROLL_SETTLE seconds after its last roll started (so a window this player opened on the same
 -- corpse has been recorded first): one event per corpse, items merged by id like a window's.
 local function FlushRolls()
-    local list = pendingRolls
-    pendingRolls = {}
+    local list, burst = pendingRolls, flag.burst
+    pendingRolls, flag.burst = {}, nil
     if #list == 0 then return end
     local now = Now()
     recentWindows, rolled = Fresh(recentWindows), Fresh(rolled)
@@ -570,22 +736,49 @@ local function FlushRolls()
             else rest[#rest + 1] = r end
         end
         if #rest > 0 then
-            if not guid and bossKill and not bossKill.claimed and now - bossKill.at <= BOSS_LOOT and bossKill.map == Where().map then
+            local enc, by                       -- the encounter the game's loot history files these rolls under (0: none)
+            for _, r in ipairs(rest) do enc = enc or flag.Encounter(r.handle) end
+            -- the candidates flagged as that encounter ended: one is the corpse; several leave it to flip and sole
+            -- among them (a boss of two bodies; the kill found at ENCOUNTER_END may be the other one); none still
+            -- flagged leaves the flags nothing to say
+            local own = not guid and key == "" and flag.OfEncounter(burst, enc) or nil
+            if own and #own == 1 then
+                guid, by = own[1], "end"
+                if bossKill and bossKill.encounter == enc then bossKill.claimed = true end
+            elseif own and #own > 1 then
+                burst.cands, burst.warm = {}, false
+                for _, g in ipairs(own) do burst.cands[g] = true end
+            elseif not guid and bossKill and not bossKill.claimed and now - bossKill.at <= BOSS_LOOT and bossKill.map == Where().map
+               and (enc == nil or enc == bossKill.encounter) then
                 guid = bossKill.guid
             end
+            if own and #own == 0 and not guid then burst.named = true end
             if guid and bossKill and guid == bossKill.guid then bossKill.claimed = true end
+            enc = enc and enc > 0 and enc or nil
+            if guid and enc and not bossEncounter[guid] then
+                local what, npc = FromGuid(guid)
+                if what == "npc" then bossNpcs[npc], bossEncounter[guid] = true, enc end
+            end
             if not (guid and Opened(guid .. "|roll")) then
                 local e, byId = NewEvent("loot"), {}
                 e.src, e.items = RollSource(guid), {}
+                e.src.by = by
                 for _, r in ipairs(rest) do
                     if byId[r.id] then byId[r.id].n = byId[r.id].n + r.n
                     else byId[r.id] = { id = r.id, n = r.n, link = r.link }; e.items[#e.items + 1] = byId[r.id] end
                     rolled[#rolled + 1] = { at = now, id = r.id, item = byId[r.id] }
                 end
                 Add(e)
-                if not guid then sourceless = Fresh(sourceless); sourceless[#sourceless + 1] = { at = now, e = e } end
+                if not guid then
+                    sourceless = Fresh(sourceless); sourceless[#sourceless + 1] = { at = now, e = e }
+                    e.src.encounter = enc       -- the boss's list, its corpse not known (yet)
+                    if burst and key == "" and not burst.e then burst.e, burst.enc = e, enc end
+                end
             end
         end
+    end
+    if burst then
+        if burst.e then flag.Resolve(burst) else burst.named = true end   -- nothing left for the flags to name
     end
 end
 
@@ -2607,9 +2800,11 @@ for event, kind in pairs(line.kinds) do
     end
 end
 
-function handlers.LOOT_READY() qx.Spoil(); RecordLoot(true) end
-function handlers.LOOT_OPENED() qx.Spoil(); RecordLoot(false) end
-function handlers.LOOT_CLOSED() lootDone = false end
+function handlers.LOOT_READY() flag.Window(true); qx.Spoil(); RecordLoot(true) end
+function handlers.LOOT_OPENED() flag.Window(true); qx.Spoil(); RecordLoot(false) end
+function handlers.LOOT_CLOSED() flag.Window(false); lootDone = false end
+function handlers.UNIT_LOOT(guid, has) flag.Changed(guid, has) end
+function handlers.LOOT_ROLLS_COMPLETE(handle) flag.Done(handle) end
 local function Cast(unit, _, spellId)
     if unit ~= "player" then return end
     local kind = GatherKind(spellId)
@@ -2643,6 +2838,7 @@ function handlers.ENCOUNTER_START() Engaged(true) end
 function handlers.ENCOUNTER_END(encounter, _, _, _, success)   -- (id, name, difficulty, group size, success)
     encounter = Int(encounter, 1)
     if Plain(success) ~= 1 and Plain(success) ~= true then return end
+    flag.Ended(encounter)
     if not KilledBoss(encounter, false) then                   -- the corpse may not be "dead" yet this frame
         if C_Timer and C_Timer.After then C_Timer.After(1, function() pcall(KilledBoss, encounter, true) end)
         else KilledBoss(encounter, true) end
@@ -2655,7 +2851,9 @@ function handlers.START_LOOT_ROLL(rollID, _, ...)
     local id = ItemId(link)
     if not id then return end
     local _, _, count = Try(GetLootRollItemInfo, rollID)
-    pendingRolls[#pendingRolls + 1] = { id = id, n = Int(count, 1) or 1, link = ShortLink(link), guid = GuidIn(...) }
+    local handle = Int(Plain((...)))            -- lootHandle: the loot history's key for this roll, and what its end names
+    flag.Roll(handle)
+    pendingRolls[#pendingRolls + 1] = { id = id, n = Int(count, 1) or 1, link = ShortLink(link), guid = GuidIn(...), handle = handle }
     rollToken = rollToken + 1
     local token = rollToken
     if C_Timer and C_Timer.After then
@@ -2809,6 +3007,7 @@ function handlers.HEARTHSTONE_BOUND() Sighting("npc", true, { "inn" }) end
 local RECORDING = { "LOOT_READY", "LOOT_OPENED", "LOOT_CLOSED",
                     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "ENCOUNTER_START",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
+                    "UNIT_LOOT", "LOOT_ROLLS_COMPLETE",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN", "QUEST_REMOVED",
                     "QUEST_DATA_LOAD_RESULT", "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "PLAYER_REGEN_ENABLED",
                     "GOSSIP_SHOW", "QUEST_GREETING", "MAIL_SHOW", "MAIL_CLOSED",
@@ -2825,6 +3024,7 @@ local ev = CreateFrame("Frame")
 local hookedBags = false
 
 local function Enable()
+    flag.Reset()
     for _, e in ipairs(RECORDING) do
         local ok, err = pcall(ev.RegisterEvent, ev, e)   -- an event this client lacks is simply skipped
         if e == "QUEST_TURNED_IN" then haveTurnedInEvent = ok and err ~= false end
@@ -2851,6 +3051,7 @@ local function Disable()
     lootDone, detail, turnin, progress, merchantOpen = false, nil, nil, nil, false
     trainer.open, trainer.token = false, trainer.token + 1   -- a read still waiting is dropped
     pendingRolls, rollToken = {}, rollToken + 1          -- a burst still settling is dropped
+    flag.Reset()
     taxi.Reset()
     gameText.mail, gameText.book, gameText.bookUse = false, nil, nil
     qx.waiting = {}
