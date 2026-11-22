@@ -930,30 +930,15 @@ function qlog.Cut(s, max)
     return s:sub(1, i)
 end
 
-function qlog.ReplaceName(s, name)
-    local pat = name:gsub("(%W)", "%%%1")
-    if name:find("^%w") then pat = "%f[%w]" .. pat end
-    if name:find("%w$") then pat = pat .. "%f[%W]" end
-    return (s:gsub(pat, "$N"))
-end
-
-function qlog.Text(s, max, names)
+function qlog.Text(s, max)
     s = Plain(s)
     if type(s) ~= "string" then return nil end
     s = s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|A.-|a", "")
          :gsub("|H.-|h", ""):gsub("|h", ""):gsub("|n", " "):gsub("[\r\n]", " "):gsub("%c", "")
          :gsub("|", ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
     if s == "" then return nil end
-    for _, name in ipairs(names) do s = qlog.ReplaceName(s, name) end
     s = qlog.Cut(s, max):gsub("%s+$", "")
     return s ~= "" and s or nil
-end
-
-function qlog.OwnNames()
-    local given, surname = PlayerName()
-    if type(given) ~= "string" or given == "" then return {} end
-    if type(surname) == "string" and surname ~= "" then return { given .. " " .. surname, given, surname } end
-    return { given }
 end
 
 function qlog.Mode()
@@ -1019,7 +1004,7 @@ function qlog.Row(mode, L, i)
              lv = qlog.Int(level, 1), done = done, failed = failed }
 end
 
-function qlog.Objectives(L, id, logIndex, names)
+function qlog.Objectives(L, id, logIndex)
     local obj = {}
     local getObj = (type(L) == "table" and L.GetQuestObjectives)
                    or (type(C_QuestLog) == "table" and C_QuestLog.GetQuestObjectives) or nil
@@ -1029,7 +1014,7 @@ function qlog.Objectives(L, id, logIndex, names)
             for _, raw in ipairs(list) do
                 local r = Plain(raw)
                 if type(r) == "table" then
-                    local text = qlog.Text(r.text, 400, names)
+                    local text = qlog.Text(r.text, 400)
                     if text then
                         local otype = Plain(r.type)
                         if type(otype) ~= "string" or #otype > 40 or not otype:match("^[a-z][a-z0-9_%-]*$") then otype = nil end
@@ -1049,7 +1034,7 @@ function qlog.Objectives(L, id, logIndex, names)
         local n = math.min(qlog.Int(Try(GetNumQuestLeaderBoards, logIndex), 0) or 0, 40)
         for j = 1, n do
             local desc, otype, finished = Try(GetQuestLogLeaderBoard, j, logIndex)
-            local text = qlog.Text(desc, 400, names)
+            local text = qlog.Text(desc, 400)
             if text then
                 otype = Plain(otype)
                 if type(otype) ~= "string" or #otype > 40 or not otype:match("^[a-z][a-z0-9_%-]*$") then otype = nil end
@@ -1061,7 +1046,7 @@ function qlog.Objectives(L, id, logIndex, names)
     return obj
 end
 
-function qlog.Read(mode, L, names)
+function qlog.Read(mode, L)
     local shown, total = qlog.Counts(mode, L)
     if not shown then return nil end
     local quests, seen, header = {}, {}, nil
@@ -1069,9 +1054,9 @@ function qlog.Read(mode, L, names)
         local r = qlog.Row(mode, L, i)
         if r then
             if r.isHeader then
-                header = qlog.Text(r.title, 120, names)
+                header = qlog.Text(r.title, 120)
             elseif not r.isHidden and r.id and not seen[r.id] then
-                local title = qlog.Text(r.title, 200, names)
+                local title = qlog.Text(r.title, 200)
                 if title then
                     seen[r.id] = true
                     quests[#quests + 1] = {
@@ -1081,7 +1066,7 @@ function qlog.Read(mode, L, names)
                         header = header,
                         done = r.done and true or nil,
                         failed = r.failed and true or nil,
-                        obj = qlog.Objectives(L, r.id, i, names),
+                        obj = qlog.Objectives(L, r.id, i),
                     }
                     if #quests >= qlog.MAX_QUESTS then break end
                 end
@@ -1107,7 +1092,6 @@ local function ScanQuestLog()
         questsWaiting = true
         return false
     end
-    local names = qlog.OwnNames()
     readingQuests = true
     local opened = {}
     local ok, snap = pcall(function()
@@ -1123,7 +1107,7 @@ local function ScanQuestLog()
                 i = i + 1
             end
         end
-        return qlog.Read(mode, L, names)
+        return qlog.Read(mode, L)
     end)
     if next(opened) then
         local n = (qlog.Counts(mode, L)) or 0

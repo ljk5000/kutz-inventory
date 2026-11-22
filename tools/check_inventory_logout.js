@@ -204,7 +204,7 @@ do -- reputation: collapsed headers, one nested in another and one with no facti
  check(c.reputation[4].value==300,'and the next change is read again')
  C_Reputation=nil
 end
-do -- quest log: modern C_QuestLog, collapsed headers restored (also on error), combat defer, $N scrubbing, empty vs unloaded, legacy fallback
+do -- quest log: modern C_QuestLog, collapsed headers restored (also on error), combat defer, titles kept as shown (no $N: a name like Red is also a word), empty vs unloaded, legacy fallback
  local qrows = {
   { h = true, title = "Elwynn Forest", c = false },
   { id = 33, title = "|cffffff00Wolves for Tester|r", lv = 5, p = 1 },
@@ -255,8 +255,8 @@ do -- quest log: modern C_QuestLog, collapsed headers restored (also on error), 
  check(c.questLog and c.questLog.at and #c.questLog.quests == 3, 'quest log read after combat ends: ' .. tostring(c.questLog and #c.questLog.quests))
  check(qrows[4].c == true and not qrows[1].c, 'collapsed quest header put back as player left it')
  local q1, q2, q3 = c.questLog.quests[1], c.questLog.quests[2], c.questLog.quests[3]
- check(q1.id == 33 and q1.title == 'Wolves for $N' and q1.lv == 5 and q1.header == 'Elwynn Forest' and q1.done == nil and q1.failed == nil, 'first quest + $N + markup')
- check(#q1.obj == 2 and q1.obj[1].text == 'Tough Wolf Meat for $N: 3/8' and q1.obj[1].have == 3 and q1.obj[1].need == 8 and q1.obj[1].done == false and q1.obj[1].type == 'monster', 'objective 1')
+ check(q1.id == 33 and q1.title == 'Wolves for Tester' and q1.lv == 5 and q1.header == 'Elwynn Forest' and q1.done == nil and q1.failed == nil, 'first quest: markup gone, the name kept')
+ check(#q1.obj == 2 and q1.obj[1].text == 'Tough Wolf Meat for Tester: 3/8' and q1.obj[1].have == 3 and q1.obj[1].need == 8 and q1.obj[1].done == false and q1.obj[1].type == 'monster', 'objective 1')
  check(q1.obj[2].text == 'Return to Goldshire' and q1.obj[2].done == true and q1.obj[2].have == nil and q1.obj[2].need == nil and q1.obj[2].type == 'event', 'objective 2')
  check(q2.id == 463 and q2.header == 'Stormwind City' and q2.done == true and q2.failed == nil and #q2.obj == 0, 'collapsed complete quest')
  check(q3.id == 500 and q3.failed == true and q3.done == nil, 'failed quest')
@@ -288,7 +288,7 @@ do -- quest log: modern C_QuestLog, collapsed headers restored (also on error), 
  GetNumQuestLeaderBoards = function(idx) return idx == 2 and 1 or 0 end
  GetQuestLogLeaderBoard = function(j, idx) if idx == 2 and j == 1 then return "Skeletal Fighter slain: 8/8", "monster", true end end
  emit('QUEST_LOG_UPDATE'); advance(2)
- check(#c.questLog.quests == 1 and c.questLog.quests[1].id == 56 and c.questLog.quests[1].title == 'Night Watch for $N'
+ check(#c.questLog.quests == 1 and c.questLog.quests[1].id == 56 and c.questLog.quests[1].title == 'Night Watch for Tester'
        and c.questLog.quests[1].header == 'Duskwood' and c.questLog.quests[1].done == true
        and #c.questLog.quests[1].obj == 1 and c.questLog.quests[1].obj[1].done == true and c.questLog.quests[1].obj[1].type == 'monster',
        'legacy GetQuestLogTitle + GetQuestLogLeaderBoard fallback')
@@ -308,7 +308,7 @@ ${earlyUnload?"":"check(#c.recording.pending==0,'checkpoint must finish safe que
 check(c.legacyTree.trees['1187'].nodes['100']==${earlyUnload && mode === 'NativeExit' ? 'nil' : '7'},'queued talent checkpoint records Legacy while APIs ready')
 local goodLegacy=c.legacyTree
 local goodQuests=c.questLog
-check(goodQuests and goodQuests.quests[1].title=='${earlyUnload && mode === 'NativeExit' ? 'Night Watch for $N' : 'Night Watch Updated'}','logout checkpoint refreshes questLog while APIs ready')
+check(goodQuests and goodQuests.quests[1].title=='${earlyUnload && mode === 'NativeExit' ? 'Night Watch for Tester' : 'Night Watch Updated'}','logout checkpoint refreshes questLog while APIs ready')
 local goodMoney,goodXP,goodBags=c.money,c.xp,c.bags
 loaded,mapReady=false,false
 GetNumQuestLogEntries=function() return 0, 0 end

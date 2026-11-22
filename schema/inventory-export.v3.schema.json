@@ -3299,7 +3299,7 @@
                 "minLength": 1,
                 "maxLength": 200,
                 "pattern": "^[^|\\u0000-\\u001f\\u007f]+$",
-                "description": "Quest title as shown in the quest log (C_QuestLog.GetInfo.title, else GetQuestLogTitle), with UI markup removed and the character's own name replaced with $N."
+                "description": "Quest title as shown in the quest log (C_QuestLog.GetInfo.title, else GetQuestLogTitle), with UI markup removed."
               },
               "lv": {
                 "type": "integer",
@@ -3312,7 +3312,7 @@
                 "minLength": 1,
                 "maxLength": 120,
                 "pattern": "^[^|\\u0000-\\u001f\\u007f]+$",
-                "description": "Zone or category header the quest sits under in the quest log (the preceding isHeader row's title), with UI markup removed and the character's own name replaced with $N."
+                "description": "Zone or category header the quest sits under in the quest log (the preceding isHeader row's title), with UI markup removed."
               },
               "done": {
                 "const": true,
@@ -3339,7 +3339,7 @@
                       "minLength": 1,
                       "maxLength": 400,
                       "pattern": "^[^|\\u0000-\\u001f\\u007f]+$",
-                      "description": "Objective text as the client shows it (for example \"Kobold Vermin slain: 3/10\"), with UI markup removed and the character's own name replaced with $N."
+                      "description": "Objective text as the client shows it (for example \"Kobold Vermin slain: 3/10\"), with UI markup removed."
                     },
                     "have": {
                       "type": "integer",

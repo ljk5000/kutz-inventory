@@ -51,7 +51,7 @@ Records reflect what the client made available, with timestamps for freshness. B
 | Reputation, paragon/friendship data where available | Login and reputation changes; collapsed headers are temporarily expanded and restored |
 | Nonzero achievement statistics and total achievement points; from 1.21.0 also the values that changed on each of the last 30 days | After login; after combat at most once per ten minutes; manual scans |
 | PvP kills, honor, honor level, yesterday/session totals and played rated brackets | Login and PvP/honor changes |
-| Current quest log: quests in log order, zone/category headers, levels, complete/failed state and objective progress (character's own name replaced with `$N`) | After login, quest log changes (debounced), `/kinv scan` and safe pre-logout checkpoints; collapsed headers are expanded and restored out of combat |
+| Current quest log: quests in log order, zone/category headers, levels, complete/failed state and objective progress (as the game shows them) | After login, quest log changes (debounced), `/kinv scan` and safe pre-logout checkpoints; collapsed headers are expanded and restored out of combat |
 | Zone, subzone, map and coordinates outside instances; instance name/type in dungeons and raids | Movement stops, zone/loading events and safe checkpoints before leaving |
 | Hearthstone bind location | After loading screens and `HEARTHSTONE_BOUND` |
 | Save/checkpoint diagnostics and optional addon-monitor findings | Checkpoints/logout; monitor findings copied at logout |
