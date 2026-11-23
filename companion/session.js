@@ -46,13 +46,14 @@ async function createSession({ game, output, base, key, username = "", companion
     log: message => { if (/rejected/.test(message)) notify({ state: "watching", message }); },
   });
   // The game's quest cache (Cache/WDB/<locale>/questcache.wdb): quest facts the server sent the client, new or changed
-  // quests only, after the inventory and auction prices of the same run. It never fails or delays those: a site without
-  // the endpoint (404/405) is asked again only after the next start; other failures wait for the next run. Silent in the
+  // quests only, started after the inventory and auction prices of a run and never waited for, so it cannot fail or delay
+  // those. A site without the endpoint (404/405) or one that refuses it (401/403/426) is asked again only after the next
+  // start; other failures wait for the next run. Silent in the
   // tray (nothing there for the person to do). State beside the export, no key in it.
   const questCache = createQuestCacheSender(output + ".quest-cache-sent.json", doc => uploadQuestCache(base, key, doc, undefined, abort.signal), {
     context: questCacheContext({ origin: base, username }), companion: companionVersion, minGapMs: auctionGapMs, sleep,
   });
-  let questCacheTaken = sendQuestCache;
+  let questCacheTaken = sendQuestCache, questActive = null;
   let replay = true, deliveredFor = "";
   const fileSignature = files => files.map(f => { const s = fs.statSync(f); return `${f}:${s.mtimeMs}:${s.size}`; }).join("|");
   async function run() {
@@ -88,9 +89,12 @@ async function createSession({ game, output, base, key, username = "", companion
       deliveredFor = sig; refusedSig = "";
     }
     if (sendAuctions) await auctions.send(all.auctions);
-    if (questCacheTaken && !stopped) {
-      const sent = await questCache.send(game);
-      if (sent.unsupported) questCacheTaken = false;
+    // Started, not waited for: a slow, throttled or refusing quest-cache endpoint never holds up the next inventory
+    // upload. One send at a time; a run that finds one still going starts none.
+    if (questCacheTaken && !stopped && !questActive) {
+      questActive = questCache.send(game)
+        .then(sent => { if (sent.unsupported || sent.refused) questCacheTaken = false; }, () => {})
+        .then(() => { questActive = null; });
     }
   }
   const clearResume = () => { if (resumeTimer) clearTimeout(resumeTimer); resumeTimer = null; };
@@ -122,7 +126,7 @@ async function createSession({ game, output, base, key, username = "", companion
   return { async stop() {
     if (stopped) return;
     stopped = true; queue.stop(); clearInterval(timer); clearResume(); abort.abort();
-    await active.catch(() => {}); await release(); key = "";
+    await active.catch(() => {}); if (questActive) await questActive; await release(); key = "";
     report({ state: "paused" });
   } };
 }

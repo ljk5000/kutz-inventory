@@ -184,6 +184,6 @@ function questCacheDocuments(parsed, quests, { companion, perDocument = 500 } = 
 }
 
 module.exports = {
-  QUEST_CACHE_SCHEMA_VERSION, SUPPORTED_BUILDS, LAYOUT, FIXED_BYTES,
+  QUEST_CACHE_SCHEMA_VERSION, SUPPORTED_BUILDS, LAYOUT, FIXED_BYTES, MAX_FILE_BYTES,
   parseQuestCache, questCacheDocuments,
 };

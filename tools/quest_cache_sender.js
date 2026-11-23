@@ -10,20 +10,22 @@
 // another site or account, a new schema version, or a missing or unreadable state file sends everything again.
 //
 // Answers:
-//   - 2xx: the document's rows are recorded as sent.
+//   - 2xx with { ok: true }: the document's rows are recorded as sent. A 2xx with any other body records nothing.
 //   - 404 / 405: the site does not take quest caches yet. One log line, nothing recorded, nothing else sent this run;
 //     the caller stops asking for the rest of its session (no retry storm, no error state).
 //   - 400 / 413 / 422: this document will never be accepted. Its fingerprint (rows and Companion version) is recorded as
 //     rejected and it is not sent again; its rows are not recorded as sent, so a changed row or a newer Companion tries again.
-//   - 401 / 403 (the key, or cr0m's account refusals) and 426 (this Companion is too old): thrown, like the auction sender,
-//     so the caller treats them as it treats the same answers to the other uploads.
+//   - 401 / 403 (the key, or cr0m's account refusals) and 426 (this Companion is too old): one log line, nothing
+//     recorded, nothing else sent this run, and the caller is told (refused) so it stops asking for the rest of its
+//     session. Never thrown: the inventory and auction uploads report those answers themselves, and a refusal of this
+//     endpoint alone must not stop them.
 //   - 429 waits Retry-After (at most a minute) and tries again, up to 3 times.
 //   - Anything else (5xx, no connection, a pause, an invalid acknowledgement): one log line and nothing recorded; the next
 //     run (the next save, or the next start) tries again. It never fails the run.
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { parseQuestCache, questCacheDocuments, QUEST_CACHE_SCHEMA_VERSION } = require("./questcache");
+const { parseQuestCache, questCacheDocuments, QUEST_CACHE_SCHEMA_VERSION, MAX_FILE_BYTES } = require("./questcache");
 
 const STATE_VERSION = 1;
 const MAX_REJECTED = 32;
@@ -55,6 +57,7 @@ function findQuestCaches(game) {
 function readOnce(file) {
   try {
     const before = fs.statSync(file);
+    if (before.size > MAX_FILE_BYTES) return { reason: "the file is larger than any quest cache (" + before.size + " bytes)" };
     const bytes = fs.readFileSync(file);
     const after = fs.statSync(file);
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || bytes.length !== after.size) return { reason: "the game was writing it" };
@@ -64,7 +67,7 @@ function readOnce(file) {
   }
 }
 
-const passThrough = (error) => error && (error.status === 401 || error.status === 403 || error.status === 426 || error.resumable === true);
+const refusal = (error) => error && (error.status === 401 || error.status === 403 || error.status === 426 || error.resumable === true);
 
 function createQuestCacheSender(stateFile, post, { context, companion, perDocument = 500, minGapMs = 10500, sleep = realSleep, log = () => {} } = {}) {
   if (typeof context !== "string" || !context) throw new Error("The quest cache sender needs a context.");
@@ -101,7 +104,7 @@ function createQuestCacheSender(stateFile, post, { context, companion, perDocume
     // game: the game client folder (the one holding WTF, Interface and Cache).
     // -> { caches, sent, unchanged, skipped: [{ locale, reason }], rejected: [{ locale, reason }], unsupported, failed }
     async send(game) {
-      const out = { caches: 0, sent: 0, unchanged: 0, skipped: [], rejected: [], unsupported: false, failed: null };
+      const out = { caches: 0, sent: 0, unchanged: 0, skipped: [], rejected: [], unsupported: false, refused: false, failed: null };
       const caches = findQuestCaches(game);
       if (!caches.length) return out;
       const state = read();
@@ -137,7 +140,8 @@ function createQuestCacheSender(stateFile, post, { context, companion, perDocume
           const fingerprint = sha256(JSON.stringify([companion, doc.quests])).slice(0, 16);
           if (Object.hasOwn(set.rejected, fingerprint)) continue;
           try {
-            await paced(doc);
+            const ack = await paced(doc);
+            if (!(ack && ack.ok === true)) throw new Error("The site did not acknowledge the quest cache.");
           } catch (error) {
             const status = error && error.status;
             if (status === 404 || status === 405) {
@@ -155,8 +159,12 @@ function createQuestCacheSender(stateFile, post, { context, companion, perDocume
               save(); continue;
             }
             save();
-            if (passThrough(error)) throw error;
             out.failed = (error && error.message) || "upload failed";
+            if (refusal(error)) {                // never thrown: this endpoint's refusal must not stop the other uploads
+              out.refused = true;
+              log(`Quest cache ${parsed.locale} was refused (${out.failed}); nothing was recorded.`);
+              return out;
+            }
             log(`Quest cache ${parsed.locale} was not sent (${out.failed}); the next run tries again.`);
             return out;
           }

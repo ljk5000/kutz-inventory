@@ -548,6 +548,32 @@ test("a site without the quest-cache endpoint (404) is quiet: inventory still up
   await s2.stop();
 });
 
+test("a refused (401/403/426) or slow quest-cache endpoint never blocks or delays the inventory uploads", async t => {
+  for (const status of [401, 403, 426]) {
+    const f = await fixture(t); questCacheIn(f.game);
+    const { seen, base } = await serve(t, url => url === "/api/wow/quest-cache" ? [status, { error: "refused" }] : [200, { ok: true }]);
+    const events = [];
+    const session = await createSession({ ...f, base, key: "k", interval: 20, sendAuctions: false, report: e => events.push(e) });
+    t.after(() => session.stop());
+    await until(() => seen.some(s => s.url === "/api/wow/quest-cache"));
+    f.write("Again"); await until(() => seen.filter(s => s.url === "/api/wow/import").length === 2); await delay(300);
+    assert.equal(seen.filter(s => s.url === "/api/wow/quest-cache").length, 1, "asked again after " + status);
+    assert.equal(events.some(e => e.state === "attention" || e.state === "retrying"), false, status + ": " + JSON.stringify(events));
+    await session.stop();
+  }
+  // A quest-cache request that never answers: the next save's inventory still goes, and Pause still ends the session.
+  const f = await fixture(t); questCacheIn(f.game);
+  const inventory = []; let asked = 0;
+  const session = await createSession({ ...f, base: "https://cr0m.com", key: "k", interval: 20, sendAuctions: false, report: () => {},
+    upload: async (_b, _k, d) => { inventory.push(d); return { ok: true }; },
+    uploadQuestCache: (_b, _k, _d, _o, signal) => { asked++; return new Promise((_, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("Paused."), { retryable: false })), { once: true })); } });
+  t.after(() => session.stop());
+  await until(() => asked === 1);
+  f.write("Again"); await until(() => inventory.length === 2); await delay(100);
+  assert.equal(asked, 1, "a second quest-cache send started while one was going");
+  await session.stop();
+});
+
 test("sendQuestCache false never reads or sends the quest cache", async t => {
   const f = await fixture(t); questCacheIn(f.game);
   const quests = [], inventory = [];
