@@ -30,11 +30,20 @@ binary shows the client knows the function or event; what it answers must still 
 | `GetRewardMoney`, `GetRewardXP`, `GetNumQuestRewards`, `GetNumQuestChoices`, `GetQuestItemInfo`, `GetQuestItemLink` | yes | the offer and reward windows |
 | `C_QuestInfoSystem.GetQuestRewardSpells`, `GetQuestRewardSpellInfo` | yes | reward spells |
 | `GetRewardTitle` | yes | reward title |
+| `GetRewardSkillLineID`, `GetRewardSkillPoints` | yes | skill points a quest grants (return shape undocumented: see below) |
+| `C_QuestInfoSystem.GetQuestRewardCurrencies` | yes | reward currencies (`QuestRewardCurrencyInfo`: `currencyID`, `totalRewardAmount`) |
+| `QUEST_ITEM_UPDATE`, `QUEST_FINISHED` | not checked in the binary | re-reading the open window when a reward item loads (an event the client lacks is skipped) |
 | `GetMaxPlayerLevel`, `UnitLevel`, `IsXPUserDisabled` | yes (already used) | level and cap |
 | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `FACTION_STANDING_INCREASED`, `C_Reputation.GetFactionDataByID/ByIndex` | yes | kill reputation |
 | `UnitHealthMax`, `UnitPowerMax`, `UnitPowerType` | yes | creature health and power |
 | `GetLootSourceInfo`, `C_Item.GetItemIDByGUID`, `UNIT_SPELLCAST_SUCCEEDED`, spell 13262 Disenchant | yes | disenchanting |
 | `GetNumRewardSpells`, `GetQuestLogRewardSpell`, `GetNumRewardCurrencies`, `GetQuestCurrencyInfo` | **no** | not used |
+
+**`GetRewardSkillPoints` return shape.** Neither the local API annotations nor the binary say what it returns. The
+addon takes its first return as the points when that is a plain integer; when the first return is a string it takes
+the third (Blizzard's default quest UI reads the call as `skillName, skillIcon, skillPoints`; recalled from that UI,
+not from a file on this machine). `GetRewardSkillLineID`'s first return is taken as the line id. The checklist prints
+both.
 | Spells 31252 Prospecting, 51005 Milling | **not in this client's spell table** | dropped: the game version has neither |
 | `GetNumQuestLogRewardFactions`, `GetQuestLogRewardFactionInfo` | yes, but see below | not used in 1.23.0 |
 
@@ -50,9 +59,14 @@ print-out shows what the calls answer.
 quest window showed it to this character. Existing keys keep their meaning.
 
 When: on accept, read at `QUEST_DETAIL` (the offer window) and written to the accept event only when that window
-showed this very quest (`GetQuestID()` equals the accepted quest; the same rule as `startItem`). On turn-in, read at
-`QUEST_COMPLETE` (the reward window). A quest accepted without an offer window (shared, auto-accepted) has no
-`rewards`. One read per window; nothing per frame.
+showed this very quest (`GetQuestID()` equals the accepted quest; the same rule as `startItem`) and listed at least one
+reward (`cap` alone is a fact about the character, not a reward: no `rewards` then). On turn-in, read at
+`QUEST_COMPLETE` (the reward window), always written as before. A quest accepted without an offer window (shared,
+auto-accepted) has no `rewards`. One read per window, plus (added in the build) a re-read of the open window when the
+client says it has loaded a reward item (`QUEST_ITEM_UPDATE`): an item the client had not cached has no link yet and
+would be skipped. At most 4 re-reads a window, only while the window is open (`QUEST_FINISHED` and `QUEST_PROGRESS`
+close it) and shows the same quest, and a re-read is kept only when it lists at least as many items. Nothing per
+frame.
 
 ```text
 rewards?: {
@@ -68,7 +82,18 @@ rewards?: {
   title?:   label 1-80          GetRewardTitle(): a title the quest grants
   cap?:     true                the character was at the level cap at the read (UnitLevel("player") >= GetMaxPlayerLevel(),
                                 both known). A capped character's money can include converted XP, and xp is absent
+  skill?:   { line: integer >= 1, pts: integer 1-1000 }   GetRewardSkillLineID() and GetRewardSkillPoints(): skill points
+                                the quest grants in that skill line; left out unless both are usable
+  cur?:     [ 1-8 of { id: integer >= 1, n: integer >= 1 } ]   reward currencies, sorted by id, each once:
+                                C_QuestInfoSystem.GetQuestRewardCurrencies(quest), each row's currencyID and
+                                totalRewardAmount (the first row of an id wins; the lowest 8 ids)
 }
+
+Every key but items is left out when the client function is missing, errors, answers a secret value, or answers 0 or
+something out of range. A client with none of the new calls records exactly what it did before (items, choices, chose
+on a turn-in; on an accept, rewards only when items or choices were listed). Saved and exported in the same shape;
+the exporter drops each new key alone when it fails its check. In the schema, rewards.required is now ["items"] and
+an if/then keeps choices required on a turn-in and refuses choices and chose on an accept.
 ```
 
 **The exact key for quest money is `rewards.money`** (in `observations.events[]`, `type: "quest"`). It is named for what
@@ -146,7 +171,9 @@ from the bag item the cast was aimed at. **No item id, no event**: such a window
 
 1. Allow `rewards.money` through the money-key filter for quest events only, and amend the "gold is never shared"
    rule to say a quest's listed reward is a game fact, not a person's gold.
-2. Read `rewards` on accept events; read `choose`, `money`, `xp`, `spells`, `title`, `cap` on both acts.
+2. Read `rewards` on accept events; read `choose`, `money`, `xp`, `spells`, `title`, `cap`, `skill` and `cur` on both
+   acts. `rewards.choices` is absent on an accept (schema: `rewards` requires only `items` now; a turn-in still has
+   `choices`).
 3. Accept the `killrep` event type and the `disenchant` source kind (with `src.item`).
 4. Read `hp` and `pw` from `npcs[]`; show a value only when two installs agree.
 5. Validate against export schema 3.16.0.
@@ -162,7 +189,10 @@ from the bag item the cast was aimed at. **No item id, no event**: such a window
 ## In-game checklist (nothing here has been run in the game yet)
 
 - Open a quest offer with money and a choice of items: `/dump GetRewardMoney(), GetRewardXP(), GetNumQuestRewards(),
-  GetNumQuestChoices(), GetRewardTitle()` and `/dump C_QuestInfoSystem.GetQuestRewardSpells(GetQuestID())`. Do the
+  GetNumQuestChoices(), GetRewardTitle()` and `/dump C_QuestInfoSystem.GetQuestRewardSpells(GetQuestID())`. In an
+  offer window of a quest that grants skill points (or any offer window), `/dump GetRewardSkillLineID()` and `/dump
+  GetRewardSkillPoints()`: which return is the line id and which the points? And `/dump
+  C_QuestInfoSystem.GetQuestRewardCurrencies(GetQuestID())`. Do the
   numbers match the window in the offer window as well as in the reward window? Accept, `/reload`, and find
   `rewards` on the accept event; turn in and find it on the turn-in. "Friend of the Library" should show both
   amulets under `choose`, `money = 125` and `xp = 160` at a level that gets the full reward.

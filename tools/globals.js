@@ -40,6 +40,7 @@ const known = new Set(("_G ipairs pairs pcall select type unpack tostring tonumb
  "UnitIsTapDenied GetItemCount GetNumQuestLogEntries GetQuestLogTitle " +   // Observations.lua objective credit
  "ExpandQuestHeader CollapseQuestHeader GetNumQuestLeaderBoards GetQuestLogLeaderBoard " +   // KutzInventory.lua quest log
  "C_QuestLog GetRewardXP IsXPUserDisabled GetGossipText GetGreetingText ItemTextGetCreator ItemTextGetMaterial ItemTextGetItem ItemTextGetPage ItemTextGetText ItemTextHasNextPage " +   // Observations.lua quest extras
+ "GetRewardMoney GetRewardTitle GetRewardSkillLineID GetRewardSkillPoints C_QuestInfoSystem " +   // Observations.lua quest rewards (1.23.0); never GetMoney
  "SetTrainerServiceTypeFilter UnitArmor UnitAttackPower UnitAttackSpeed UnitDamage UnitDefenseSkill UnitHonor UnitHonorLevel UnitHonorMax UnitRangedAttackPower UnitRangedDamage UnitResistance UnitSex UnitSpellHaste UnitStat").split(" "));
 const odd = [...all].filter(g => !known.has(g)).sort();
 console.log("\nglobals used that are NOT in the expected WoW/Lua list (check for typos):\n  " + (odd.join(", ") || "(none)"));

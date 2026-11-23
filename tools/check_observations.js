@@ -904,7 +904,7 @@ do
   print("OK   without GetLootSourceInfo: the dead target (via = target, with its level); a live target is not used")
 end
 
--- 6) quests: accept with the giver, turn-in with ender, rewards, choices and the chosen one; never the money
+-- 6) quests: accept with the giver, turn-in with ender, rewards, choices and the chosen one; never QUEST_TURNED_IN's money
 do
   local h = fresh(); h.on()
   h.s.units.questnpc = { guid = "Creature-0-4170-0-1234-11811-000012AAAB" }
@@ -921,10 +921,11 @@ do
   assert(dump(ev[1]):find("act=accept") and ev[1].quest == 7787 and ev[1].npc == 11811 and not ev[1].rewards, dump(ev[1]))
   assert(ev[2].quest == 7788 and not ev[2].npc and not ev[2].object, "no player giver: " .. dump(ev[2]))
   assert(ev[3].act == "turnin" and ev[3].object == 2059 and
-         dump(ev[3].rewards) == "{choices={1=19018,2=19019},chose=19019,items={1={id=19019,link=|cffffffff|Hitem:19019|h[X]|h|r,n=1}}}",
+         dump(ev[3].rewards) == "{cap=true,choices={1=19018,2=19019},choose={1={id=19018,link=|cffffffff|Hitem:19018|h[X]|h|r,n=1},"
+         .. "2={id=19019,link=|cffffffff|Hitem:19019|h[X]|h|r,n=1}},chose=19019,items={1={id=19019,link=|cffffffff|Hitem:19019|h[X]|h|r,n=1}}}",
          dump(ev[3]))
   assert(not dump(h.db()):find("123456") and not dump(h.db()):find("6600"), "quest money and xp are never kept")
-  print("OK   quests: accept with the giver, turn-in with the ender, item rewards, choices and the chosen item; no money")
+  print("OK   quests: accept with the giver, turn-in with the ender, item rewards, choices and the chosen item; never QUEST_TURNED_IN's money")
 end
 
 -- 6b) quest text: the words of the quest windows, the character's own name back to "$N", once per quest and act
@@ -979,8 +980,8 @@ do
   print("OK   quest text: title, details, objectives, progress and completion as shown, own name as $N, once per quest and act, capped")
 end
 
--- 6c) quest extras: lv, group, freq, timed and startItem on accept; xp and rep (changes only) on turn-in; never money or a
---     standing. questy() adds the quest log, XP, combat and reputation APIs:
+-- 6c) quest extras: lv, group, freq, timed and startItem on accept; xp and rep (changes only) on turn-in; never the player's
+--     money or a standing. questy() adds the quest log, XP, combat and reputation APIs:
 --     s.log[questID] = info (with index); s.timeAllowed[questID]; s.level / s.maxLevel; s.xp; s.xpOff; s.combat;
 --     s.factions = { { id, st, header, rep (a header with its own standing), collapsed, parent, major } } in list order, a
 --     collapsed header hiding its children; s.expands counts ExpandFactionHeader; bomb = true: reading that row errors
@@ -998,7 +999,8 @@ do
     G.GetRewardXP = function() return s.xp end
     G.IsXPUserDisabled = function() return s.xpOff or false end
     G.InCombatLockdown = function() return s.combat or false end
-    G.GetRewardMoney = function() s.moneyRead = true; return 123456 end
+    G.GetRewardMoney = function() return 4321 end           -- the quest's listed money: rewards.money since 1.23.0
+    G.GetMoney = function() s.moneyRead = true; return 123456 end   -- the player's own money: never read
     local function shown()
       local out, hidden = {}, {}
       for _, f in ipairs(s.factions) do
@@ -1117,7 +1119,8 @@ do
   assert(dump(e.rep) == "{1={d=62,f=47},2={d=250,f=72},3={d=-25,f=87},4={d=10,f=1834}}", dump(e.rep))
   local all = dump(t.db())
   assert(not all:find("9250") and not all:find("3062") and not all:find("6525") and not all:find("123456") and not t.s.moneyRead,
-         "never a standing, never the money")
+         "never a standing, never the player's money or QUEST_TURNED_IN's")
+  assert(e.rewards.money == 4321, "the quest's listed money: " .. dump(e.rewards))
   assert(not e.lv and not e.startItem and not t.db().lastError, dump(e))
 
   -- rep: nothing when anything else could have moved it, or the numbers are odd
@@ -1241,7 +1244,212 @@ do
   local wx = questy(); wx.s.quest, wx.s.xp = 7787, 6600
   wx.event("QUEST_COMPLETE"); wx.event("QUEST_TURNED_IN", 7790)
   assert(not quest(wx, 7790).xp, "a turn-in of another quest than the window's")
-  print("OK   quest extras: lv, group, freq, timed, startItem on accept; xp under the cap; rep changes only, dropped when unsure; no money")
+  print("OK   quest extras: lv, group, freq, timed, startItem on accept; xp under the cap; rep changes only, dropped when unsure; never the player's money")
+end
+
+-- 6d) quest rewards as the quest window listed them (1.23.0), on accept (the offer window, QUEST_DETAIL) and on turn-in
+--     (the reward window, QUEST_COMPLETE): choose, money (the quest's GetRewardMoney, never the player's GetMoney), xp,
+--     spells, title, cap, skill and cur; each key only when the client answered it plainly. rw() adds the reward APIs:
+--     s.money, s.xp, s.title, s.spells, s.cur, s.skillLine, s.skillPts (a table: GetRewardSkillPoints' returns), s.level
+do
+  local SECRET = {}
+  local LINK_A, LINK_B = "|cffffffff|Hitem:18471|h[X]|h|r", "|cffffffff|Hitem:18472|h[X]|h|r"
+  local function rw(opts)
+    opts = opts or {}
+    opts.globals = opts.globals or {}
+    opts.globals.issecretvalue = function(v) return v == SECRET end
+    local h = fresh(opts); h.on()
+    local s, G = h.s, h.G
+    s.level, s.maxLevel, s.getMoney = 30, 60, 0
+    G.UnitLevel = function(u) if u == "player" then return s.level end; local x = s.units[u]; return x and x.level end
+    G.GetRewardMoney = function() return s.money end
+    G.GetMoney = function() s.getMoney = s.getMoney + 1; return 98765432 end   -- the player's own money: never read
+    G.GetRewardXP = function() return s.xp end
+    G.GetRewardTitle = function() return s.title end
+    G.GetRewardSkillLineID = function() return s.skillLine end
+    G.GetRewardSkillPoints = function() if s.skillPts then return table.unpack(s.skillPts) end end
+    G.C_QuestInfoSystem = { GetQuestRewardSpells = function(q) assert(q == s.quest, "the window's quest"); return s.spells end,
+                            GetQuestRewardCurrencies = function(q) assert(q == s.quest, "the window's quest"); return s.cur end }
+    h.s.units.questnpc = { guid = "Creature-0-4170-0-1234-11811-000012AAAB" }
+    return h
+  end
+  local function lastOf(h, act) local e = h.events(); for i = #e, 1, -1 do if e[i].act == act then return e[i] end end end
+  local function fine(h) assert(not h.db().lastError and h.s.getMoney == 0, tostring(h.db().lastError) .. " GetMoney " .. h.s.getMoney) end
+
+  -- "Friend of the Library": nothing always given, two amulets to choose from, 125 copper and 160 XP
+  local h = rw()
+  h.s.quest, h.s.choices, h.s.money, h.s.xp = 1032, { item(18471, 1), item(18472, 1) }, 125, 160
+  h.event("QUEST_DETAIL"); h.event("QUEST_ACCEPTED", 1032)
+  local a = lastOf(h, "accept")
+  assert(dump(a.rewards) == "{choose={1={id=18471,link=" .. LINK_A .. ",n=1},2={id=18472,link=" .. LINK_B .. ",n=1}},items={},money=125,xp=160}",
+         "the offer's rewards on the accept: " .. dump(a.rewards))
+  h.s.money = 130                               -- what the reward window says is what the turn-in keeps
+  h.event("QUEST_COMPLETE"); h.hooks.GetQuestReward(2); h.event("QUEST_TURNED_IN", 1032, 160, 123456)
+  local t = lastOf(h, "turnin")
+  assert(dump(t.rewards) == "{choices={1=18471,2=18472},choose={1={id=18471,link=" .. LINK_A .. ",n=1},2={id=18472,link=" .. LINK_B
+         .. ",n=1}},chose=18472,items={},money=130,xp=160}" and t.xp == 160, "the reward window's rewards on the turn-in: " .. dump(t))
+  assert(not dump(h.db()):find("123456") and not dump(h.db()):find("98765432"), "never QUEST_TURNED_IN's money, never the player's")
+  fine(h)
+
+  -- spells, title, skill and currencies: cleaned, sorted, each once, capped
+  local x = rw()
+  x.s.quest, x.s.rewards = 7000, { item(2589, 5) }
+  x.s.spells = { 300, 100, 300, 0, -1, 2.5, "x", SECRET }
+  x.s.title = "  Champion of the Example" .. string.char(1) .. " "
+  x.s.skillLine, x.s.skillPts = 197, { 5 }
+  x.s.cur = { { currencyID = 61, totalRewardAmount = 3 }, { currencyID = 42, totalRewardAmount = 10 }, { currencyID = 61, totalRewardAmount = 9 },
+              { currencyID = 7, totalRewardAmount = 0 }, { currencyID = 0, totalRewardAmount = 2 }, "junk", SECRET,
+              { currencyID = SECRET, totalRewardAmount = 2 }, { currencyID = 8, totalRewardAmount = 1.5 } }
+  x.event("QUEST_DETAIL"); x.event("QUEST_ACCEPTED", 7000)
+  a = lastOf(x, "accept")
+  assert(dump(a.rewards) == "{cur={1={id=42,n=10},2={id=61,n=3}},items={1={id=2589,link=|cffffffff|Hitem:2589|h[X]|h|r,n=5}},"
+         .. "skill={line=197,pts=5},spells={1=100,2=300},title=Champion of the Example}", dump(a.rewards))
+  fine(x)
+  local function one(setup)
+    local y = rw(); y.s.quest = 7001; y.s.money = 1
+    setup(y)
+    y.event("QUEST_DETAIL"); y.event("QUEST_ACCEPTED", 7001)
+    fine(y)
+    return lastOf(y, "accept").rewards
+  end
+  local many = one(function(y) y.s.spells = { 9, 8, 7, 6, 5, 4, 3, 2, 1, 10 } end)
+  assert(dump(many.spells) == "{1=1,2=2,3=3,4=4,5=5,6=6,7=7,8=8}", "the lowest 8 spells: " .. dump(many.spells))
+  many = one(function(y) y.s.cur = {}; for i = 9, 1, -1 do y.s.cur[#y.s.cur + 1] = { currencyID = i, totalRewardAmount = 1 } end end)
+  assert(#many.cur == 8 and many.cur[1].id == 1 and many.cur[8].id == 8, "the lowest 8 currencies: " .. dump(many.cur))
+  -- GetRewardSkillPoints in the shape the default UI reads it (skillName, skillIcon, skillPoints)
+  assert(dump(one(function(y) y.s.skillLine, y.s.skillPts = 197, { "Tailoring", 136249, 5 } end).skill) == "{line=197,pts=5}", "name first")
+  for what, setup in pairs({
+    ["no line"] = function(y) y.s.skillPts = { 5 } end,
+    ["no points"] = function(y) y.s.skillLine = 197 end,
+    ["0 points"] = function(y) y.s.skillLine, y.s.skillPts = 197, { 0 } end,
+    ["1001 points"] = function(y) y.s.skillLine, y.s.skillPts = 197, { 1001 } end,
+    ["a secret line"] = function(y) y.s.skillLine, y.s.skillPts = SECRET, { 5 } end,
+    ["secret points"] = function(y) y.s.skillLine, y.s.skillPts = 197, { SECRET } end,
+    ["a name and no points"] = function(y) y.s.skillLine, y.s.skillPts = 197, { "Tailoring", 136249 } end,
+    ["the calls missing"] = function(y) y.G.GetRewardSkillLineID, y.G.GetRewardSkillPoints = nil, nil end,
+    ["the calls failing"] = function(y) y.G.GetRewardSkillLineID = function() error("no") end; y.s.skillPts = { 5 } end }) do
+    assert(not one(setup).skill, what)
+  end
+  for what, setup in pairs({
+    ["a title with markup"] = function(y) y.s.title = "|cffff0000Red|r" end,
+    ["an empty title"] = function(y) y.s.title = "   " end,
+    ["a secret title"] = function(y) y.s.title = SECRET end,
+    ["a number for a title"] = function(y) y.s.title = 5 end }) do
+    assert(not one(setup).title, what)
+  end
+  assert(#one(function(y) y.s.title = string.rep("é", 50) end).title == 80, "a title is cut to 80 bytes on a whole character")
+  -- money: only a plain whole number of copper from 1 to 2^31-1
+  for what, setup in pairs({
+    ["0"] = function(y) y.s.money = 0 end, ["negative"] = function(y) y.s.money = -5 end, ["a fraction"] = function(y) y.s.money = 2.5 end,
+    ["too much"] = function(y) y.s.money = 2147483648 end, ["a secret"] = function(y) y.s.money = SECRET end,
+    ["a string"] = function(y) y.s.money = "125" end, ["the call missing"] = function(y) y.G.GetRewardMoney = nil end,
+    ["the call failing"] = function(y) y.G.GetRewardMoney = function() error("no") end end }) do
+    local r = one(function(y) setup(y); y.s.xp = 10 end)
+    assert(r and r.xp == 10 and not r.money, "money " .. what .. ": " .. dump(r))
+  end
+  assert(one(function(y) y.s.money = 2147483647 end).money == 2147483647, "the largest money")
+  -- the spells and currencies calls missing, failing or answering junk: left out, nothing else lost
+  for what, setup in pairs({
+    ["no C_QuestInfoSystem"] = function(y) y.G.C_QuestInfoSystem = nil end,
+    ["the calls failing"] = function(y) y.G.C_QuestInfoSystem = { GetQuestRewardSpells = function() error("no") end,
+                                                                   GetQuestRewardCurrencies = function() error("no") end } end,
+    ["junk"] = function(y) y.s.spells, y.s.cur = "1,2", 7 end,
+    ["secret lists"] = function(y) y.s.spells, y.s.cur = SECRET, SECRET end,
+    ["a list that errors when read"] = function(y)
+      local bomb = setmetatable({}, { __index = function() error("unreadable") end })
+      y.s.spells, y.s.cur = bomb, bomb end }) do
+    local r = one(setup)
+    assert(r and r.money == 1 and not r.spells and not r.cur, what .. ": " .. dump(r))
+  end
+
+  -- the level cap: cap = true, no xp; cap alone lists nothing, so an accept with nothing else carries no rewards
+  local c = rw(); c.s.level = 60; c.s.quest, c.s.money, c.s.xp = 7100, 600, 900
+  c.event("QUEST_DETAIL"); c.event("QUEST_ACCEPTED", 7100)
+  assert(dump(lastOf(c, "accept").rewards) == "{cap=true,items={},money=600}", dump(lastOf(c, "accept").rewards))
+  c.s.quest, c.s.money = 7101, 0
+  c.event("QUEST_DETAIL"); c.event("QUEST_ACCEPTED", 7101)
+  assert(not lastOf(c, "accept").rewards, "a window that lists nothing: no rewards on the accept")
+  c.event("QUEST_COMPLETE"); c.event("QUEST_TURNED_IN", 7101)
+  assert(dump(lastOf(c, "turnin").rewards) == "{cap=true,choices={},items={}}", "a turn-in keeps its rewards as before: " .. dump(lastOf(c, "turnin")))
+  c.G.GetMaxPlayerLevel = nil; c.s.quest, c.s.money = 7102, 5
+  c.event("QUEST_DETAIL"); c.event("QUEST_ACCEPTED", 7102)
+  assert(dump(lastOf(c, "accept").rewards) == "{items={},money=5}", "the cap unknown: no cap, no xp " .. dump(lastOf(c, "accept").rewards))
+  fine(c)
+
+  -- only the window of this very quest: another quest's offer, no offer at all, a window without a quest id
+  local o = rw(); o.s.quest, o.s.money = 7200, 50
+  o.event("QUEST_DETAIL"); o.event("QUEST_ACCEPTED", 7201)
+  assert(lastOf(o, "accept").quest == 7201 and not lastOf(o, "accept").rewards, "another quest's offer window")
+  o.event("QUEST_ACCEPTED", 7202)
+  assert(not lastOf(o, "accept").rewards, "accepted without an offer window (shared, auto-accepted)")
+  o.s.quest = nil; o.event("QUEST_DETAIL"); o.s.quest = 7203; o.event("QUEST_ACCEPTED", 7203)
+  assert(not lastOf(o, "accept").rewards, "an offer window that did not name its quest")
+  o.event("QUEST_DETAIL"); o.event("QUEST_ACCEPTED", 7203); o.event("QUEST_ACCEPTED", 7203)
+  local ev = o.events()
+  assert(ev[#ev - 1].rewards and not ev[#ev].rewards, "one offer window, one accept with its rewards")
+  fine(o)
+
+  -- a reward item the client had not loaded: QUEST_ITEM_UPDATE reads the open window again
+  local u = rw(); u.s.quest, u.s.money = 7300, 40
+  u.s.choices = { { n = 1 }, item(18472, 1) }   -- the first amulet has no link yet
+  u.event("QUEST_DETAIL")
+  u.s.choices[1] = item(18471, 1); u.event("QUEST_ITEM_UPDATE")
+  u.event("QUEST_ACCEPTED", 7300)
+  assert(#lastOf(u, "accept").rewards.choose == 2, "the item loaded while the offer was open: " .. dump(lastOf(u, "accept").rewards))
+  u.s.quest = 7301; u.s.choices = { { n = 1 } }; u.s.money = 0
+  u.event("QUEST_DETAIL"); u.s.choices[1] = item(18471, 1); u.event("QUEST_ITEM_UPDATE"); u.event("QUEST_ACCEPTED", 7301)
+  assert(dump(lastOf(u, "accept").rewards.choose) == "{1={id=18471,link=" .. LINK_A .. ",n=1}}", "a window that listed nothing until then")
+  u.s.quest = 7302; u.s.choices = { { n = 1 } }; u.s.money = 7
+  u.event("QUEST_DETAIL"); u.event("QUEST_FINISHED"); u.s.choices[1] = item(18471, 1); u.event("QUEST_ITEM_UPDATE"); u.event("QUEST_ACCEPTED", 7302)
+  assert(not lastOf(u, "accept").rewards.choose, "the window closed: not read again")
+  u.s.quest = 7303; u.s.choices = { item(18471, 1), item(18472, 1) }
+  u.event("QUEST_DETAIL"); u.s.choices = { item(18471, 1) }; u.event("QUEST_ITEM_UPDATE"); u.s.quest = 7304; u.event("QUEST_ITEM_UPDATE")
+  u.s.quest = 7303; u.event("QUEST_ACCEPTED", 7303)
+  assert(#lastOf(u, "accept").rewards.choose == 2, "a read that lists less, or another quest's window, changes nothing")
+  local reads = 0
+  u.G.GetNumQuestChoices = function() reads = reads + 1; return #u.s.choices end
+  u.s.quest = 7305; u.event("QUEST_DETAIL")
+  for _ = 1, 10 do u.event("QUEST_ITEM_UPDATE") end
+  assert(reads == 5, "the window read once and again at most 4 times: " .. reads)
+  -- on the reward window the choice slots follow the new read, so the chosen item is the right one
+  local r = rw(); r.s.quest = 7400
+  r.s.choices = { { n = 1 }, item(18472, 1) }
+  r.event("QUEST_COMPLETE"); r.s.choices[1] = item(18471, 1); r.event("QUEST_ITEM_UPDATE")
+  r.hooks.GetQuestReward(1); r.event("QUEST_TURNED_IN", 7400)
+  local tr = lastOf(r, "turnin").rewards
+  assert(tr.chose == 18471 and dump(tr.choices) == "{1=18471,2=18472}" and #tr.choose == 2, dump(tr))
+  -- a slot that never gets an id is not chosen; more than 10 choices keep their slots for the hook, choose keeps 10
+  r.s.quest = 7401; r.s.choices = { { n = 1 } }
+  for i = 1, 11 do r.s.choices[i + 1] = item(30000 + i, 1) end
+  r.event("QUEST_COMPLETE"); r.hooks.GetQuestReward(1); r.event("QUEST_TURNED_IN", 7401)
+  tr = lastOf(r, "turnin").rewards
+  assert(not tr.chose and #tr.choices == 11 and #tr.choose == 10, dump(tr))
+  r.s.quest = 7402; r.event("QUEST_COMPLETE"); r.hooks.GetQuestReward(12); r.event("QUEST_TURNED_IN", 7402)
+  assert(lastOf(r, "turnin").rewards.chose == 30011, "the 12th slot's item")
+  fine(u); fine(r)
+
+  -- a client without any of the new calls records rewards as before: items, choices and chose on the turn-in, none on accept
+  local old = fresh(); old.on(); old.s.quest = 7500; old.s.choices = { item(18471, 1) }
+  old.G.GetMaxPlayerLevel = nil
+  old.event("QUEST_DETAIL"); old.event("QUEST_ACCEPTED", 7500)
+  assert(dump(lastOf(old, "accept").rewards) == "{choose={1={id=18471,link=" .. LINK_A .. ",n=1}},items={}}", "the items alone still list")
+  old.s.choices = {}; old.s.quest = 7501
+  old.event("QUEST_DETAIL"); old.event("QUEST_ACCEPTED", 7501)
+  assert(not lastOf(old, "accept").rewards, "nothing listed")
+  old.event("QUEST_COMPLETE"); old.event("QUEST_TURNED_IN", 7501)
+  assert(dump(lastOf(old, "turnin").rewards) == "{choices={},items={}}", dump(lastOf(old, "turnin").rewards))
+  assert(not old.db().lastError, tostring(old.db().lastError))
+  -- every reward call failing at once: the quest events are still recorded, without rewards, and nothing is raised
+  local bad = rw()
+  for _, k in ipairs({ "GetNumQuestRewards", "GetNumQuestChoices", "GetRewardMoney", "GetRewardXP", "GetRewardTitle", "GetRewardSkillLineID",
+                       "GetRewardSkillPoints", "GetMaxPlayerLevel" }) do bad.G[k] = function() error("no") end end
+  bad.G.C_QuestInfoSystem = setmetatable({}, { __index = function() error("no") end })
+  bad.s.quest = 7600; bad.event("QUEST_DETAIL"); bad.event("QUEST_ACCEPTED", 7600)
+  bad.event("QUEST_COMPLETE"); bad.event("QUEST_TURNED_IN", 7600)
+  assert(lastOf(bad, "accept") and not lastOf(bad, "accept").rewards and dump(lastOf(bad, "turnin").rewards) == "{choices={},items={}}",
+         dump(bad.events()))
+  fine(bad)
+  print("OK   quest rewards as listed: choose, money (the quest's, never the player's), xp, spells, title, cap, skill, cur; on accept only for its own offer window; re-read when an item loads")
 end
 
 -- 7) vendors: items, stack, price, extended costs, limited stock; the same stock once an hour
@@ -1609,7 +1817,7 @@ do
   end
   local n = fresh({ noSurname = true }); n.on(); n.s.units.target = { guid = MOB, dead = true }; n.loot({ COIN })
   assert(dump(n.events()[1].who) == "{class=4,faction=Alliance,level=60,name=Tester}", "no surname: " .. dump(n.events()[1].who))
-  print("OK   no coin amounts, quest money, player GUIDs, realms or other players' names; only this character's own name")
+  print("OK   no coin amounts, QUEST_TURNED_IN's money, player GUIDs, realms or other players' names; only this character's own name")
 end
 
 -- 8b) item links are cut to the item's own colour, id and name (no level, spec or enchant parts); odd links are dropped
@@ -1961,7 +2169,7 @@ end
 do
   local h = fresh({ noApi = true })
   h.cmd("track drops on"); h.cmd("track drops yes")
-  for _, e in ipairs({ "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_SUCCEEDED", "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE",
+  for _, e in ipairs({ "LOOT_OPENED", "LOOT_CLOSED", "UNIT_SPELLCAST_SUCCEEDED", "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_ITEM_UPDATE", "QUEST_FINISHED",
                        "QUEST_TURNED_IN", "MERCHANT_SHOW", "MERCHANT_CLOSED", "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_START",
                        "ENCOUNTER_END", "START_LOOT_ROLL", "UNIT_LOOT", "LOOT_ROLLS_COMPLETE", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                        "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",

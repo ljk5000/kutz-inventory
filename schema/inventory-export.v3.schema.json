@@ -1404,7 +1404,7 @@
     },
     "observations": {
       "type": "object",
-      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Since 3.12.0 also game-authored gossip, quest greetings readable pages and lines spoken by identified NPCs. Since 3.13.0 also hunter tames and objective credit (which creature, item or object counted for a quest objective; never the progress numbers). Never gold (no coin loot, quest money or player money), player chat, mail or guild data. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know. Since 3.15.0 also items (each item's own facts, read once per item and game build), kills (with killsInstall: creatures killed per day) and, on npcs, inst (creatures seen inside instances); events may be empty when any of them is present.",
+      "description": "Since 3.2.0, only when drop tracking recorded something (absent otherwise, and in 3.0.0 / 3.1.0). The events drop tracking recorded (loot, quest, vendor and, since 3.9.0, trainer; since 3.11.0, taxi and flight) (/kinv track; opt-in until KutzInventory 1.13.0, on by default since, /kinv track drops off stops it), from the saved table KutzInventoryObsDB. Since 3.12.0 also game-authored gossip, quest greetings readable pages and lines spoken by identified NPCs. Since 3.13.0 also hunter tames and objective credit (which creature, item or object counted for a quest objective; never the progress numbers). Never the player's gold (no coin loot, no player money), player chat, mail or guild data; since 3.16.0 a quest event's rewards.money is the quest's listed money reward, a fact about the quest, not anyone's gold. Contains character identity and location history; consumers must apply their own access controls. Since 3.10.0 also npcs (with install): a cumulative per-install summary of the creatures the player looked at; a later export from the same install replaces it. Readers must ignore event types and fields they do not know. Since 3.15.0 also items (each item's own facts, read once per item and game build), kills (with killsInstall: creatures killed per day) and, on npcs, inst (creatures seen inside instances); events may be empty when any of them is present.",
       "required": [
         "v",
         "addon",
@@ -1783,7 +1783,7 @@
         },
         {
           "type": "object",
-          "description": "A quest was accepted or turned in. rewards only on turnin; never the money. text (since 3.6.0) is the quest's own words. Since 3.11.0: lv, group, freq, timed and startItem only on accept; xp and rep only on turnin; each is left out when the client did not say or the addon was not sure. Since 3.12.0: obj and poi only on accept.",
+          "description": "A quest was accepted or turned in. rewards on turnin; since 3.16.0 also on accept (the offer window's), with rewards.money the quest's own listed reward, never the player's money. text (since 3.6.0) is the quest's own words. Since 3.11.0: lv, group, freq, timed and startItem only on accept; xp and rep only on turnin; each is left out when the client did not say or the addon was not sure. Since 3.12.0: obj and poi only on accept.",
           "required": [
             "id",
             "t",
@@ -1847,15 +1847,66 @@
             "rewards": {
               "type": "object",
               "required": [
-                "items",
-                "choices"
+                "items"
               ],
               "additionalProperties": false,
+              "description": "The quest's reward as the quest window listed it to the recording character: on turnin the reward window (QUEST_COMPLETE); since 3.16.0 (KutzInventory 1.23.0) also on accept, from the offer window (QUEST_DETAIL), only when that window showed this very quest and listed something. A quest accepted without an offer window (shared, auto-accepted) has none. Each key since 3.16.0 is left out when the window did not list it or the client did not answer plainly: absent means not recorded, never none. choices is always there on a turnin and never on an accept.",
               "properties": {
                 "items": {
                   "type": "array",
                   "maxItems": 2000,
                   "description": "The item rewards everyone gets.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "n"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
+                        "description": "Item ID."
+                      },
+                      "n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
+                        "description": "Stack count."
+                      },
+                      "link": {
+                        "$ref": "#/$defs/observationLink"
+                      },
+                      "suffix": {
+                        "type": "integer",
+                        "minimum": -2147483647,
+                        "maximum": 2147483647,
+                        "not": {
+                          "const": 0
+                        },
+                        "description": "Since 3.15.0: this copy's random suffix id, from its link (\"of the Bear\"). The item is still id: a suffixed copy is a variant of that one item, never an item of its own. Absent for a copy with no suffix id."
+                      },
+                      "bonus": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "description": "Since 3.15.0: this copy's bonus ids, from its link, ascending. On the Forever client a random suffix is a bonus id (6560 with bonus [12729] is \"Soldier's Shield of Intellect\"). Same rule as suffix: one item, a variant."
+                      }
+                    }
+                  }
+                },
+                "choose": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 10,
+                  "description": "Since 3.16.0, both acts: the choose-one item rewards (GetNumQuestChoices, GetQuestItemInfo / GetQuestItemLink \"choice\"), in the window's order, with their counts; the first 10. On a turnin choices still lists the same items' ids, for older readers.",
                   "items": {
                     "type": "object",
                     "required": [
@@ -1910,13 +1961,98 @@
                     "minimum": 1,
                     "maximum": 2147483647
                   },
-                  "description": "The choice rewards' item IDs."
+                  "description": "Turnin only: the choice rewards' item IDs (the same items as choose, kept for older readers)."
                 },
                 "chose": {
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 2147483647,
-                  "description": "The picked choice reward's item ID."
+                  "description": "Turnin only: the picked choice reward's item ID."
+                },
+                "money": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "Since 3.16.0, both acts: the quest's money reward in copper as the window listed it (GetRewardMoney() with that quest's window open). A fact about the quest at this character's level, the same for every character of that level: never the player's money (GetMoney is never called) and never QUEST_TURNED_IN's money argument. At the level cap (see cap) it can include XP converted to money. Absent when 0 or unreadable."
+                },
+                "xp": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647,
+                  "description": "Since 3.16.0, both acts: the XP the window listed (GetRewardXP), under the same rules as a turnin's top-level xp (under the level cap, XP not turned off, never 0). On a turnin the top-level xp stays too."
+                },
+                "spells": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "description": "Since 3.16.0, both acts: the reward spell ids (C_QuestInfoSystem.GetQuestRewardSpells(quest)), ascending, each once; the lowest 8."
+                },
+                "title": {
+                  "type": "string",
+                  "$ref": "#/$defs/observationLabel",
+                  "maxLength": 80,
+                  "description": "Since 3.16.0, both acts: the title the quest grants (GetRewardTitle), as the game named it."
+                },
+                "cap": {
+                  "const": true,
+                  "description": "Since 3.16.0, both acts: the character was at the level cap when the window was read (UnitLevel(\"player\") >= GetMaxPlayerLevel(), both known). Its money can then include converted XP, and xp is absent. Absent when under the cap or unknown. On its own it lists no reward."
+                },
+                "skill": {
+                  "type": "object",
+                  "required": [
+                    "line",
+                    "pts"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Since 3.16.0, both acts: skill points the quest grants in one skill line (GetRewardSkillLineID, GetRewardSkillPoints). Only when both are known.",
+                  "properties": {
+                    "line": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647,
+                      "description": "The skill line id."
+                    },
+                    "pts": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000,
+                      "description": "The skill points granted."
+                    }
+                  }
+                },
+                "cur": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "description": "Since 3.16.0, both acts: the reward currencies (C_QuestInfoSystem.GetQuestRewardCurrencies(quest): currencyID and totalRewardAmount), sorted by id, each id once; the lowest 8.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "n"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
+                        "description": "The currency id."
+                      },
+                      "n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
+                        "description": "The amount (totalRewardAmount)."
+                      }
+                    }
+                  }
                 }
               }
             },
@@ -2125,7 +2261,14 @@
               "then": {
                 "properties": {
                   "xp": false,
-                  "rep": false
+                  "rep": false,
+                  "rewards": {
+                    "type": "object",
+                    "properties": {
+                      "choices": false,
+                      "chose": false
+                    }
+                  }
                 }
               }
             },
@@ -2146,7 +2289,16 @@
                   "startItem": false,
                   "obj": false,
                   "poi": false,
-                  "rows": false
+                  "rows": false,
+                  "rewards": {
+                    "type": "object",
+                    "required": [
+                      "choices"
+                    ],
+                    "properties": {
+                      "choices": true
+                    }
+                  }
                 }
               }
             }

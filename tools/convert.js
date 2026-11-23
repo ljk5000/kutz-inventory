@@ -630,6 +630,46 @@ function obsQuestRep(list) {
   }
   return out.sort((a, b) => a.f - b.f);
 }
+// Quest rewards as the quest window listed them (3.16.0, KutzInventory 1.23.0), on both acts. items (and on a turn-in
+// choices and chose) as before; the new keys each dropped alone when they fail their check: choose (the choose-one items,
+// 1-10), money (the quest's listed copper, GetRewardMoney: never the player's money), xp, spells (ids, each once,
+// ascending, 1-8), title (a label of at most 80), cap (true), skill ({ line, pts 1-1000 }, both or neither) and cur
+// (currencies { id, n }, each id once, by id, 1-8). An accept's rewards that list nothing (cap alone) are left out.
+const OBS_REWARDS = { choose: 10, spells: 8, cur: 8, pts: 1000, title: 80 };
+function obsQuestRewards(r, act) {
+  if (!r || typeof r !== "object" || Array.isArray(r)) return undefined;
+  const items = obsItems(r.items), chooseList = obsItems(r.choose).slice(0, OBS_REWARDS.choose);
+  const spellSet = [...new Set(asList(r.spells).filter((v) => obsInt(v, 1) !== undefined))].sort((a, b) => a - b);
+  const skillLine = r.skill && typeof r.skill === "object" ? obsInt(r.skill.line, 1) : undefined;
+  const skillPts = r.skill && typeof r.skill === "object" ? obsInt(r.skill.pts, 1) : undefined;
+  const cur = [], curSeen = new Set();
+  for (const c of asList(r.cur)) {
+    const id = c && typeof c === "object" ? obsInt(c.id, 1) : undefined, n = id !== undefined ? obsInt(c.n, 1) : undefined;
+    if (id === undefined || n === undefined || curSeen.has(id)) continue;
+    curSeen.add(id);
+    cur.push({ id, n });
+  }
+  cur.sort((a, b) => a.id - b.id);
+  const title = obsLabel(r.title, OBS_REWARDS.title);
+  const extra = pick({
+    choose: chooseList.length ? chooseList : undefined,
+    money: obsInt(r.money, 1),
+    xp: obsInt(r.xp, 1),
+    spells: spellSet.length ? spellSet.slice(0, OBS_REWARDS.spells) : undefined,
+    title: title?.trim() ? title : undefined,
+    cap: r.cap === true ? true : undefined,
+    skill: skillLine !== undefined && skillPts !== undefined && skillPts <= OBS_REWARDS.pts ? { line: skillLine, pts: skillPts } : undefined,
+    cur: cur.length ? cur.slice(0, OBS_REWARDS.cur) : undefined,
+  });
+  if (act === "turnin") {
+    const choices = asList(r.choices).filter((c) => obsInt(c, 1) !== undefined).slice(0, 20);
+    const { choose, ...rest } = extra;
+    return { items, ...(choose ? { choose } : {}), choices, ...(choices.includes(r.chose) ? { chose: r.chose } : {}), ...rest };
+  }
+  const { cap, ...listed } = extra;
+  if (!items.length && !Object.keys(listed).length) return undefined;
+  return { items, ...extra };
+}
 function obsCost(list) {
   return asList(list).map((c) => {
     if (!c || typeof c !== "object") return {};
@@ -706,11 +746,10 @@ function observationEvent(e) {
     }
     const text = obsQuestText(e.text, e.act);
     if (text) out.text = text;
-    if (e.act === "turnin" && e.rewards && typeof e.rewards === "object") {
-      const choices = asList(e.rewards.choices).filter((c) => obsInt(c, 1) !== undefined).slice(0, 20);
-      out.rewards = { items: obsItems(e.rewards.items), choices, ...(choices.includes(e.rewards.chose) ? { chose: e.rewards.chose } : {}) };
-    }
-    if (e.act === "turnin") Object.assign(out, pick({ xp: obsInt(e.xp, 1), rep: obsQuestRep(e.rep) }));   // never the money
+    const rewards = obsQuestRewards(e.rewards, e.act);
+    if (rewards) out.rewards = rewards;
+    // the top-level xp stays the turn-in's; never QUEST_TURNED_IN's money or the player's money (rewards.money is the quest's)
+    if (e.act === "turnin") Object.assign(out, pick({ xp: obsInt(e.xp, 1), rep: obsQuestRep(e.rep) }));
     return out;
   }
   if (e.type === "vendor") {
