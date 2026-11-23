@@ -154,7 +154,7 @@ KutzInventoryDB = {
 -- (1.20.0), a drop with a random suffix (1.21.0: the link names the suffix, the item is still 6560), and one broken
 -- event the exporter leaves out.
 KutzInventoryObsDB = {
-  v = 1, on = true, agreed = true, noted = true, addon = "1.21.0", prefix = "k1f9c2", n = 31,
+  v = 1, on = true, agreed = true, noted = true, addon = "1.23.0", prefix = "k1f9c2", n = 33,
   events = {
     { id = "k1f9c2-000017", t = 1762905600, b = "1.60.1.70888", type = "loot",
       src = { kind = "boss", npc = 11502, guid = "Creature-0-4170-409-1234-11502-000012ABCD", via = "slot" },
@@ -176,11 +176,16 @@ KutzInventoryObsDB = {
       obj = { { t = "item", n = 1, text = "Carry the crate to the far camp." },
               { t = "monster", n = 4, text = "Clear the road of raiders." } }, rows = 2,
       poi = { { map = 1449, x = 50.12, y = 33.01 }, { map = 1449, x = 42.19, y = 67.84 } },
+      -- 1.23.0: the rewards the offer window listed (money: the quest's listed copper, never the player's money)
+      rewards = { items = {}, choose = { { id = 19018, n = 1, link = "|cffa335ee|Hitem:19018|h[Made-up Amulet]|h|r" },
+                                         { id = 19019, n = 1, link = "|cffa335ee|Hitem:19019|h[Made-up Charm]|h|r" } },
+                  money = 125, xp = 6600, spells = { 7322 }, skill = { line = 197, pts = 5 }, cur = { { id = 4225, n = 1 } } },
       text = { title = "A Made-up Errand", details = "You look capable, $N.\n\nTake this crate to the far camp.",
                objectives = "Carry the crate to the far camp." } },
     { id = "k1f9c2-000021", t = 1762905700, b = "1.60.1.70888", type = "quest", act = "turnin", quest = 7787, npc = 11811,
       where = { map = 1, uiMap = 1449, x = 0.5012, y = 0.3301 }, who = { level = 58, class = 4, faction = "Alliance" },
-      rewards = { items = { { id = 19019, n = 1 } }, choices = { 19018, 19019 }, chose = 19019 },
+      rewards = { items = { { id = 19019, n = 1 } }, choices = { 19018, 19019 }, chose = 19019,
+                  choose = { { id = 19018, n = 1 }, { id = 19019, n = 1 } }, money = 125, xp = 6600 },
       xp = 6600, rep = { { f = 47, d = 62 }, { f = 72, d = 250 } },
       text = { title = "A Made-up Errand", progress = "Is the crate here, $N?", completion = "The camp thanks you, $N." } },
     { id = "k1f9c2-000022", t = 1762905800, b = "1.60.1.70888", type = "vendor", npc = 12944, rx = 5,
@@ -221,6 +226,13 @@ KutzInventoryObsDB = {
       src = { kind = "mob", npc = 2958, guid = "Creature-0-4170-0-1234-2958-000012ABCF", level = 14, via = "slot" },
       where = { map = 0, uiMap = 1429, x = 0.4219, y = 0.6784 }, who = { level = 14, class = 4, faction = "Alliance" },
       items = { { id = 6560, n = 1, link = "|cff1eff00|Hitem:6560::::::::::::1:12729|h[Soldier's Shield of Intellect]|h|r" } } },
+    -- 1.23.0: the reputation one kill gave, tied to the one creature that died around the message
+    { id = "k1f9c2-000032", t = 1762906650, b = "1.60.1.70888", type = "killrep", npc = 2958, lv = 14, f = 72, d = 5,
+      where = { map = 0, uiMap = 1429, x = 0.4219, y = 0.6784 }, who = { level = 14, class = 4, faction = "Alliance" } },
+    -- 1.23.0: a Disenchant's window: the destroyed item, nothing else about the source
+    { id = "k1f9c2-000033", t = 1762906700, b = "1.60.1.70888", type = "loot", src = { kind = "disenchant", item = 6560 },
+      where = { map = 0, uiMap = 1453, x = 0.6312, y = 0.7208 }, who = { level = 14, class = 4, faction = "Alliance" },
+      items = { { id = 10940, n = 2, link = "|cffffffff|Hitem:10940|h[Strange Dust]|h|r" } } },
     { id = "not an id", t = 1762905900, type = "loot", src = { kind = "mob" }, items = {} },
   },
   -- the npcs summary (1.17.0): a beast with its attack speed (spds is the addon's own tally, not exported), a vendor with
@@ -228,14 +240,18 @@ KutzInventoryObsDB = {
   -- cell key that is not a map square (both left out by the exporter)
   npcs = {
     [525] = { name = "Made-up Wolf", lv = { 10, 12 }, cls = "normal", ct = 1, fam = 1, rxA = 2, spd = 200, spds = { [200] = 3, [150] = 1 }, day = 20404,
-              cells = { ["1429:41:65"] = 2, ["1429:42:65"] = 1 } },
+              cells = { ["1429:41:65"] = 2, ["1429:42:65"] = 1 },
+              -- 1.23.0: health and power per level (c is the addon's own tally, not exported); this wolf has no power
+              hp = { { lv = 10, v = 156, c = { [156] = 2 } }, { lv = 12, v = 198, c = { [198] = 3, [190] = 1 } } } },
     [1346] = { name = "Made-up Tailor", lv = { 30, 30 }, cls = "normal", ct = 7, rxA = 5, sub = "Made-up Tailoring Supplies",
                svc = { vendor = true, repair = true, gossip = true }, day = 20405,
                cells = { ["1453:63:72"] = 4, ["nowhere"] = 9 } },
     [6109] = { name = "Made-up Dragon", boss = true, cls = "worldboss", ct = 2, rxA = 1, day = 20403 },
     [2958] = { lv = { 14, 14 }, cls = "normal" },
     -- 1.21.0: seen inside an instance, where there is no position: the instance map and difficulty, no cells
-    [11671] = { name = "Made-up Hound", lv = { 62, 62 }, cls = "elite", ct = 1, rxA = 2, day = 20404, inst = { ["409:9"] = 3 } },
+    [11671] = { name = "Made-up Hound", lv = { 62, 62 }, cls = "elite", ct = 1, rxA = 2, day = 20404, inst = { ["409:9"] = 3 },
+                -- 1.23.0: inside an instance the difficulty goes with each reading
+                hp = { { lv = 62, diff = 9, v = 42000, c = { [42000] = 2 } } }, pw = { { lv = 62, diff = 9, t = 0, v = 9800, c = { ["0:9800"] = 2 } } } },
   },
   -- item facts (1.21.0): read once per item and game build from a link made of the item id alone. d is the last day
   -- the entry's exported content changed; m is the last day it was met (saved-only for pruning, never exported). f is

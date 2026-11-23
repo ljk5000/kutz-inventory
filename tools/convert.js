@@ -53,7 +53,14 @@ const SCHEMA_VERSION = "2.1.0";
 // Unix seconds, up to 35 quests in log order with up to 12 objectives each and progress counts, character's own name
 // replaced with "$N"; absent = not recorded, quests: [] = recorded and empty; format 2 never carries it). Unlearned
 // recipes saved once per account file export exactly as before.
-const SCHEMA_VERSION_3 = "3.15.0";
+// 3.16.0 (KutzInventory 1.23.0), all optional and additive: quest events' rewards as the quest window listed them, on
+// accept and turn-in (choose, money: the quest's own listed copper from GetRewardMoney, never the player's money, xp,
+// spells, title, cap, skill, cur; rewards.choices only on a turn-in), killrep events (the reputation one kill gave: npc,
+// lv, faction id and the signed change, never a standing), npcs[].hp and pw (a creature's health and power per level
+// and, inside an instance, difficulty), the loot source kind "disenchant" (src = { kind, item }: the destroyed item), and
+// characters[].legacyChallenges (each Legacy challenge as the character sees it: completed, who of the owner's
+// characters earned it and when, criteria progress; private; format 2 never carries it). observations.v stays 1.
+const SCHEMA_VERSION_3 = "3.16.0";
 const FORMATS = { 2: SCHEMA_VERSION, 3: SCHEMA_VERSION_3 };
 // schema/auction-scan.schema.json: one document per auction house, sent to POST /api/wow/auctions.
 // 1.1.0 adds scope ("all" = the whole AH: an item missing is not listed) and items[].c / .s (item class / subclass).

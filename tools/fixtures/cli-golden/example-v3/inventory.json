@@ -1,5 +1,5 @@
 {
- "schemaVersion": "3.15.0",
+ "schemaVersion": "3.16.0",
  "exportedAt": "<exportedAt>",
  "uiHealth": null,
  "prices": {
@@ -650,7 +650,7 @@
  ],
  "observations": {
   "v": 1,
-  "addon": "1.21.0",
+  "addon": "1.23.0",
   "install": "k1f9c2",
   "events": [
    {
@@ -796,6 +796,36 @@
      "title": "A Made-up Errand",
      "details": "You look capable, $N.\n\nTake this crate to the far camp.",
      "objectives": "Carry the crate to the far camp."
+    },
+    "rewards": {
+     "items": [],
+     "choose": [
+      {
+       "id": 19018,
+       "n": 1,
+       "link": "|cffa335ee|Hitem:19018|h[Made-up Amulet]|h|r"
+      },
+      {
+       "id": 19019,
+       "n": 1,
+       "link": "|cffa335ee|Hitem:19019|h[Made-up Charm]|h|r"
+      }
+     ],
+     "money": 125,
+     "xp": 6600,
+     "spells": [
+      7322
+     ],
+     "skill": {
+      "line": 197,
+      "pts": 5
+     },
+     "cur": [
+      {
+       "id": 4225,
+       "n": 1
+      }
+     ]
     }
    },
    {
@@ -829,11 +859,23 @@
        "n": 1
       }
      ],
+     "choose": [
+      {
+       "id": 19018,
+       "n": 1
+      },
+      {
+       "id": 19019,
+       "n": 1
+      }
+     ],
      "choices": [
       19018,
       19019
      ],
-     "chose": 19019
+     "chose": 19019,
+     "money": 125,
+     "xp": 6600
     },
     "xp": 6600,
     "rep": [
@@ -1159,6 +1201,55 @@
       ]
      }
     ]
+   },
+   {
+    "id": "k1f9c2-000032",
+    "t": 1762906650,
+    "b": "1.60.1.70888",
+    "type": "killrep",
+    "npc": 2958,
+    "lv": 14,
+    "f": 72,
+    "d": 5,
+    "where": {
+     "map": 0,
+     "uiMap": 1429,
+     "x": 0.4219,
+     "y": 0.6784
+    },
+    "who": {
+     "level": 14,
+     "class": 4,
+     "faction": "Alliance"
+    }
+   },
+   {
+    "id": "k1f9c2-000033",
+    "t": 1762906700,
+    "b": "1.60.1.70888",
+    "type": "loot",
+    "src": {
+     "kind": "disenchant",
+     "item": 6560
+    },
+    "where": {
+     "map": 0,
+     "uiMap": 1453,
+     "x": 0.6312,
+     "y": 0.7208
+    },
+    "who": {
+     "level": 14,
+     "class": 4,
+     "faction": "Alliance"
+    },
+    "items": [
+     {
+      "id": 10940,
+      "n": 2,
+      "link": "|cffffffff|Hitem:10940|h[Strange Dust]|h|r"
+     }
+    ]
    }
   ],
   "npcs": [
@@ -1174,6 +1265,16 @@
     "fam": 1,
     "rxA": 2,
     "spd": 200,
+    "hp": [
+     {
+      "lv": 10,
+      "v": 156
+     },
+     {
+      "lv": 12,
+      "v": 198
+     }
+    ],
     "day": 20404,
     "cells": [
      [
@@ -1234,6 +1335,21 @@
     "cls": "elite",
     "ct": 1,
     "rxA": 2,
+    "hp": [
+     {
+      "lv": 62,
+      "v": 42000,
+      "diff": 9
+     }
+    ],
+    "pw": [
+     {
+      "lv": 62,
+      "t": 0,
+      "v": 9800,
+      "diff": 9
+     }
+    ],
     "day": 20404,
     "inst": [
      [

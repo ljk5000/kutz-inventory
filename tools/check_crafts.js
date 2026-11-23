@@ -277,7 +277,7 @@ const schemaProblems = (doc) => validateExport(JSON.parse(JSON.stringify(doc)));
 try {
   // what the fake game saved above, through the real exporter
   const doc = exported(withCrafted(saved));
-  assert.equal(doc.schemaVersion, "3.15.0");
+  assert.equal(doc.schemaVersion, "3.16.0");
   assert.deepEqual(exampleMage(doc).crafted, {
     since: "2026-01-01T00:00:00.000Z", total: 10,
     items: [{ itemId: 1113, name: "Conjured Bread", count: 4, crafts: 1, lastAt: "2026-01-01T00:00:00.000Z" },

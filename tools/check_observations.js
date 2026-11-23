@@ -729,7 +729,7 @@ do
   local h = fresh()
   h.ns.ObsNote()
   assert(#h.printed == 2 and h.printed[1]:find("enabled by default") and h.printed[1]:find("/kinv track")
-         and h.printed[2]:find("never records gold") and h.printed[2]:find("/kinv track drops off"), "two lines: " .. table.concat(h.printed, " | "))
+         and h.printed[2]:find("never records your gold") and h.printed[2]:find("/kinv track drops off"), "two lines: " .. table.concat(h.printed, " | "))
   h.ns.ObsNote(); h.ns.ObsNote()
   assert(#h.printed == 2 and h.db().noted == true and h.db().on, "only once, and it changes nothing")
   local off = fresh({ db = { v = 1, on = false } })
@@ -737,23 +737,29 @@ do
   assert(#off.printed == 2 and off.printed[1]:find("off here") and off.printed[1]:find("/kinv track drops on")
          and not off.db().on, "an install that kept it off is told how to start it: " .. table.concat(off.printed, " | "))
   h.ns.ObsNote(true)
-  assert(#h.printed == 2 and h.db().notedGameText and h.db().notedPets, "fresh installs skip the upgrade notices")
+  assert(#h.printed == 2 and h.db().notedGameText and h.db().notedPets and h.db().notedRewards, "fresh installs skip the upgrade notices")
   for _, on in ipairs({ true, false }) do
     local existing = fresh({ db = { v = 1, on = on, agreed = true, noted = true } })
     existing.ns.ObsNote(true); existing.ns.ObsNote(true); existing.ns.ObsNote()
     local first = existing.printed[1] or ""
-    assert(#existing.printed == 2 and first:find("NPC gossip and spoken lines")
+    assert(#existing.printed == 3 and first:find("NPC gossip and spoken lines")
       and first:find("book pages from world objects") and first:find("quest objectives")
       and first:find("/kinv track drops off") and existing.db().on == on, "the 1.19.0 line at login")
-    assert(existing.last():find("1%.20%.0 adds hunter tames") and existing.last():find("/kinv track drops off"), "the 1.20.0 line at login")
+    assert(existing.printed[2]:find("1%.20%.0 adds hunter tames") and existing.printed[2]:find("/kinv track drops off"), "the 1.20.0 line at login")
+    assert(existing.last():find("1%.23%.0 adds the rewards a quest window lists") and existing.last():find("never yours")
+      and existing.last():find("/kinv track drops off"), "the 1.23.0 line at login")
     local reloaded = fresh({ db = existing.db() })
     reloaded.ns.ObsNote(true)
     assert(#reloaded.printed == 0, "upgrade notices survive reload")
     local seen119 = fresh({ db = { v = 1, on = on, agreed = true, noted = true, notedGameText = true } })
     seen119.ns.ObsNote(true)
-    assert(#seen119.printed == 1 and seen119.last():find("1%.20%.0"), "a 1.19.0 install sees only the 1.20.0 line")
+    assert(#seen119.printed == 2 and seen119.printed[1]:find("1%.20%.0") and seen119.last():find("1%.23%.0"),
+      "a 1.19.0 install sees the 1.20.0 and 1.23.0 lines")
+    local seen120 = fresh({ db = { v = 1, on = on, agreed = true, noted = true, notedGameText = true, notedPets = true } })
+    seen120.ns.ObsNote(true); seen120.ns.ObsNote(true)
+    assert(#seen120.printed == 1 and seen120.last():find("1%.23%.0") and seen120.db().notedRewards, "a 1.20.0 install sees only the 1.23.0 line, once")
   end
-  print("OK   one-time 1.19.0 and 1.20.0 login notices for existing installs and the original first /kinv note")
+  print("OK   one-time 1.19.0, 1.20.0 and 1.23.0 login notices for existing installs and the original first /kinv note")
 end
 
 -- 3) /kinv track: status, off stops and unregisters, on starts again at once (no prompt), yes is the same as on

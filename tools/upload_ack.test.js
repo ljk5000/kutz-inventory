@@ -59,7 +59,7 @@ test("trimExport: drops events at or below mark, keeps above, respects rollback 
 
 test("trimExport: day entries below mark are dropped, on or above mark are kept, and emptied parts are removed cleanly", () => {
   // In EXAMPLE_V3:
-  //   events: k1f9c2-000017..000031
+  //   events: k1f9c2-000017..000033
   //   npcs:   days 20403, 20404, 20404, 20405
   //   items:  days 20404, 20404
   //   kills:  days 20404, 20404
@@ -67,9 +67,9 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
   const snap = clone(base);
 
   // Mark day 20404: drops npc day 20403, keeps 20404 and 20405; keeps items/kills on 20404.
-  const partial = trimExport(base, { epoch: 1, events: { k1f9c2: 30 }, day: 20404 });
+  const partial = trimExport(base, { epoch: 1, events: { k1f9c2: 32 }, day: 20404 });
   assert.deepEqual(base, snap);
-  assert.deepEqual(partial.observations.events.map(e => e.id), ["k1f9c2-000031"]);
+  assert.deepEqual(partial.observations.events.map(e => e.id), ["k1f9c2-000033"]);
   assert.deepEqual(partial.observations.npcs.map(n => n.day), [20404, 20405, 20404]);
   assert.equal(partial.observations.install, "k1f9c2");
   assert.equal(partial.observations.items.length, 2);
@@ -77,8 +77,8 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
   assert.equal(partial.observations.killsInstall, "k1f9c2");
   assert.deepEqual(validateExport(partial), []);
 
-  // Mark day 20405 and all events <= 31: events -> [], items deleted, kills & killsInstall deleted, only npc day 20405 stays.
-  const npcsOnly = trimExport(base, { epoch: 1, events: { k1f9c2: 31 }, day: 20405 });
+  // Mark day 20405 and all events <= 33: events -> [], items deleted, kills & killsInstall deleted, only npc day 20405 stays.
+  const npcsOnly = trimExport(base, { epoch: 1, events: { k1f9c2: 33 }, day: 20405 });
   assert.deepEqual(npcsOnly.observations.events, []);
   assert.equal(npcsOnly.observations.npcs.length, 1);
   assert.equal(npcsOnly.observations.npcs[0].day, 20405);
@@ -88,9 +88,9 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
   assert.equal("killsInstall" in npcsOnly.observations, false);
   assert.deepEqual(validateExport(npcsOnly), []);
 
-  // Mark day 20406 and events <= 30: only event 31 stays; npcs+install, items, kills+killsInstall deleted.
-  const eventsOnly = trimExport(base, { epoch: 1, events: { k1f9c2: 30 }, day: 20406 });
-  assert.deepEqual(eventsOnly.observations.events.map(e => e.id), ["k1f9c2-000031"]);
+  // Mark day 20406 and events <= 32: only event 33 stays; npcs+install, items, kills+killsInstall deleted.
+  const eventsOnly = trimExport(base, { epoch: 1, events: { k1f9c2: 32 }, day: 20406 });
+  assert.deepEqual(eventsOnly.observations.events.map(e => e.id), ["k1f9c2-000033"]);
   assert.equal("npcs" in eventsOnly.observations, false);
   assert.equal("install" in eventsOnly.observations, false);
   assert.equal("items" in eventsOnly.observations, false);
@@ -101,7 +101,7 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
   // Only items remain (events=[], npcs/kills emptied).
   const itemsLate = clone(EXAMPLE_V3);
   itemsLate.observations.items[0].day = 20406;
-  const itemsOnly = trimExport(itemsLate, { epoch: 1, events: { k1f9c2: 31 }, day: 20406 });
+  const itemsOnly = trimExport(itemsLate, { epoch: 1, events: { k1f9c2: 33 }, day: 20406 });
   assert.deepEqual(itemsOnly.observations.events, []);
   assert.equal(itemsOnly.observations.items.length, 1);
   assert.equal("npcs" in itemsOnly.observations, false);
@@ -113,7 +113,7 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
   // Only kills remain (events=[], npcs/items emptied).
   const killsLate = clone(EXAMPLE_V3);
   killsLate.observations.kills[0].day = 20406;
-  const killsOnly = trimExport(killsLate, { epoch: 1, events: { k1f9c2: 31 }, day: 20406 });
+  const killsOnly = trimExport(killsLate, { epoch: 1, events: { k1f9c2: 33 }, day: 20406 });
   assert.deepEqual(killsOnly.observations.events, []);
   assert.equal(killsOnly.observations.kills.length, 1);
   assert.equal(killsOnly.observations.killsInstall, "k1f9c2");
@@ -123,7 +123,7 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
   assert.deepEqual(validateExport(killsOnly), []);
 
   // Everything emptied -> observations deleted from export; non-observation fields stay whole.
-  const allGone = trimExport(base, { epoch: 1, events: { k1f9c2: 31 }, day: 20406 });
+  const allGone = trimExport(base, { epoch: 1, events: { k1f9c2: 33 }, day: 20406 });
   assert.equal("observations" in allGone, false);
   assert.deepEqual(allGone.characters, base.characters);
   assert.deepEqual(allGone.prices, base.prices);
@@ -132,7 +132,7 @@ test("trimExport: day entries below mark are dropped, on or above mark are kept,
 
   // Unknown keys outside observations and inside surviving observations stay untouched.
   const withUnknown = { ...clone(EXAMPLE_V3), extraTop: { ok: true }, observations: { ...clone(EXAMPLE_V3.observations), extraObs: "keep" } };
-  const trimmedUnknown = trimExport(withUnknown, { epoch: 1, events: { k1f9c2: 30 }, day: 20404 });
+  const trimmedUnknown = trimExport(withUnknown, { epoch: 1, events: { k1f9c2: 32 }, day: 20404 });
   assert.deepEqual(trimmedUnknown.extraTop, { ok: true });
   assert.equal(trimmedUnknown.observations.extraObs, "keep");
 });
