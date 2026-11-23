@@ -805,6 +805,11 @@ function observationEvent(e) {
              spdAura: spd !== undefined && e.spdAura === true ? true : undefined, diet: obsTameDiet(e.diet),
              loc: obsText(e.loc, OBS_LOCALE) }), ...place() };
   }
+  if (e.type === "killrep") {                         // 1.23.0: the reputation one kill gave; never a standing
+    const npc = obsInt(e.npc, 1), lv = obsInt(e.lv, 1), f = obsInt(e.f, 1);
+    if (npc === undefined || f === undefined || !Number.isInteger(e.d) || e.d === 0 || Math.abs(e.d) > OBS_REP.d) return null;
+    return { ...base, npc, ...pick({ lv: lv <= 255 ? lv : undefined }), f, d: e.d, ...place() };
+  }
   if (e.type === "credit") {
     const quest = obsInt(e.quest, 1), i = obsInt(e.i, 1), field = Object.keys(OBS_CREDIT).includes(e.ot) ? OBS_CREDIT[e.ot] : undefined;
     const id = field && obsInt(e[field], 1), rows = e.rows == null ? undefined : obsInt(e.rows, 1);

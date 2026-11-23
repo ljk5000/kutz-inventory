@@ -666,6 +666,38 @@ test("observations 3.16.0: quest rewards as the window listed them, on both acts
   assert.ok(validateExport(noChoices).length, "the schema still wants choices on a turn-in");
 });
 
+test("observations 3.16.0: killrep keeps npc, lv, faction and the signed change; never a standing or a GUID", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([LUA]).inventory;
+  const where = { map: 0, uiMap: 1429, x: 0.4123, y: 0.6543 };
+  const who = { level: 30, class: 4, faction: "Alliance", name: "Exampleobserver" };
+  const event = { id: "krep-1", t: 100, b: "1.60.1.70888", type: "killrep", npc: 1234, lv: 12, f: 72, d: 25,
+    standing: 9000, guid: "Creature-0-4170-0-1234-1234-000012ABCD", name: "Stormwind", where, who };
+  const obs = (patch) => convert.exportObservations([{ events: [{ ...event, ...patch }] }]);
+  const good = obs({}).events[0];
+  assert.deepEqual(good, { id: "krep-1", t: 100, b: "1.60.1.70888", type: "killrep", npc: 1234, lv: 12, f: 72, d: 25, where, who });
+  assert.ok(!/Creature-|9000|Stormwind|standing/.test(JSON.stringify(good)), "no GUID, standing or faction name");
+  assert.ok(Buffer.byteLength(JSON.stringify(good)) < 260, "one killrep event: " + Buffer.byteLength(JSON.stringify(good)) + " bytes");
+  assert.deepEqual(obs({ d: -100000 }).events[0].d, -100000);
+  assert.deepEqual(obs({ d: 100000 }).events[0].d, 100000);
+  for (const lv of [0, 256, 1.5, "12", -1]) assert.ok(!("lv" in obs({ lv }).events[0]), "lv " + lv + " goes alone");
+  for (const bad of [{ npc: undefined }, { npc: 0 }, { npc: "1234" }, { f: undefined }, { f: 0 }, { f: 2.5 }, { d: 0 },
+                     { d: undefined }, { d: 100001 }, { d: -100001 }, { d: 2.5 }, { d: "25" }]) assert.equal(obs(bad), null, JSON.stringify(bad));
+  const withEvent = (e) => ({ ...doc, observations: { v: 1, addon: "1.23.0", events: [e] } });
+  assert.deepEqual(validateExport(withEvent(good)), []);
+  const { lv, ...bare } = good;
+  assert.deepEqual(validateExport(withEvent(bare)), []);
+  for (const patch of [{ npc: undefined }, { f: undefined }, { d: undefined }, { d: 0 }, { d: 100001 }, { lv: 0 }, { lv: 256 },
+                       { standing: 9000 }, { guid: "Creature-0-1-2" }, { where: undefined }]) {
+    assert.ok(validateExport(withEvent({ ...good, ...patch })).length, "schema rejected " + JSON.stringify(patch));
+  }
+  // through the saved file: a Lua killrep event reaches the export as is
+  const lua = convert.convertSavedVariables([obsFile(`{
+    { id = "krep-2", t = 200, type = "killrep", npc = 1234, lv = 12, f = 87, d = -5, ${WHO} } }`)]).inventory;
+  const e = lua.observations.events.find((x) => x.id === "krep-2");
+  assert.deepEqual([e.type, e.npc, e.lv, e.f, e.d], ["killrep", 1234, 12, 87, -5]);
+});
+
 test("observations 3.6.0: a quest's text rides on its accept and turn-in; only text, only that act's fields", () => {
   const obs = convert.convertSavedVariables([obsFile(`{
     { id = "ffff-1", t = 100, type = "quest", act = "accept", quest = 5, ${WHO},

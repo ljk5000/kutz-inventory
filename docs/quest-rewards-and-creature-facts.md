@@ -38,14 +38,14 @@ binary shows the client knows the function or event; what it answers must still 
 | `UnitHealthMax`, `UnitPowerMax`, `UnitPowerType` | yes | creature health and power |
 | `GetLootSourceInfo`, `C_Item.GetItemIDByGUID`, `UNIT_SPELLCAST_SUCCEEDED`, spell 13262 Disenchant | yes | disenchanting |
 | `GetNumRewardSpells`, `GetQuestLogRewardSpell`, `GetNumRewardCurrencies`, `GetQuestCurrencyInfo` | **no** | not used |
+| Spells 31252 Prospecting, 51005 Milling | **not in this client's spell table** | dropped: the game version has neither |
+| `GetNumQuestLogRewardFactions`, `GetQuestLogRewardFactionInfo` | yes, but see below | not used in 1.23.0 |
 
 **`GetRewardSkillPoints` return shape.** Neither the local API annotations nor the binary say what it returns. The
 addon takes its first return as the points when that is a plain integer; when the first return is a string it takes
 the third (Blizzard's default quest UI reads the call as `skillName, skillIcon, skillPoints`; recalled from that UI,
 not from a file on this machine). `GetRewardSkillLineID`'s first return is taken as the line id. The checklist prints
 both.
-| Spells 31252 Prospecting, 51005 Milling | **not in this client's spell table** | dropped: the game version has neither |
-| `GetNumQuestLogRewardFactions`, `GetQuestLogRewardFactionInfo` | yes, but see below | not used in 1.23.0 |
 
 **Dropped: reputation as the quest window lists it.** The two quest-log calls exist, but they read the selected
 quest-log entry (the addon would have to change the selection), and their amounts are raw values whose scale differs
@@ -120,11 +120,24 @@ turn-in event per quest already exist.
 
 When: `CHAT_MSG_COMBAT_FACTION_CHANGE` (matched against the client's own `FACTION_STANDING_INCREASED` /
 `FACTION_STANDING_DECREASED` formats, English forms as fallback; other formats, such as the generic and bonus ones,
-record nothing). The faction name is turned into an id from the reputation list (a name-to-id table built out of
-combat and reused; a name not found is dropped). The message is tied to a creature only when, in the 2 seconds before
-it, every creature this player saw die untapped by others (the existing death evidence) had the same NPC id; none or
-two different ids record nothing. Nothing within 5 seconds of a quest turn-in or an open reward window. `who.level`
-tells a reduced amount from a full one. Never a standing.
+record nothing; a translation that names the amount before the faction is read the right way round). The faction name
+is turned into an id from the reputation list: a name-to-id table read with the same walk as a turn-in's `rep`
+(`C_Reputation.GetFactionDataByIndex`, collapsed headers opened and closed again), only out of combat (`InCombatLockdown`
+plainly false), at login (`PLAYER_ENTERING_WORLD`) and reused. A name it does not know marks it stale; it is read
+again out of combat (at once, or when combat ends) and at most once a minute, never on every kill. A name still not
+found, or one two factions share, records nothing. The message is tied to a creature only when every creature this
+player saw die untapped by others (the existing death evidence: `UnitIsDead`, an NPC GUID, `UnitIsPlayer`,
+`UnitPlayerControlled` and `UnitIsTapDenied` plainly false), **from 2 seconds before the message to 1 second after
+it**, had the same NPC id; none or two different ids record nothing. `lv` is kept only when all of those deaths
+showed the same plain level. Nothing within 5 seconds of a quest turn-in or of a reward window opening, nor while a
+reward window is open. `who.level` tells a reduced amount from a full one. Never a standing.
+
+Correction to the first draft, which looked only at the 2 seconds before the message: the server likely sends the
+reputation change as soon as the kill is credited, while the creature's death reaches the client with the next batch
+of unit updates, so the line can come first. The message is therefore held for 1 second (`C_Timer.After`; a client
+without it decides at once, from the deaths before) and decided then; a turn-in seen during that second also drops it.
+The death is read once per `UNIT_HEALTH` for both this and objective credit, so the event costs no more reads than
+before. The in-game checklist asks which comes first.
 
 Dedup: once per `npc`, `lv`, `f` and `d` per install (a saved FIFO index of 2,000 keys, like `credit`), at most 100 a
 session, only under the half caps. About 230 bytes an event.
@@ -199,7 +212,10 @@ from the bag item the cast was aimed at. **No item id, no event**: such a window
 - Repeat on a character at the level cap and on one far above the quest's level; note money, XP and `cap`.
 - Kill a creature that gives reputation, alone: one `killrep` with its `npc`, `f` and `d`. Kill two different
   creatures at once: none. Turn in a quest beside a fresh corpse: none. Print the chat line and `/dump
-  FACTION_STANDING_INCREASED`.
+  FACTION_STANDING_INCREASED, FACTION_STANDING_DECREASED`. Does the reputation line come before or after the corpse's
+  health reaches 0 (a chat frame timestamp beside `/etrace` with `UNIT_HEALTH` and `CHAT_MSG_COMBAT_FACTION_CHANGE`)?
+  Right after login, kill one: is it recorded (the list is first read at `PLAYER_ENTERING_WORLD`; if the client has
+  not filled it yet, a kill is missed until the next read out of combat)?
 - Target a creature at full health, in and out of a dungeon: `/dump UnitHealthMax("target"), UnitPowerType("target"),
   UnitPowerMax("target")`, then `/dump KutzInventoryObsDB.npcs[<id>]`. Are the values plain in combat?
 - Disenchant an item: `/dump GetLootSourceInfo(1)` with the window open. Is the source an `Item-` GUID, and does
