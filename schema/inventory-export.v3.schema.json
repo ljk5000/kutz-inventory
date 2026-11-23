@@ -3729,6 +3729,81 @@
           "maximum": 2000,
           "description": "Beasts only: main-hand attack speed in hundredths of a second (UnitAttackSpeed), read alive and out of combat; the value seen most often (a tie keeps the one seen first)."
         },
+        "hp": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Since 3.16.0: the creature's maximum health (UnitHealthMax), one entry per level (and diff inside an instance), sorted by lv then diff; at most 6 levels, the most recently seen. Read at a sighting (at most once per creature per 30 s), only alive and at a plain level of 1 or more; v is the value seen most often of up to 4 distinct readings. A buff or debuff on the creature can change it, so a reader should want two installs to agree before showing it.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lv",
+              "v"
+            ],
+            "properties": {
+              "lv": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 255,
+                "description": "The creature's level when read."
+              },
+              "v": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "UnitHealthMax(unit), above 0."
+              },
+              "diff": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 99999,
+                "description": "The instance difficulty id (GetInstanceInfo), present exactly when the value was read inside an instance; absent outside."
+              }
+            }
+          }
+        },
+        "pw": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Since 3.16.0: the creature's power (UnitPowerType and UnitPowerMax), one entry per level (and diff inside an instance), sorted by lv then diff; at most 6 levels, the most recently seen. Read as hp is; absent for a creature whose maximum was 0. t and v are the pair seen most often.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lv",
+              "t",
+              "v"
+            ],
+            "properties": {
+              "lv": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 255,
+                "description": "The creature's level when read."
+              },
+              "t": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30,
+                "description": "UnitPowerType(unit): 0 mana, 1 rage, 2 focus, 3 energy, ..."
+              },
+              "v": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "UnitPowerMax(unit, t), above 0."
+              },
+              "diff": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 99999,
+                "description": "The instance difficulty id (GetInstanceInfo), present exactly when the value was read inside an instance; absent outside."
+              }
+            }
+          }
+        },
         "day": {
           "type": "integer",
           "minimum": 1,

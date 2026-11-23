@@ -109,6 +109,8 @@
 -- (the least recently seen go first), 40 cells each and its own ~500 KB cap, apart from the events' 2 MB: the summary
 -- is replaced, not added to, so it must not push drops out of the events' cap, nor drops push it out (3000 realistic
 -- NPCs with names are ~440 KB by Size below). spds is this file's own tally for spd (attack speed -> times seen), not exported.
+-- Since 1.23.0 also hp = { { lv, diff, v, c } } and pw = { { lv, diff, t, v, c } }: UnitHealthMax, and UnitPowerType with
+-- UnitPowerMax, per level (and difficulty inside an instance), read alive; the value seen most often (NPC.Vitals).
 -- Since 1.21.0 a creature seen inside an instance is kept too, without cells: inst = { ["<instance map>:<difficulty>"] =
 -- count } says where (NPC.Inside). Item facts (items), per-day kill counts (kills) and the suffix on item links: Facts.lua.
 
@@ -1640,7 +1642,7 @@ end
 ---------------------------------------------------------------------------
 -- DAYS: an entry not seen for this long is dropped on load; SESSION: the session tables below are trimmed past this many npcs
 local NPC = { AGAIN = 30, CELL_AGAIN = 600, CELLS = 40, MAX = 3000, BYTES = 500000, SPEEDS = 4, DAYS = 180, SESSION = 4000,
-              INSTS = 8 }
+              INSTS = 8, LEVELS = 6, POWER_TYPES = 30 }
 local NPC_CLASS = { normal = true, elite = true, rare = true, rareelite = true, worldboss = true, trivial = true, minus = true }
 local NPC_RX = { Alliance = "rxA", Horde = "rxH" }      -- the reaction is kept per player faction
 local CT_BEAST, CT_COMPANION = 1, 12            -- UnitCreatureType ids: Beast; Non-combat Pet (someone's companion)
@@ -1848,6 +1850,64 @@ local function Speed(n, v)
     if not n.spd or c[v] > (Int(c[n.spd]) or 0) then n.spd = v end
 end
 
+-- Health and power (1.23.0): n.hp = { { lv, diff, v, c = { [v] = times } } } and n.pw = { { lv, diff, t, v, c = { ["t:v"] =
+-- times } } }, one entry per level (and instance difficulty, diff, only when read inside an instance), the most recently
+-- read last, at most 6 (the one read longest ago goes). v (and t) is the reading seen most often (a tie keeps the one
+-- that got there first) of at most 4 counted values (c, this file's own tally like spds; not exported).
+function NPC.Tally(c, key, cur)                 -- one more count of key in c; -> the key seen most often
+    if not c[key] then
+        local k, low = 0, nil
+        for x, m in pairs(c) do
+            k = k + 1
+            if x ~= cur and (not low or (Int(m) or 0) < (Int(c[low]) or 0)) then low = x end
+        end
+        if k >= NPC.SPEEDS and low then c[low] = nil end
+    end
+    c[key] = (Int(c[key]) or 0) + 1
+    if cur == nil or c[key] > (Int(c[cur]) or 0) then return key end
+    return cur
+end
+
+function NPC.Reading(n, field, lv, diff)        -- the entry for lv (and diff), moved to the end as the latest read
+    local list = n[field]
+    if type(list) ~= "table" then list = {}; n[field] = list end
+    for i = #list, 1, -1 do if type(list[i]) ~= "table" then table.remove(list, i) end end   -- junk in a saved file
+    for i = #list, 1, -1 do
+        local x = list[i]
+        if x.lv == lv and x.diff == diff then
+            table.remove(list, i)
+            list[#list + 1] = x
+            if type(x.c) ~= "table" then x.c = {} end
+            return x
+        end
+    end
+    while #list >= NPC.LEVELS do table.remove(list, 1) end
+    local x = { lv = lv, diff = diff, c = {} }
+    list[#list + 1] = x
+    return x
+end
+
+-- UnitHealthMax, UnitPowerType and UnitPowerMax of a creature alive, at a plain level of 1 or more; each value plain and
+-- above 0 (a creature without power has none to read)
+function NPC.Vitals(n, unit, level, w, inside)
+    if not (level and level >= 1 and level <= 255 and level == math.floor(level) and False(UnitIsDead, unit)) then return end
+    local diff = inside and (Int(w.difficulty) or 0) or nil
+    local hp = Int(Try(UnitHealthMax, unit), 1)
+    if hp then
+        local x = NPC.Reading(n, "hp", level, diff)
+        x.v = NPC.Tally(x.c, hp, Int(x.v, 1))
+    end
+    local t = Int((Try(UnitPowerType, unit)))   -- (type, token): the type only
+    local pw = t and t <= NPC.POWER_TYPES and Int(Try(UnitPowerMax, unit, t), 1)
+    if pw then
+        local x = NPC.Reading(n, "pw", level, diff)
+        local ct, cv = Int(x.t), Int(x.v, 1)
+        local key = NPC.Tally(x.c, t .. ":" .. pw, ct and cv and (ct .. ":" .. cv) or nil)
+        local kt, kv = key:match("^(%d+):(%d+)$")
+        x.t, x.v = tonumber(kt), tonumber(kv)
+    end
+end
+
 -- One more count for the 1% map square the player stands in, at most once per npc and square per 10 minutes; at most 40
 -- squares per npc (the least counted goes)
 local function Cell(n, npc, w, now)
@@ -1989,6 +2049,7 @@ Sighting = function(unit, open, svc)
         local v = mh and math.floor(mh * 100 + 0.5)
         if v and v >= 10 and v <= 2000 then Speed(n, v) end
     end
+    NPC.Vitals(n, unit, level, w, inside)
     if svc then Serve(n, svc) end
     n.day = math.floor(time() / 86400)
     if inside then NPC.Inside(n, npc, w, now) elseif near then Cell(n, npc, w, now) end

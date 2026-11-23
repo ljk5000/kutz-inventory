@@ -825,6 +825,46 @@ test("observations 3.10.0: several installs merge into one summary named by all 
   assert.deepEqual(twice.npcs.find((n) => n.npc === 525).cells, [[1429, 41, 65, 2]], "the newest copy, not both added up");
 });
 
+test("observations 3.16.0: npcs hp and pw per level and difficulty; the tally stays home; installs join per level", () => {
+  const obs = convert.convertSavedVariables([npcFile(`{
+    [525] = { day = 20404, hp = { { lv = 13, v = 250, c = { [250] = 2, [198] = 1 } }, { lv = 12, v = 198, c = { [198] = 1 } },
+                                  { lv = 12, diff = 1, v = 900, c = { [900] = 1 } } },
+              pw = { { lv = 12, t = 0, v = 345, c = { ["0:345"] = 1 } } } },
+    [526] = { day = 20404, hp = { "junk", { lv = 0, v = 5 }, { lv = 256, v = 5 }, { lv = 5, v = 0 }, { lv = 5, v = 1.5 }, { lv = 5, v = 7, diff = -1 },
+                                  { lv = 5, v = 8, diff = "1" }, { lv = 6, v = 9 } },
+              pw = { { lv = 5, v = 7 }, { lv = 5, t = 31, v = 7 }, { lv = 5, t = -1, v = 7 }, { lv = 6, t = 3, v = 100 } } },
+    [527] = { day = 20404, hp = { { lv = 1, v = 1 }, { lv = 2, v = 2 }, { lv = 3, v = 3 }, { lv = 4, v = 4 }, { lv = 5, v = 5 },
+                                  { lv = 6, v = 6 }, { lv = 7, v = 7 }, { lv = 3, v = 33 } } },
+    [528] = { day = 20404, hp = {}, pw = "x" },
+  }`)]).inventory.observations;
+  const by = Object.fromEntries(obs.npcs.map((n) => [n.npc, n]));
+  assert.deepEqual(by[525].hp, [{ lv: 12, v: 198 }, { lv: 12, v: 900, diff: 1 }, { lv: 13, v: 250 }]);
+  assert.deepEqual(by[525].pw, [{ lv: 12, t: 0, v: 345 }]);
+  assert.deepEqual(Object.keys(by[525]), ["npc", "hp", "pw", "day"]);
+  assert.deepEqual(by[526].hp, [{ lv: 6, v: 9 }], "each broken reading goes alone");
+  assert.deepEqual(by[526].pw, [{ lv: 6, t: 3, v: 100 }]);
+  assert.deepEqual(by[527].hp.map((x) => [x.lv, x.v]), [[3, 33], [4, 4], [5, 5], [6, 6], [7, 7], [2, 2]].sort((a, b) => a[0] - b[0]),
+    "6 levels, the latest read kept (3 read again last, 1 the oldest)");
+  assert.deepEqual(by[528], { npc: 528, day: 20404 });
+  assert.ok(!JSON.stringify(obs.npcs).includes('"c"'), "the tally is not exported");
+  // two installs: the levels join, the one seen last wins a level both have
+  const a = npcFile(`{ [525] = { day = 20404, hp = { { lv = 12, v = 198 }, { lv = 10, v = 150 } }, pw = { { lv = 12, t = 0, v = 300 } } } }`, `prefix = "zz9900"`);
+  const b = npcFile(`{ [525] = { day = 20405, hp = { { lv = 12, v = 205 }, { lv = 14, v = 260 } } } }`, `prefix = "aa1100"`);
+  const merged = convert.convertSavedVariables([a, b]).inventory.observations.npcs[0];
+  assert.deepEqual(merged.hp, [{ lv: 10, v: 150 }, { lv: 12, v: 205 }, { lv: 14, v: 260 }]);
+  assert.deepEqual(merged.pw, [{ lv: 12, t: 0, v: 300 }]);
+  // the schema: valid as exported; out-of-range values are not
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([npcFile(`{ [525] = { day = 20404, hp = { { lv = 12, v = 198 }, { lv = 12, diff = 1, v = 900 } }, pw = { { lv = 12, t = 0, v = 345 } } } }`)]).inventory;
+  assert.deepEqual(validateExport(doc), []);
+  const npc = doc.observations.npcs[0];
+  for (const patch of [{ hp: [] }, { hp: [{ lv: 12 }] }, { hp: [{ lv: 0, v: 1 }] }, { hp: [{ lv: 1, v: 0 }] }, { hp: [{ lv: 1, v: 1, c: {} }] },
+                       { pw: [{ lv: 1, v: 1 }] }, { pw: [{ lv: 1, t: 31, v: 1 }] }, { hp: Array.from({ length: 7 }, (_, i) => ({ lv: i + 1, v: 1 })) }]) {
+    const bad = { ...doc, observations: { ...doc.observations, npcs: [{ ...npc, ...patch }] } };
+    assert.ok(validateExport(bad).length, "schema rejected " + JSON.stringify(patch));
+  }
+});
+
 test("observations 3.11.0: svc is a sorted set of the known services; merged installs add theirs up", () => {
   const obs = convert.convertSavedVariables([npcFile(`{
     [1] = { svc = { vendor = true, repair = true, inn = true, flight = 1, gossip = true, Vendor = true }, day = 20404 },

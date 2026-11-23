@@ -846,9 +846,9 @@ function obsTaxiTo(list, own) {
 }
 // ---------------------------------------------------------------------------
 // The npcs summary (3.10.0, KutzInventory 1.17.0; svc 3.11.0): KutzInventoryObsDB.npcs[npcId] = { name, lv = { min, max }, boss,
-// cls, ct, fam, rxA, rxH, sub, svc = { [service] = true }, spd, day, cells = { ["uiMap:cx:cy"] = n } }: one entry per creature
+// cls, ct, fam, rxA, rxH, sub, svc = { [service] = true }, spd, hp, pw, day, cells = { ["uiMap:cx:cy"] = n } }: one entry per creature
 // the player looked at, updated in place (not events), cumulative per install. Exported as observations.npcs = [{ npc, name?,
-// lv?, boss?, cls?, ct?, fam?, rxA?, rxH?, sub?, svc?, spd?, day, cells? }] sorted by npc, with observations.install naming the install(s) it summarises
+// lv?, boss?, cls?, ct?, fam?, rxA?, rxH?, sub?, svc?, spd?, hp?, pw?, day, cells? }] sorted by npc, with observations.install naming the install(s) it summarises
 // (the saved file's random prefix; several, sorted and joined by "+", when several saved files have one). An entry
 // without a valid npc id or day is dropped; any other field that fails its check is left out. At most 3000 npcs, 40
 // cells each and about 1 MB of JSON, the most recently seen kept.
@@ -860,7 +860,26 @@ const OBS_NPC_CLASSES = ["normal", "elite", "rare", "rareelite", "worldboss", "t
 const OBS_NPC_DAY_MAX = 1157407;                       // 1e11 seconds (the events' time limit) in days
 const OBS_PREFIX = /^[0-9a-z]{4,16}$/;
 const OBS_CELL = /^([0-9]{1,10}):([0-9]{1,2}):([0-9]{1,2})$/;
-const OBS_NPC_KEYS = ["npc", "name", "lv", "boss", "cls", "ct", "fam", "rxA", "rxH", "sub", "svc", "spd", "day", "cells", "inst"];
+const OBS_NPC_KEYS = ["npc", "name", "lv", "boss", "cls", "ct", "fam", "rxA", "rxH", "sub", "svc", "spd", "hp", "pw", "day", "cells", "inst"];
+// hp / pw (3.16.0, KutzInventory 1.23.0): [{ lv, v, diff? }] (UnitHealthMax) and [{ lv, t, v, diff? }] (UnitPowerType,
+// UnitPowerMax) from the addon's list, the latest read last (its tally c is not exported); one per lv and diff (the later
+// wins), at most 6, the latest kept; sorted by lv, then diff (none first). diff: the instance difficulty, only when read
+// inside an instance.
+const OBS_NPC_LEVELS = 6;
+function obsNpcVitals(v, power) {
+  const out = new Map();
+  for (const e of asList(v)) {
+    if (!e || typeof e !== "object") continue;
+    const lv = obsInt(e.lv, 1), val = obsInt(e.v, 1), diff = e.diff == null ? undefined : obsInt(e.diff), t = power ? obsInt(e.t) : undefined;
+    if (lv === undefined || lv > 255 || val === undefined || (e.diff != null && (diff === undefined || diff > 99999))
+        || (power && (t === undefined || t > 30))) continue;
+    const key = lv + ":" + (diff ?? "");
+    out.delete(key);
+    out.set(key, pick({ lv, t, v: val, diff }));
+  }
+  const list = [...out.values()].slice(-OBS_NPC_LEVELS).sort((a, b) => a.lv - b.lv || (a.diff ?? -1) - (b.diff ?? -1));
+  return list.length ? list : undefined;
+}
 const OBS_NPC_INSTS = 8;
 const OBS_INST = /^([0-9]{1,10}):([0-9]{1,5})$/;
 // inst (3.15.0): where a creature was seen inside instances, [[instance map, difficulty, n]] from the addon's
@@ -924,15 +943,19 @@ function obsNpc(id, n) {
   return pick({ npc, name: obsNpcText(n.name), lv: lvOk ? [lv[0], lv[1]] : undefined, boss: n.boss === true ? true : undefined,
                 cls: OBS_NPC_CLASSES.includes(n.cls) ? n.cls : undefined, ct: obsNpcKind(n.ct), fam: obsNpcKind(n.fam),
                 rxA: obsReaction(n.rxA), rxH: obsReaction(n.rxH), sub: obsNpcText(n.sub), svc: obsNpcSvc(n.svc),
-                spd: Number.isInteger(n.spd) && n.spd >= 10 && n.spd <= 2000 ? n.spd : undefined, day: n.day,
+                spd: Number.isInteger(n.spd) && n.spd >= 10 && n.spd <= 2000 ? n.spd : undefined,
+                hp: obsNpcVitals(n.hp, false), pw: obsNpcVitals(n.pw, true), day: n.day,
                 cells: cells.length ? cells : undefined, inst: inst.length ? inst : undefined });
 }
-// The same creature in two installs: the level range, services and cells add up; the rest comes from the one seen last
+// The same creature in two installs: the level range, services and cells add up; hp and pw join per level and
+// difficulty (the one seen last wins a level both have); the rest comes from the one seen last
 function mergeNpc(a, b) {
   const [newer, older] = b.day > a.day ? [b, a] : [a, b];
   const lv = a.lv && b.lv ? [Math.min(a.lv[0], b.lv[0]), Math.max(a.lv[1], b.lv[1])] : a.lv || b.lv;
   const cells = obsNpcCells([...(a.cells || []), ...(b.cells || [])]), inst = obsNpcInst([...(a.inst || []), ...(b.inst || [])]);
   const out = { ...older, ...newer, lv, boss: a.boss || b.boss, svc: obsNpcSvc([...(a.svc || []), ...(b.svc || [])]), day: newer.day,
+                hp: obsNpcVitals([...(older.hp || []), ...(newer.hp || [])], false),
+                pw: obsNpcVitals([...(older.pw || []), ...(newer.pw || [])], true),
                 cells: cells.length ? cells : undefined, inst: inst.length ? inst : undefined };
   return pick(Object.fromEntries(OBS_NPC_KEYS.map((k) => [k, out[k]])));
 }
