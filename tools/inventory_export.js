@@ -10,6 +10,8 @@
 //   WOW_IMPORT_TOKEN   bearer token (Authorization: Bearer ...)
 //   WOW_IMPORT_URL     full URL of the import endpoint, for example https://<host>/api/wow/import
 // --watch re-reads the saved file when the game rewrites it (/reload or logout) and exports again.
+// With --upload, the game's quest cache (Cache\WDB\<locale>\questcache.wdb beside the WTF folder) is sent too, new or
+// changed quests only (tools/quest_cache_sender.js); --no-quest-cache leaves it out.
 // With both, a reload uploads. The request is described below; the JSON format is in schema/README.md.
 // Writes inventory 3.x by default (only what the Battle.net API cannot see); --format 2 writes the older 2.x.
 "use strict";
@@ -127,8 +129,24 @@ function auctionsUrl() {
 }
 const uploadAuctionScan = (doc) => postGzipJson("WOW_AUCTIONS_URL", auctionsUrl(), doc);
 
+// Quest-cache documents go to WOW_QUEST_CACHE_URL, or by default the import address with /import replaced by /quest-cache.
+function questCacheUrl() {
+  if (process.env.WOW_QUEST_CACHE_URL) return process.env.WOW_QUEST_CACHE_URL;
+  const imp = process.env.WOW_IMPORT_URL;
+  if (!imp) return imp;
+  try { const u = new URL(imp); u.pathname = u.pathname.replace(/\/import\/?$/, "/quest-cache"); return u.href; } catch { return imp; }
+}
+const uploadQuestCache = (doc) => postGzipJson("WOW_QUEST_CACHE_URL", questCacheUrl(), doc);
+
+// The game client folder of a saved file: <game>\WTF\Account\<account>\SavedVariables\KutzInventory.lua. null otherwise.
+function gameFolderOf(savedFile) {
+  const saved = path.dirname(path.resolve(savedFile)), account = path.dirname(saved), accounts = path.dirname(account), wtf = path.dirname(accounts);
+  if (path.basename(saved).toLowerCase() !== "savedvariables" || path.basename(accounts).toLowerCase() !== "account" || path.basename(wtf).toLowerCase() !== "wtf") return null;
+  return path.dirname(wtf);
+}
+
 function parseArgs(argv) {
-  const flags = { upload: false, watch: false, help: false, noInventory: false, noAuctions: false, format: 3 };
+  const flags = { upload: false, watch: false, help: false, noInventory: false, noAuctions: false, noQuestCache: false, format: 3 };
   const pos = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -144,9 +162,10 @@ function parseArgs(argv) {
     else if (a === "--watch") flags.watch = true;
     else if (a === "--no-inventory") flags.noInventory = true;     // with --upload: auction prices only (a "service" character)
     else if (a === "--no-auctions") flags.noAuctions = true;       // with --upload: characters only
+    else if (a === "--no-quest-cache") flags.noQuestCache = true;  // with --upload: not the game's quest cache
     else if (a === "--help" || a === "-h") flags.help = true;
     else if (a.startsWith("-")) {
-      console.error("Unknown option " + a + ". Known options: --upload, --watch, --no-inventory, --no-auctions, --format, --help.");
+      console.error("Unknown option " + a + ". Known options: --upload, --watch, --no-inventory, --no-auctions, --no-quest-cache, --format, --help.");
       process.exit(2);
     } else pos.push(a);
   }
@@ -162,6 +181,8 @@ function help() {
   --watch    after the first export, export again whenever the saved file changes
   --no-inventory   with --upload: send auction house prices only (a price-gathering "service" character)
   --no-auctions    with --upload: send your characters only
+  --no-quest-cache with --upload: don't send the game's quest cache (quest facts from Cache\\WDB, new or changed
+                   quests only, to WOW_QUEST_CACHE_URL or the import URL's /quest-cache)
   --format 2       write the older inventory 2.x (everything the addon records). The default is 3: only what the
                    Battle.net API can't see; cr0m reads the rest from the API. See schema/README.md.
 
@@ -271,12 +292,29 @@ async function main() {
 
   const { createAuctionSender } = require("./auction_sender");
   const auctions = createAuctionSender(outFile + ".auctions-sent.json", uploadAuctionScan, { log: (m) => console.log(m) });
+  // The quest cache of each game folder the saved files are in (not sent when the site answers 404 or 405).
+  let questCache = null;
+  const games = [...new Set(files.map(gameFolderOf).filter(Boolean))];
+  if (args.upload && !args.noQuestCache && games.length) {
+    const { createQuestCacheSender, questCacheContext } = require("./quest_cache_sender");
+    const { COMPANION_VERSION } = require("../companion/version");
+    let origin = "";
+    try { origin = new URL(questCacheUrl()).origin; } catch { origin = ""; }
+    questCache = createQuestCacheSender(outFile + ".quest-cache-sent.json", uploadQuestCache, {
+      context: questCacheContext({ origin, username: "" }), companion: COMPANION_VERSION, log: (m) => console.log(m),
+    });
+  }
   async function run() {
     const all = exportAll(files, outFile, { format: args.format });
     summarize(files, all, outFile);
     if (args.upload) {
       if (!args.noInventory) await outbox.send(all.inventory);
       if (!args.noAuctions) await auctions.send(all.auctions);
+      for (const game of questCache ? games : []) {
+        const sent = await questCache.send(game);
+        if (sent.caches) console.log(`Quest cache: ${sent.sent} new or changed quest(s) sent, ${sent.unchanged} unchanged.`);
+        if (sent.unsupported) { questCache = null; break; }
+      }
     }
   }
 
@@ -298,5 +336,5 @@ if (require.main === module) {
     process.exit(1);
   });
 }
-module.exports = { SCHEMA_VERSION, SCHEMA_VERSION_3, DROPPED_IN_3, toFormat3, AUCTION_SCHEMA_VERSION, uploadExport, uploadAuctionScan, auctionsUrl, gzipJson,
+module.exports = { SCHEMA_VERSION, SCHEMA_VERSION_3, DROPPED_IN_3, toFormat3, AUCTION_SCHEMA_VERSION, uploadExport, uploadAuctionScan, auctionsUrl, questCacheUrl, gameFolderOf, gzipJson,
   buildAll, exportAll, auctionsFileFor, parseSavedVariables, plain, build, exportUiHealth, newerUiHealth, exportOnce, redact };

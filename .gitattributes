@@ -3,3 +3,4 @@
 *.tga binary
 *.png binary
 tools/fixtures/cli-golden/** -text
+*.wdb binary

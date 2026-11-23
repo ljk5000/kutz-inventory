@@ -488,6 +488,78 @@ test("session ack: a write failure of the state file does not fail or repeat the
   await session.stop();
 });
 
+// The game's quest cache beside WTF: the committed fixture (build 71037, enUS).
+function questCacheIn(game) {
+  const file = path.join(game, "Cache", "WDB", "enUS", "questcache.wdb");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "..", "tools", "fixtures", "questcache-71037-enUS.wdb"), file);
+  return file;
+}
+
+test("the quest cache goes to /api/wow/quest-cache after the inventory, gzipped, new or changed quests only", async t => {
+  const f = await fixture(t); const cache = questCacheIn(f.game);
+  const { seen, base } = await serve(t, () => [200, { ok: true }]);
+  const events = [];
+  const session = await createSession({ ...f, base, key: "kutz_quest_key", interval: 20, auctionGapMs: 0, sendAuctions: false, report: e => events.push(e) });
+  t.after(() => session.stop());
+  const quest = () => seen.filter(s => s.url === "/api/wow/quest-cache");
+  await until(() => quest().length === 1);
+  assert.deepEqual(seen.map(s => s.url), ["/api/wow/import", "/api/wow/quest-cache"], "the quest cache went before the inventory");
+  const doc = quest()[0].body;
+  assert.equal(doc.kind, "quest-cache"); assert.equal(doc.companion, COMPANION_VERSION); assert.equal(doc.quests.length, 8);
+  assert.ok(!JSON.stringify(doc).includes("Original") && !JSON.stringify(doc).includes(f.root), "the document names the character or a path");
+  assert.ok(fs.existsSync(f.output + ".quest-cache-sent.json"));
+  assert.ok(!fs.readFileSync(f.output + ".quest-cache-sent.json", "utf8").includes("kutz_quest_key"));
+  // A new save with the same cache: the inventory goes, the quests do not.
+  f.write("Second"); await until(() => seen.filter(s => s.url === "/api/wow/import").length === 2); await delay(200);
+  assert.equal(quest().length, 1, "unchanged quests were sent again");
+  // The game learns a changed quest: the next save sends that one.
+  const b = fs.readFileSync(cache); let at = 24;
+  for (;;) { const id = b.readUInt32LE(at), size = b.readUInt32LE(at + 4); if (id === 1003) { b.writeInt32LE(900, at + 8 + 48); break; } at += 8 + size; }
+  fs.writeFileSync(cache, b);
+  f.write("Third"); await until(() => quest().length === 2);
+  assert.deepEqual(quest()[1].body.quests.map(q => [q.id, q.money]), [[1003, 900]]);
+  assert.equal(events.some(e => e.state === "attention" || e.state === "retrying"), false);
+  await session.stop();
+});
+
+test("a site without the quest-cache endpoint (404) is quiet: inventory still uploads, no error state, not asked again this session", async t => {
+  const f = await fixture(t); questCacheIn(f.game);
+  const { seen, base } = await serve(t, url => url === "/api/wow/quest-cache" ? [404, { error: "Not found" }] : [200, { ok: true }]);
+  const events = [];
+  const session = await createSession({ ...f, base, key: "k", interval: 20, sendAuctions: false, report: e => events.push(e) });
+  t.after(() => session.stop());
+  await until(() => seen.some(s => s.url === "/api/wow/quest-cache"));
+  f.write("Again"); await until(() => seen.filter(s => s.url === "/api/wow/import").length === 2); await delay(300);
+  assert.equal(seen.filter(s => s.url === "/api/wow/quest-cache").length, 1, "the endpoint was asked again after a 404");
+  assert.equal(events.some(e => e.state === "attention" || e.state === "retrying" || e.message), false, JSON.stringify(events));
+  const state = f.output + ".quest-cache-sent.json";
+  assert.ok(!fs.existsSync(state) || Object.values(JSON.parse(fs.readFileSync(state, "utf8")).sets).every(s => !Object.keys(s.quests).length));
+  await session.stop();
+  // A server error on the quest cache does not fail or repeat the inventory upload either.
+  const g = await fixture(t); questCacheIn(g.game);
+  const busy = await serve(t, url => url === "/api/wow/quest-cache" ? [503, { error: "busy" }] : [200, { ok: true }]);
+  const events2 = [];
+  const s2 = await createSession({ ...g, base: busy.base, key: "k", interval: 20, sendAuctions: false, report: e => events2.push(e) });
+  t.after(() => s2.stop());
+  await until(() => busy.seen.some(s => s.url === "/api/wow/quest-cache")); await delay(300);
+  assert.equal(busy.seen.filter(s => s.url === "/api/wow/import").length, 1);
+  assert.equal(events2.some(e => e.state === "attention" || e.state === "retrying"), false);
+  await s2.stop();
+});
+
+test("sendQuestCache false never reads or sends the quest cache", async t => {
+  const f = await fixture(t); questCacheIn(f.game);
+  const quests = [], inventory = [];
+  const session = await createSession({ ...f, base: "https://cr0m.com", key: "k", interval: 20, sendAuctions: false, sendQuestCache: false, report: () => {},
+    upload: async (_b, _k, d) => { inventory.push(d); return { ok: true }; }, uploadQuestCache: async (_b, _k, d) => { quests.push(d); return { ok: true }; } });
+  t.after(() => session.stop());
+  await until(() => inventory.length === 1); await delay(200);
+  assert.equal(quests.length, 0);
+  assert.equal(fs.existsSync(f.output + ".quest-cache-sent.json"), false);
+  await session.stop();
+});
+
 test("Companion version stays consistent across session.js, package.json, package-lock.json and docs", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tools", "windows", "package.json"), "utf8"));
   const lock = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tools", "windows", "package-lock.json"), "utf8"));
