@@ -7,6 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { createQuestCacheSender, questCacheContext, findQuestCaches } = require("./quest_cache_sender");
+const { MAX_FILE_BYTES } = require("./questcache");
 const { validateQuestCache } = require("./validate_export");
 
 const FIXTURE = path.join(__dirname, "fixtures", "questcache-71037-enUS.wdb");
@@ -125,11 +126,18 @@ test("404 and 405 are quiet: one log line, nothing recorded, nothing thrown, the
   }
 });
 
-test("401 / 403 / 426 and account refusals are thrown like the auction sender's; 5xx, no connection and 429 after retries are quiet", async (t) => {
+test("401 / 403 / 426 and account refusals are never thrown (refused, nothing recorded); a 2xx without ok records nothing; 5xx, no connection and 429 after retries are quiet", async (t) => {
   for (const e of [err(401, { retryable: false, authentication: true }), err(403, { retryable: false, authentication: true }),
     err(426, { retryable: false, detail: "Update the Companion." }), err(403, { code: "bnet_link_required", retryable: false, resumable: true })]) {
     const s = setup(t, async () => { throw e; });
-    await assert.rejects(s.sender.send(s.game), (x) => x === e);
+    const out = await s.sender.send(s.game);     // never thrown: it must not stop the inventory or auction uploads
+    assert.equal(out.refused, true); assert.equal(out.failed, e.message); assert.equal(out.sent, 0);
+    assert.ok(!fs.existsSync(s.stateFile) || !Object.keys(s.state().sets["71037|enUS"].quests).length);
+  }
+  for (const body of [{}, { ok: false }, undefined, "<html>login</html>"]) {   // a 2xx that is not an acknowledgement
+    const s = setup(t, async () => body);
+    const out = await s.sender.send(s.game);
+    assert.equal(out.sent, 0); assert.ok(out.failed); assert.equal(out.refused, false);
     assert.ok(!fs.existsSync(s.stateFile) || !Object.keys(s.state().sets["71037|enUS"].quests).length);
   }
   for (const e of [err(503), Object.assign(new Error("Connection unavailable"), { retryable: true }), Object.assign(new Error("The service returned an invalid acknowledgement."), { retryable: false })]) {
@@ -191,7 +199,13 @@ test("a refused, half-written or missing cache is skipped quietly and sends noth
   assert.equal(r.posted.length, 0);
   fs.rmSync(path.join(s.game, "Cache"), { recursive: true });
   out = await s.sender.send(s.game);
-  assert.deepEqual(out, { caches: 0, sent: 0, unchanged: 0, skipped: [], rejected: [], unsupported: false, failed: null });
+  assert.deepEqual(out, { caches: 0, sent: 0, unchanged: 0, skipped: [], rejected: [], unsupported: false, refused: false, failed: null });
+  // Larger than any quest cache: refused by its size, before it is read.
+  fs.mkdirSync(path.dirname(s.cacheFile), { recursive: true });
+  fs.writeFileSync(s.cacheFile, ""); fs.truncateSync(s.cacheFile, MAX_FILE_BYTES + 1);
+  out = await s.sender.send(s.game);
+  assert.equal(out.caches, 0); assert.match(out.skipped[0].reason, /larger than any quest cache/);
+  fs.rmSync(path.join(s.game, "Cache"), { recursive: true });
   assert.deepEqual(findQuestCaches(path.join(s.root, "nowhere")), []);
   assert.equal(fs.existsSync(s.stateFile), false);
 });

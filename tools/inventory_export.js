@@ -313,7 +313,7 @@ async function main() {
       for (const game of questCache ? games : []) {
         const sent = await questCache.send(game);
         if (sent.caches) console.log(`Quest cache: ${sent.sent} new or changed quest(s) sent, ${sent.unchanged} unchanged.`);
-        if (sent.unsupported) { questCache = null; break; }
+        if (sent.unsupported || sent.refused) { questCache = null; break; }
       }
     }
   }
