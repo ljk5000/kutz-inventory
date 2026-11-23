@@ -12,6 +12,7 @@ KutzInventory collects game data while playing. It checkpoints queued work befor
 | Gold/XP/rested XP | Delayed login reads, immediate money/XP/exhaustion events and manual scan. Reads stop while leaving; checkpoint handling avoids a new teardown zero overwriting gold. |
 | Professions, currencies, skills, spells, talents, reputation, PvP | Login/change events queue scans. A checkpoint can finish queued work while player data are usable; unavailable client APIs may leave fields absent or old. |
 | Quest log (`questLog`) | After login, on `QUEST_LOG_UPDATE` / `QUEST_ACCEPTED` / `QUEST_REMOVED` / `QUEST_TURNED_IN` (debounced), `/kinv scan`, and safe pre-logout checkpoints. Collapsed headers are expanded and restored out of combat; in combat with collapsed headers, the read waits for `PLAYER_REGEN_ENABLED`. Titles, headers and objective text keep the game's wording (no `$N`: a name such as Red is also a word). |
+| Legacy challenges (`legacyChallenges`, 1.23.0) | 16 s after login, then after `RECEIVED_ACHIEVEMENT_LIST` / `ACHIEVEMENT_EARNED` / `CRITERIA_EARNED` / `CRITERIA_UPDATE`: one coalesced read no sooner than 30 s after the last, never in combat (a read due in combat waits for `PLAYER_REGEN_ENABLED`), on `/kinv scan`, and at a pre-logout checkpoint when one is waiting. Set 60 (65 ids embedded from the platform's `legacy-challenges` dataset, build 1.60.1.70938) and set 61 (63969-64033, only once completed or started). Saved only when the reading differs; a read where nothing answered keeps the saved one. Independent of drop tracking. `earnedBy` is another of the owner's characters: private. |
 | Stats/sheet | Latest safe out-of-combat reading; changes during combat can defer updates. Buffs at snapshot time count. |
 | Statistics/achievement points | Login, manual scan and post-combat reads throttled to once per ten minutes. From 1.21.0 each read also notes the values that changed since the read before under today (`chars[key].statDays[day][id]`), kept 30 days; the first read notes nothing. |
 | Character/warband bank | Requires the bank open and loaded. Cached values represent a visit, not a live view after closing it. |
@@ -154,3 +155,10 @@ The rule was written from nine roll bursts logged in a five-player dungeon run o
 - Verify a complete quest records `done = true`, a failed quest records `failed = true`, a breadcrumb quest with no objectives records `obj = {}`, and an empty quest log records `quests = {}`.
 - Accept, progress, abandon and turn in a quest; confirm `questLog` updates without Lua errors and that combat with a collapsed header defers the read until combat ends.
 - Check a quest whose title or objective contains your character's name or surname and confirm it is saved as `$N`.
+
+### WoW Forever 1.23.0 Legacy challenges checklist
+
+- On the character that earned a Legacy challenge, `/dump GetAchievementInfo(<a completed challenge id>)`; then the same on another character of the account. Note returns 4-7 (completed, month, day, year: is the year years since 2000, 26 for 2026?) and 13-14 (`wasEarnedByMe`, `earnedBy`) on each.
+- `/dump GetAchievementNumCriteria(<id>)` and `/dump GetAchievementCriteriaInfo(<id>, 1)`: is return 10 the criteria id, and 4 and 5 the progress and the amount needed?
+- Log in, wait 20 s, `/reload`: `KutzInventoryDB.chars[key].legacyChallenges` lists the set-60 challenges with their criteria and only the set-61 ones started or done. Does `GetAchievementInfo` answer at login, or only after `RECEIVED_ACHIEVEMENT_LIST`?
+- Make progress on a challenge criterion, wait 30 s, `/reload`: `at` and `updated.legacyChallenges` moved. Log out and in with nothing changed: they did not. Fight while making progress: no read until combat ends (no Lua error either way).

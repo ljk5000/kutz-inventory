@@ -68,6 +68,55 @@ KutzInventoryDB = {
 					}, -- [2]
 				},
 			},
+			["legacyChallenges"] = {
+				["at"] = 1762905000,
+				["list"] = {
+					{
+						["id"] = 61499,
+						["set"] = 60,
+						["completed"] = true,
+						["wasEarnedByMe"] = false,
+						["earnedBy"] = "Examplewarrior",
+						["date"] = "2025-10-04",
+						["criteria"] = {
+							{
+								["id"] = 101,
+								["completed"] = true,
+								["quantity"] = 25,
+								["reqQuantity"] = 25,
+							}, -- [1]
+						},
+					}, -- [1]
+					{
+						["id"] = 61989,
+						["set"] = 60,
+						["completed"] = false,
+						["wasEarnedByMe"] = false,
+						["criteria"] = {
+							{
+								["id"] = 202,
+								["completed"] = false,
+								["quantity"] = 24,
+								["reqQuantity"] = 40,
+							}, -- [1]
+						},
+					}, -- [2]
+					{
+						["id"] = 63969,
+						["set"] = 61,
+						["completed"] = false,
+						["wasEarnedByMe"] = false,
+						["criteria"] = {
+							{
+								["id"] = 303,
+								["completed"] = false,
+								["quantity"] = 3,
+								["reqQuantity"] = 10,
+							}, -- [1]
+						},
+					}, -- [3]
+				},
+			},
 			["legacyTree"] = {
 				["currency"] = {
 					["available"] = 12,
@@ -116,6 +165,7 @@ KutzInventoryDB = {
 				["spells"] = 1762905000,
 				["recipes"] = 1762900000,
 				["trainers"] = 1762800000,
+				["legacyChallenges"] = 1762905000,
 			},
 			["bags"] = {
 				[0] = {

@@ -1,7 +1,8 @@
-# Quest rewards, kill reputation, creature health and disenchanting (KutzInventory 1.23.0, export 3.16.0)
+# Quest rewards, kill reputation, creature health, disenchanting and Legacy challenges (KutzInventory 1.23.0, export 3.16.0)
 
 Status: spec for the `feat/record-quest-money-and-facts` branch. Hand-off to the receiving site: this file plus
-`schema/examples/inventory-export.v3.example.json`. `observations.v` stays `1`; every field here is optional.
+`schema/examples/inventory-export.v3.example.json`. `observations.v` stays `1`; every field here is optional. Parts 1-4
+are observations; part 5 is a character field.
 
 ## What is recorded today (so it is not added twice)
 
@@ -16,6 +17,7 @@ Status: spec for the `feat/record-quest-money-and-facts` branch. Hand-off to the
 | Reward spell or title | nothing |
 | Reputation from a kill | nothing |
 | A creature's health or power | nothing (`npcs[]` has level, type, reaction, attack speed) |
+| Legacy challenge completion | nothing (`statistics` has the Statistics tab only, not achievements) |
 | Disenchanting | a loot window with an `Item-` source is recorded as `src.kind: "container"`; a destroyed item often resolves to no item id, so the result is mislabelled or has no source item |
 
 ## How the calls were checked
@@ -38,6 +40,7 @@ binary shows the client knows the function or event; what it answers must still 
 | `UnitHealthMax`, `UnitPowerMax`, `UnitPowerType` | yes | creature health and power |
 | `GetLootSourceInfo`, `C_Item.GetItemIDByGUID`, `UNIT_SPELLCAST_SUCCEEDED`, spell 13262 Disenchant | yes | disenchanting |
 | `C_Container.PickupContainerItem`, `C_Container.GetContainerItemInfo`, `UNIT_SPELLCAST_START` | not checked in the binary (`GetContainerItemInfo` and the `UseContainerItem` hook are already used) | the bag item a Disenchant was aimed at (a client without them falls back to the source GUID alone) |
+| `GetAchievementInfo`, `GetAchievementNumCriteria`, `GetAchievementCriteriaInfo`, `RECEIVED_ACHIEVEMENT_LIST`, `ACHIEVEMENT_EARNED`, `CRITERIA_EARNED`, `CRITERIA_UPDATE` | yes | Legacy challenges (`GetAchievementInfo` is already used for statistics) |
 | `GetNumRewardSpells`, `GetQuestLogRewardSpell`, `GetNumRewardCurrencies`, `GetQuestCurrencyInfo` | **no** | not used |
 | Spells 31252 Prospecting, 51005 Milling | **not in this client's spell table** | dropped: the game version has neither |
 | `GetNumQuestLogRewardFactions`, `GetQuestLogRewardFactionInfo` | yes, but see below | not used in 1.23.0 |
@@ -187,12 +190,61 @@ fishing window, stays what it was. One window per cast: the window closing ends 
 container opened) makes the window that item's `container` window as before. The exported `src` of a disenchant
 window is exactly `{ kind, item }`.
 
+## 5. Legacy challenges (`characters[].legacyChallenges`, new character field)
+
+The Legacy challenges are set 60 of the platform's `legacy-challenges` dataset; set 61 is the second set of 65
+achievements the dataset counts under `otherSets` (ids 63969-64033). Which of them a character has done, and how far it is with the rest, is per character and
+per account, and nothing in the export says it today. It is a character field read from the achievement API, like
+`statistics`, not an observation: it is not tied to drop tracking and is recorded with tracking off.
+
+**What is read.** For every id of set 60 (the 65 ids of the platform's `legacy-challenges` dataset, build
+1.60.1.70938; the addon embeds the ids only) and for ids 63969-64033 (set 61): `GetAchievementInfo(id)` returns 1
+(the id: an achievement the client does not know answers nothing or another id, and is skipped), 4 `completed`,
+5-7 month, day and years since 2000, 13 `wasEarnedByMe` and 14 `earnedBy`; then `GetAchievementNumCriteria(id)` (at
+most 40) and `GetAchievementCriteriaInfo(id, i)` returns 3 `completed`, 4 `quantity`, 5 `reqQuantity` and 10 the
+criteria id. Each value goes through the file's guards: a secret, missing or wrongly typed value leaves that field
+out (an achievement without a plain boolean `completed`, a criterion without its id or a plain `completed`, is left
+out whole); `date` only when completed and a real date. A set-61 id is kept only when completed or when one of its
+criteria has a quantity above 0.
+
+**When.** Once 16 s after login (beside `statistics`), and after `RECEIVED_ACHIEVEMENT_LIST`, `ACHIEVEMENT_EARNED`,
+`CRITERIA_EARNED` and `CRITERIA_UPDATE`. Each event only asks for one read through the existing coalescing (`Soon`),
+no sooner than 30 s after the last read; a read that comes due in combat waits for `PLAYER_REGEN_ENABLED`. `/kinv
+scan` reads at once (the 30 s do not apply to that command). A read still waiting when the pre-logout checkpoint
+runs is done there. No timer of its own, nothing per frame. One read is about 130 achievement calls plus their
+criteria.
+
+**Saved only when changed.** The new reading is compared with the saved one in memory; `at` and
+`updated.legacyChallenges` move only when something differs. A read where no achievement answered (or where only
+untouched set-61 ids answered) keeps the saved reading.
+
+Saved (`KutzInventoryDB.chars[key]`) and exported (format 3 only) in the same shape:
+
+```text
+legacyChallenges = {
+  at = 1762905000,                     -- Unix seconds of the last read that changed it
+  list = {                             -- 1-130 entries, sorted by id
+    { id = 61499, set = 60, completed = true, wasEarnedByMe = false, earnedBy = "Examplewarrior", date = "2025-10-04",
+      criteria = { { id = 101, completed = true, quantity = 25, reqQuantity = 25 } } },   -- 0-40 criteria
+  },
+}
+```
+
+**Privacy.** `earnedBy` is the name of another of the owner's characters (the account shares the achievement). It is
+private character data like `questLog`: never shown to anyone but the owner. Nothing about another player is read.
+
+**As built, beyond the brief.** `/kinv scan` is not held to the 30 s (a typed command, not a stream of events).
+`quantity` and `reqQuantity` are optional per criterion (left out when not a whole number of 0 or more) rather than
+dropping the criterion; `id` and `completed` are required. The exporter also drops an entry whose `set` does not fit
+its id (61 only for 63969-64033). Format 2 keeps passing `updated` through whole, so it shows the
+`updated.legacyChallenges` stamp (as it does `updated.questLog`) but never the field.
+
 ## Versions and compatibility
 
 - KutzInventory **1.23.0**; inventory export **3.16.0** (new optional fields, one new event type, one new enum value:
   a minor). `observations.v` stays `1`. Format 2 is unchanged.
 - **Old site, new addon:** unknown keys inside `rewards`, `rewards` on an accept, `hp`/`pw` in `npcs[]` and the
-  `killrep` type are ignored by a reader that keeps known fields only. A `disenchant` loot event is dropped whole by a
+  `killrep` type are ignored by a reader that keeps known fields only, and so is `characters[].legacyChallenges`. A `disenchant` loot event is dropped whole by a
   reader with a closed list of source kinds, which is right: it must not be read as a container.
 - **New site, old addon:** every new field is absent, which means "not recorded", never "none". An older addon's
   disenchant windows are `container` events, often without `item`; the site should not treat those as container drops
@@ -208,15 +260,16 @@ window is exactly `{ kind, item }`.
    `choices`).
 3. Accept the `killrep` event type and the `disenchant` source kind (with `src.item`).
 4. Read `hp` and `pw` from `npcs[]`; show a value only when two installs agree.
-5. Validate against export schema 3.16.0.
+5. Read `characters[].legacyChallenges` (per character: `completed`, `date`, criteria progress) and keep `earnedBy`
+   private to the owner, like the quest log. Absent means not recorded, not "none done".
+6. Validate against export schema 3.16.0.
 
 ## Not in this version, room kept
 
 - Coin dropped by creatures, anything about another player, computed drop rates: out of scope.
 - Reputation as the quest window lists it: see above.
-- Reserved for follow-ups the owner may confirm (nothing built): a signal that a character left its guild, and
-  per-character Legacy challenge completion. Both would be character fields (`characters[]`), not observations, and
-  would take the next minor (3.17.0).
+- Legacy challenge names, descriptions or rewards: the site has them from its dataset; the export carries ids and
+  progress only.
 
 ## In-game checklist (nothing here has been run in the game yet)
 
@@ -242,5 +295,11 @@ window is exactly `{ kind, item }`.
 - Disenchant an item: `/dump GetLootSourceInfo(1)` with the window open. Is the source an `Item-` GUID, and does
   `C_Item.GetItemIDByGUID` still answer? Find the event with `kind = "disenchant"` and the right `item`, once picking
   the item with a left click and once with a right click (the aimed-at fallback when the GUID no longer answers).
+- Legacy challenges: on the character that earned a challenge, `/dump GetAchievementInfo(<a completed challenge id>)`,
+  then the same on another character of the account; note returns 4-7 (completed, month, day, year) and 13-14
+  (`wasEarnedByMe`, `earnedBy`) on each. Is the year years since 2000? `/dump GetAchievementCriteriaInfo(<id>, 1)`:
+  return 10 is the criteria id, 4 and 5 the progress? `/reload` 20 s after login and find `legacyChallenges` on the
+  character; earn a criterion and check that `at` moves (30 s later at most) and that it does not move when nothing
+  changed. Is `GetAchievementInfo` answering at login, or only after `RECEIVED_ACHIEVEMENT_LIST`?
 - Listed reputation, for a later version: with a quest selected in the log, `/dump GetNumQuestLogRewardFactions(),
   GetQuestLogRewardFactionInfo(1)` and compare with what the turn-in gave.
