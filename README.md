@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.23.0** and Companion **0.12.7**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.23.0** and Companion **0.12.8**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)
@@ -132,15 +132,19 @@ The addon sends no HTTP requests. Its auction/item API queries go through the ga
 | --- | --- | --- |
 | Companion **Get key** | Opens a browser; the browser handles sign-in | Configured site `/private/settings#wow-upload-key` |
 | Companion **Connect / save** | Bearer key for account verification, no inventory | `GET /api/wow/identity` |
-| Companion **Start**, or a later configured resume | Bearer key and selected data immediately (including pending snapshots), then on game saves/retries | `POST /api/wow/import` and/or `POST /api/wow/auctions` |
-| CLI with `--upload` | Bearer key and selected export data; immediately, then on saves/retries with `--watch` | `WOW_IMPORT_URL`; auctions use `WOW_AUCTIONS_URL` or the import URL with trailing `/import` replaced by `/auctions` |
+| Companion **Start**, or a later configured resume | Bearer key and selected data immediately (including pending snapshots), then on game saves/retries; then the new or changed quests of the game's quest cache (0.12.8) | `POST /api/wow/import` and/or `POST /api/wow/auctions`; `POST /api/wow/quest-cache` |
+| CLI with `--upload` | Bearer key and selected export data; immediately, then on saves/retries with `--watch`; the quest cache unless `--no-quest-cache` | `WOW_IMPORT_URL`; auctions use `WOW_AUCTIONS_URL` or the import URL with trailing `/import` replaced by `/auctions`; the quest cache `WOW_QUEST_CACHE_URL` or `/quest-cache` likewise |
 | CLI without `--upload` | Nothing | Local JSON files only |
 
 The Companion defaults to **https://wow.cr0m.com**, the optional receiving website, or an HTTPS origin you choose. CLI URLs must be supplied explicitly. Uploads are gzipped JSON with an `Authorization: Bearer` key; redirects are refused. HTTP loopback is allowed by the worker/CLI for local tests. The receiving service also sees the connection's source IP and upload times. This repo cannot establish the server's storage, sharing, retention or deletion behavior; check the service before uploading.
 
 The Companion reads **all accounts** under the selected client's `WTF/Account`, merging their `KutzInventory.lua` files and any sibling `KutzUI.lua` monitor findings. There is no per-character/account picker. The inventory snapshot contains names/surnames, realm, guild, GUIDs, gold/XP, bags/banks/gear, skills/spells/professions/recipes/trainers, achievement statistics (which can include amounts of gold), Legacy Trees, current quest log and objective progress, latest location and hearth, timestamps/diagnostics, crafted history, tracked raids and retained observations (events, the NPC summary, item facts and kills per day). Monitor data can include other addon names, error messages and stacks, memory/performance and session history; free-text errors can contain sensitive context. Inventory 3.x omits detailed stats, sheet, ordinary talents, spec/role, reputation, PvP and achievement points (and, before 3.14.0, statistics); `--format 2` includes those but omits raids, observations, crafted history, hearth and quest log.
 
-Auction documents have realm/region/house, scan times and item prices/supply, without character names, player GUIDs or account-folder names. They are still authenticated uploads linked to your key. The raw Lua file, Windows account name, game-folder path and settings file are not sent as upload fields. See [schemas and field privacy](schema/README.md); inspect local exports before sending them.
+Auction documents have realm/region/house, scan times and item prices/supply, without character names, player GUIDs or account-folder names. They are still authenticated uploads linked to your key.
+
+From Companion 0.12.8 the uploader also reads the game's own quest cache, `Cache/WDB/<locale>/questcache.wdb` (written by the client, not by the addon), once per run and read-only, and sends the quest facts in it: id, levels, zone or category, quest kind, next quest, XP difficulty and multiplier, money, reward spell, start item, reward items, choices, reputation and currencies. Quest text and anything about the player (character, account, realm, folder, key) are never in these documents, but the set of quest ids says roughly which quests the client has been shown, and the upload is linked to your key. Only quests the site has not yet accepted in that form are sent; the hashes of accepted ones stay in `inventory.json.quest-cache-sent.json`. To leave it out: the CLI takes `--no-quest-cache`; the Companion has no switch for it yet, so **Pause** (which stops all uploads) is the way to stop it there.
+
+The raw Lua file, Windows account name, game-folder path and settings file are not sent as upload fields. See [schemas and field privacy](schema/README.md); inspect local exports before sending them.
 
 ## Windows Companion / KutzUploader
 

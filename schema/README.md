@@ -7,6 +7,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 | `inventory-export.v3.schema.json` | **3.16.0**, default | Inventory, selected character records, Legacy Trees, Legacy challenges, current quest log, tracked raids, crafted history, hearth, retained observations (with quest rewards, kill reputation and disenchanting), the NPC summary (with health and power), item facts and kills per day |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth/questLog |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
+| `quest-cache.schema.json` | **1.0.0** | Quest facts from the game client's `questcache.wdb` (no quest text), sent by Companion 0.12.8 |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
 
 The exporter writes `inventory.json` and `auction-scans.json` (an **array** of scan documents). Uploads send inventory to the import endpoint and **one scan document per request** to the auction endpoint. `examples/` contains visibly synthetic identities and data. `KutzInventory.example.lua` and the v2/v3 JSON are generated from `tools/fixtures/example-KutzInventory.lua`; game item/zone names remain illustrative game content.
@@ -568,6 +569,55 @@ Fungible materials use an empty variant; weapons/armor retain the `item:...` str
 A missing item is **unknown**, except in a **complete** `scope: "all"` snapshot where absence means not listed at scan time. An incomplete full scan cannot establish absence. `p: []` is an answered search with none listed. Legacy empty readings are omitted because old timeouts could look empty. Consume the whole scan document, not split fragments.
 
 No seller name is retained. The JSON carries no scanning character or player GUID, but uploads authenticate with the user's key. The sender tracks latest acknowledged/rejected `scannedAt` per realm/house in `<output>.auctions-sent.json`, spaces sends 10.5 seconds apart, bounds 429 retries, skips permanently rejected scans (400/413/422) until newer, and lets authentication/account refusals reach the caller. See the [Companion guide](../companion/README.md).
+
+## Quest cache
+
+`quest-cache.schema.json` (1.0.0, `QUEST_CACHE_SCHEMA_VERSION` in `tools/questcache.js`) describes what the Companion (0.12.8 and later) and the CLI send to `POST /api/wow/quest-cache`: the quest facts in the game client's own cache, `Cache/WDB/<locale>/questcache.wdb`. The addon has no part in it. Example: [`examples/quest-cache.example.json`](examples/quest-cache.example.json), generated from the eight records of `tools/fixtures/questcache-71037-enUS.wdb`.
+
+**Supported builds:** 70938 and 71037 (`SUPPORTED_BUILDS`). The reader checks the magic `WQST` (stored reversed), the build, the header's locale against its folder, the three fixed header fields, each record's size (at least the 488-byte fixed block, at most 64 KiB), that each record's first field repeats its id, no duplicate ids, the end marker with nothing after it, and the range of every value it emits. Anything else refuses the whole file with a reason and no rows; a new client build stays unread until its layout is checked and added.
+
+Envelope, every key required:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | `"1.0.0"` | This contract |
+| `kind` | `"quest-cache"` | Tells this document from the inventory and auction ones |
+| `build` | integer | The client build in the file header, one of `supportedBuilds` |
+| `locale` | `xxXX` | The header's locale, which is also its folder name |
+| `supportedBuilds` | integers | The builds this sender reads |
+| `companion` | `x.y.z` | Sending Companion version (the CLI sends the Companion version it ships with) |
+| `total` | integer | Quests in the whole cache file, not in this document |
+| `quests` | array, 0–500 | Quest rows sorted by `id` |
+
+Quest rows (byte offsets are into the record's fixed block; every field was confirmed by at least two independent checks on the live 71037 cache and two 70938 caches: Blizzard's quest API, the client's QuestXP/QuestMoneyReward/QuestFactionReward tables, Questie's database, an independent cache parser and the existence of every id in the client's tables):
+
+| Key | Presence | Byte | Meaning |
+| --- | --- | --- | --- |
+| `id` | always | 0 | Quest id, 1–2³¹−1 |
+| `level` | always | 8 | Quest level, −1–255 |
+| `minLevel` | always | 16 | Minimum level to take it, 0–255 |
+| `sort` | always | 24 | Positive: AreaTable zone the quest log files it under; negative: QuestSort category; 0: none |
+| `info` | when not 0 | 28 | QuestInfo id (1 Elite, 41 PvP, 62 Raid, 81 Dungeon…) |
+| `next` | when not 0 | 36 | The quest the ender offers next |
+| `xpDifficulty` | always | 40 | Column of QuestXP, row = `level`, 0–9 |
+| `xpMultiplier` | always | 44 | Multiplier on that value (float32, 6 significant digits), 0–100 |
+| `money` | always | 48 | Reward copper; 0 when none |
+| `spell` | when not 0 | 68 | Spell cast at turn-in (may be one that teaches another spell) |
+| `startItem` | when not 0 | 96 | Item handed over when the quest is accepted |
+| `items` | when any | 116 + 16k | Items always given, up to 4 `{id, n}` in slot order |
+| `choose` | when any | 180 + 12k | Items to choose one from, up to 6 `{id, n}` in slot order |
+| `rep` | when any | 300 + 16k | Up to 5 `{faction, tier, override?}`: `tier` indexes QuestFactionReward row 1 (tier 5 is 100 reputation); `override`, when present, replaces it in hundredths. Before racial or other bonuses |
+| `currencies` | when any | 384 + 8k | Up to 4 `{id, n}`, CurrencyTypes ids |
+
+**Never sent:** quest title, description, objectives text, completion text or any other string in the record (the variable-length tail is never read), and nothing about the player: no character, account, realm, game-folder path or key. Left out because they could not be confirmed twice, are always 0 in the verified files, or vary with the character: quest type, flags, time limit, suggested group, title, skill, honor, money difficulty columns, item drop slots, choice display ids, display spells, allowed races, map point, portraits and objectives.
+
+Consumer guidance:
+
+- **Absent means 0 or empty, not unknown.** An optional key is left out exactly when its slot is 0 or empty in the cache; the always-present keys are sent also when 0. A quest that is not in a document is unknown: the sender sends only quests that are new or changed since the site last accepted them (a 12-hex SHA-256 of the row per quest in `<output>.quest-cache-sent.json`, recorded after a 2xx only), so later documents usually carry a few quests while `total` still counts the whole file. A new build or locale, another site origin or account, or a missing state file sends every quest again. Store by (`build`, `locale`, `id`) and let a newer row replace an older one.
+- The cache holds what the server told this client, possibly from an earlier session. Rewards can differ between builds; `money` was 0 in the cache for one quest where Blizzard's API gives money. XP is not in the cache: compute it from QuestXP\[`level`\]\[`xpDifficulty`\] × `xpMultiplier` (rounded; this matched 216 of 222 quests, missing some level-60 ones).
+- A cache file with more than 500 quests to send is split into several documents with the same envelope; each stands alone.
+- Expected answers: 2xx with a JSON body `{ "ok": true }` to accept (anything else counts as a failure, nothing is recorded); 404/405 if the endpoint does not exist (the Companion logs it once, records nothing and asks again only after its next start); 400/413/422 to refuse a document (it is not sent again until its quests change); 401/403/426 as for the other uploads; 429 with `Retry-After` (three tries, capped at 60 s). Other failures are retried at the next run. Validate each document against the schema; it allows no extra keys.
+- Which quest ids a user's cache holds says roughly which quests their client has been shown; treat the set as account-linked activity, not as public data.
 
 ## Versioning and consumers
 

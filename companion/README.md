@@ -1,6 +1,6 @@
 # KutzUI Companion (KutzUploader)
 
-**Companion 0.12.7 bundles KutzInventory 1.22.1.** See [release notes](../CHANGELOG.md) for the public release.
+**Companion 0.12.8 bundles KutzInventory 1.22.1.** See [release notes](../CHANGELOG.md) for the public release.
 
 The Windows tray app uploads KutzInventory saves to [wow.cr0m.com](https://wow.cr0m.com), the optional receiving website. The site calls it **KutzUploader**; its launcher is **KutzUICompanion.exe**. The addon is usable without uploading. Read the [full addon/data guide](../README.md) before sharing a game client used by several people.
 
@@ -38,6 +38,7 @@ All app HTTP requests use the configured origin (default `https://wow.cr0m.com`)
 | `GET /api/wow/identity` | Connect, Start or configured resume: bearer key, no inventory |
 | `POST /api/wow/import` | Start/resume, game saves and retries with character uploads on: bearer key and full inventory 3.x snapshot |
 | `POST /api/wow/auctions` | Start/resume, saves and retries with auction uploads on: bearer key and one newer scan per realm/house |
+| `POST /api/wow/quest-cache` | After the inventory and auctions of each Start/resume and save (0.12.8): bearer key and the new or changed quests of the game's quest cache, at most 500 per request |
 | `/private/settings#wow-upload-key` | Get key opens your browser; sign-in is handled there |
 
 The UI requires HTTPS. The worker accepts HTTP loopback for local tests. Redirects are refused and requests time out after 20 seconds. There is no direct Battle.net network call in this app; account linking mentioned in server refusals happens on the website.
@@ -45,6 +46,13 @@ The UI requires HTTPS. The worker accepts HTTP loopback for local tests. Redirec
 Inventory includes **all saved characters** under that client: names/surnames, realm, guild, game GUIDs, gold/XP, possessions including shared banks, professions/recipes/trainers, skills/spells, achievement statistics (which can include amounts of gold), Legacy Trees, current quest log and objective progress, last location/coordinates and hearth, craft history, timestamps/diagnostics, retained observations, tracked raid events and optional addon-monitor reports. Those reports can contain addon names, error messages/stacks and session/performance history. Inventory 3.x removes ordinary talents, stats/sheet, spec/role, reputation, PvP and detailed equipped-item fields; [schema/README.md](../schema/README.md) gives the exact contract.
 
 Observations are on by default on a new addon install: loot/quest/vendor/trainer/taxi/flight events include time, map/coordinates and the recording character's **name/surname**, level, class and faction. Since addon 1.17.0 they also carry a per-install NPC summary (NPC name, level range, type, reaction, subtitle, services offered, last day seen and counts of map squares stood beside each creature; no player names, GUIDs or times of day) keyed by the install's random id. `/kinv track drops off` stops new events and the summary, but what is kept still uploads. Raids added with `/kinv raid` include group names and loot. Auction documents have realm/house, scan times, item names/categories/prices/stack variants and no character/player GUID/account-folder fields; the key still associates them with your account. The raw saved files, game-folder path and Windows settings are not sent as fields. The server sees your source IP and upload timing. Its privacy, retention and authorization behavior cannot be verified from this repo.
+
+**Quest cache (0.12.8).** The client keeps the answers to its quest questions in `Cache/WDB/<locale>/questcache.wdb` under the game folder. At the end of each run (Start/resume and every game save, no extra timer or watcher) the worker reads that file once, read-only, with `tools/questcache.js`, and sends quest-cache 1.0.0 documents ([contract](../schema/README.md#quest-cache)): per quest its id, level, minimum level, quest sort (zone or category), quest info (elite, dungeon, raid…), next quest, XP difficulty column and multiplier, money, reward spell, start item, reward items, choices, reputation and currencies. Quest titles, descriptions, objectives and completion text are never read or sent, and the documents hold no character, account, realm, folder or key. Which quest ids are in the cache does say roughly which quests the client has been shown, and the site links each upload to your key.
+
+- Only client builds 70938 and 71037 are read; any other build, an unknown layout or locale, a truncated file or one that changes while it is read is skipped quietly with nothing sent. The game folder is never written to.
+- Only new or changed quests are sent. `inventory.json.quest-cache-sent.json` keeps a 12-hex hash of each quest row the site accepted (2xx), per build and locale, bound to a hash of the site origin and account; a rejected document's fingerprint is kept so it is not sent again unchanged. Another build, locale, site or account, or a missing or unreadable state file, sends everything once more.
+- HTTP 404/405: the site does not take quest caches; nothing is recorded and the session stops asking until the next Start. 400/413/422: that document is skipped until its quests change. 401/403 and the account-link refusals act as for the other uploads. 429 waits as for auctions; 5xx and network errors wait for the next save. Documents are spaced like auction scans. A quest-cache failure never delays or fails the inventory and auction uploads, which go first.
+- There is no tray switch yet; adding one means reworking the fixed Settings layout, so it was left for a later release. **Pause** stops it with the other uploads. The worker already takes a `sendQuestCache` setting for that future switch (the UI does not send it yet, so it is on), and the CLI has `--no-quest-cache`.
 
 ## Tray controls and startup
 
@@ -61,6 +69,7 @@ Pause is remembered across restarts and preserves the startup preference. Window
 | Same folder: `inventory.json.pending.json` | Unacknowledged inventory snapshot, deleted after success |
 | Same folder: `inventory.json.ack.json` | Server observation-acknowledgement marks (no API key) |
 | Same folder: `inventory.json.auctions-sent.json` | Acknowledged/rejected scan timestamps and rejection reason |
+| Same folder: `inventory.json.quest-cache-sent.json` | Hashes of quests the site accepted per build/locale, rejected document fingerprints (no API key) |
 | Same folder: `.tmp` writes | Temporary files which may remain after interruption |
 | Windows Credential Manager, Generic Credentials: `KutzUI.Companion/<lowercase-site-origin>` | Remembered upload key and server-returned username for your Windows user (`CredentialStore.cs`) |
 | Per-user Windows Run entry | Optional sign-in startup, as above |

@@ -40,6 +40,15 @@ From Companion 0.12.7, each accepted `POST /api/wow/import` answer may return an
 - **When everything is sent again:** A full export is sent whenever `<output>.ack.json` is missing or unreadable, the server omits `ack` or raises `epoch` (clearing remembered marks after a trimmed upload), or the context changes (a different site origin, verified account username, sorted saved-file list, export schema version or Companion version). For a restored saved file whose highest counter for an install prefix is below its remembered mark, all events for that prefix are kept.
 - **Saved game file:** The game's `SavedVariables/KutzInventory.lua` is never modified by the Companion and always stays complete on disk.
 
+## Quest cache upload
+
+From Companion 0.12.8 the uploader also sends what the game client itself cached about quests, not anything the addon recorded. After the inventory and auction uploads of each run (Start/resume and each game save), it reads `Cache/WDB/<locale>/questcache.wdb` in the game folder once with `tools/questcache.js` and sends the new or changed quests to `POST /api/wow/quest-cache` (contract: [schema/README.md](../schema/README.md#quest-cache)).
+
+- **Freshness:** the cache holds the client's answers about quests it has been shown, kept across sessions; a quest never shown is absent. When exactly the client writes the file to disk was not checked, so a quest seen just now may arrive with a later run. A file that changes while it is read is skipped until the next run.
+- **What is never read:** the variable-length end of each record (objectives, quest title, description and completion text). Only the fixed 488-byte block is decoded.
+- **Unknown files:** only builds 70938 and 71037 are read; any other build or layout is refused whole, with nothing sent.
+- **Only changed quests:** the hashes of accepted quests are kept in `<output>.quest-cache-sent.json`; see the [Companion guide](../companion/README.md#network-endpoints-and-data).
+
 ## Activity modules
 
 `Crafts.lua` matches localized `LOOT_ITEM_CREATED_SELF`/`LOOT_ITEM_CREATED_SELF_MULTIPLE` system loot messages, with English fallbacks. A stack of five increments item count by five and craft-message count by one. Conjured items count too; other players' creations and ordinary received loot do not. This always-on feature writes `chars[key].crafted`: first observed craft time, running total, per-item count/message count/name/last time, and the newest **120 dates on which crafting happened** (local dates). It cannot reconstruct earlier activity. Format 3 exports the optional `crafted` block with up to 5,000 most recently crafted item types; format 2 omits it.
