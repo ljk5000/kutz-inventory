@@ -289,6 +289,9 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
     // 3.6.0: a quest's text on its accept and turn-in events
     const tp = validateExport(withObs(ev(1, { text: { title: "A Made-up Errand", progress: "Is it here, $N?", completion: "Thanks, $N." } })));
     if (tp.length) fail("3.6.0 quest text does not match the 3.x schema:\n  " + tp.join("\n  "));
+    // 3.16.0: rewards.money is the quest's listed copper; 0 is still refused (below)
+    const qm = validateExport(withObs(ev(1, { rewards: { items: [], choices: [], money: 300 } })));
+    if (qm.length) fail("3.16.0 rewards.money does not match the 3.x schema:\n  " + qm.join("\n  "));
     const badObs = [
         { ...goodObs, v: 2 }, { ...goodObs, events: [] }, { ...goodObs, extra: 1 },
         ev(0, { money: 5000 }), ev(0, { src: { kind: "mob", guid: "Player-4170-00ABCDEF" } }), ev(0, { src: { kind: "pickpocket" } }),
@@ -296,7 +299,7 @@ if (validateExport(broken).length < 3) fail("the schema accepted a broken export
         ev(0, { who: { ...who, name: "Te|cffffffffster" } }), ev(0, { items: [{ id: 1, n: 1, link: "|cffffffff|Hitem:1::::60|h[X]|h|r" }] }),
         ev(0, { items: [{ id: 1, n: 1, link: "|Hitem:1|h[X]|h" }] }),
         ev(1, { act: "abandon" }), ev(1, { text: {} }), ev(1, { text: { title: "" } }), ev(1, { text: { title: "T", author: "x" } }),
-        ev(1, { text: { title: 7 } }), ev(1, { text: { details: "x".repeat(8001) } }), ev(0, { text: { title: "T" } }), ev(1, { rewards: { items: [], choices: [], money: 300 } }),
+        ev(1, { text: { title: 7 } }), ev(1, { text: { details: "x".repeat(8001) } }), ev(0, { text: { title: "T" } }), ev(1, { rewards: { items: [], choices: [], money: 0 } }),
         ev(2, { items: [{ id: 4470, n: 1, price: 38 }] }), ev(2, { items: [{ id: 4470, n: 1, gold: 1, price: 38, limited: null }] }),
         ev(2, { items: [{ id: 4470, n: 1, price: 38, limited: null, cost: [{ gold: 1, n: 1 }] }] }),
     ];

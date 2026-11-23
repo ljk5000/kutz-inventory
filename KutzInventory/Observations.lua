@@ -42,6 +42,13 @@
 --           1.19.0 also records quest objective definitions (up to 12, with no progress counts) and up to 8 quest POIs
 --           on the acceptance map, when the client supplies them safely; from 1.20.0 with rows, the number of objectives
 --           the client listed before unusable ones were skipped.
+--           1.23.0, rewards as the quest window listed them, on both acts: on accept read at QUEST_DETAIL and kept only
+--           when that window showed this very quest and listed at least one reward; on turnin read at QUEST_COMPLETE.
+--           rewards = { items, choose = { { id, n, link } } (the choose-one items, at most 10), money (copper: the
+--           quest's own GetRewardMoney in that window, never the player's money), xp (as the turnin's xp), spells (ids,
+--           ascending, at most 8), title, cap (true: at the level cap), skill = { line, pts }, cur = { { id, n } }
+--           (currencies, by id, at most 8) }, plus choices and chose on turnin. A key the window did not list, or the
+--           client did not answer plainly, is left out.
 --   vendor  npc, rx, filtered, items = { { id, n, link, price (copper per n, as shown), cost = { { item|currency, n } }, limited } }
 --           read under the merchant window's "all" item filter, put back at once; filtered = true when it could not be
 --           switched (the list then misses the items the class filter hides). The same stock and rx once an hour.
@@ -77,8 +84,8 @@
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
--- Never recorded: coin loot, quest money (GetRewardMoney, QUEST_TURNED_IN's money), the player's money, a reputation
--- standing, player chat, or other players' GUIDs or guild data. The dialogue filters can miss a player name.
+-- Never recorded: coin loot, the player's money (GetMoney is never called here), QUEST_TURNED_IN's money argument, a
+-- reputation standing, player chat, or other players' GUIDs or guild data. The dialogue filters can miss a player name.
 -- (Loot chat is read only for this player's own lines: "You won", kept as the won flag, and "You receive loot / item",
 -- held for 6 s in memory as objective credit evidence.)
 -- At most 5000 events, 30 days and about 2 MB of JSON; the oldest go first.
@@ -881,10 +888,10 @@ local function Won(text)
 end
 
 ---------------------------------------------------------------------------
--- quests: accepted (with the giver) and turned in (with the ender and the item rewards; never money)
+-- quests: accepted (with the giver) and turned in (with the ender), both with the rewards the quest window listed
 ---------------------------------------------------------------------------
-local detail = nil                              -- { quest, what, id, at } from the quest window that offered it
-local turnin = nil                              -- { quest, what, id, items, choices, chose } from the reward window
+local detail = nil                              -- { quest, what, id, at, rewards } from the quest window that offered it
+local turnin = nil                              -- { quest, what, id, items, choices, chose, rewards } from the reward window
 local progress = nil                            -- { quest, text } from the "do you have it yet?" window before it
 local hookedReward, haveTurnedInEvent = false, false
 -- the extras (1.18.0), filled in further down: facts from the quest log on accept; the reward window's XP and the
@@ -1184,12 +1191,15 @@ local function TurnedIn(questId)
     if p and p.quest == questId then
         if p.what then e[p.what] = p.id end
         local choices = {}
-        for _, it in ipairs(p.choices) do choices[#choices + 1] = it.id end
-        e.rewards = { items = p.items, choices = choices, chose = p.chose }
+        for _, it in ipairs(p.choices) do if it then choices[#choices + 1] = it.id end end   -- false: a slot with no item id
+        local r = p.rewards or {}
+        r.items, r.choices, r.chose = p.items, choices, p.chose
+        e.rewards = r
         e.xp = p.xp
         if p.text and WantsText(e, p.text) then e.text = p.text end
     end
-    turnin, progress = nil, nil
+    if qx.window == p then qx.window = nil end
+    turnin, progress, qx.turnedAt = nil, nil, Now()
     Add(e)
     pcall(qx.TurnedIn, questId, e)
 end
@@ -2288,6 +2298,106 @@ function qx.Xp()
     return Int((Try(GetRewardXP)), 1)
 end
 
+-- The quest's reward as the open quest window lists it (1.23.0): read once when the offer window (QUEST_DETAIL) or the
+-- reward window (QUEST_COMPLETE) opens, for the quest that window shows (quest: its GetQuestID, nil when unknown).
+-- Returns the rewards table and the choice slots by index ({ id, n, link }, false for a slot without an item id) for
+-- the GetQuestReward hook. Each key only when the client answers it plainly and above 0, else left out:
+--   items   GetNumQuestRewards / GetQuestItemLink+Info "reward" (always there, may be empty)
+--   choose  the same for "choice", at most 10
+--   money   GetRewardMoney: the quest's listed copper. Never the player's money: GetMoney is not called, and neither is
+--           QUEST_TURNED_IN's money argument read
+--   xp      qx.Xp (under the level cap, XP not turned off)
+--   spells  C_QuestInfoSystem.GetQuestRewardSpells(quest): ids, each once, ascending, at most 8
+--   title   GetRewardTitle, a label of at most 80 bytes
+--   cap     true when this character is at the level cap (its level and the cap both known)
+--   skill   { line = GetRewardSkillLineID, pts = GetRewardSkillPoints }, only with both; pts at most 1000. The first
+--           return of each; when GetRewardSkillPoints answers a name first, its third return (the points, as the
+--           default UI reads it as skillName, skillIcon, skillPoints)
+--   cur     C_QuestInfoSystem.GetQuestRewardCurrencies(quest): { id = currencyID, n = totalRewardAmount }, by id, each
+--           id once (the first row), at most 8
+qx.CHOOSE, qx.SPELLS, qx.CURRENCIES, qx.SKILL_PTS, qx.ID_MAX = 10, 8, 8, 1000, 2147483647
+function qx.Id(v) v = Int(v, 1); if v and v <= qx.ID_MAX then return v end end
+function qx.Rewards(quest)
+    local r = { items = RewardItems("reward", (Try(GetNumQuestRewards))) }
+    local slots, choose = {}, {}
+    for i = 1, Int((Try(GetNumQuestChoices))) or 0 do
+        local link = Plain(Try(GetQuestItemLink, "choice", i))
+        local id = ItemId(link)
+        local it = false
+        if id then
+            local _, _, n = Try(GetQuestItemInfo, "choice", i)
+            it = { id = id, n = Int(n, 1) or 1, link = ShortLink(link) }
+            if #choose < qx.CHOOSE then choose[#choose + 1] = it end
+        end
+        slots[i] = it
+    end
+    if choose[1] then r.choose = choose end
+    r.money = qx.Id((Try(GetRewardMoney)))
+    r.xp = qx.Xp()
+    local Q = type(C_QuestInfoSystem) == "table" and C_QuestInfoSystem or nil
+    local spells = quest and Q and Plain(Try(Q.GetQuestRewardSpells, quest))
+    if type(spells) == "table" then
+        local seen, list = {}, {}
+        pcall(function()
+            for _, v in ipairs(spells) do
+                local id = qx.Id(v)
+                if id and not seen[id] then seen[id] = true; list[#list + 1] = id end
+            end
+        end)
+        table.sort(list)
+        for i = #list, qx.SPELLS + 1, -1 do list[i] = nil end
+        if list[1] then r.spells = list end
+    end
+    r.title = Label((Try(GetRewardTitle)), 80)
+    if AtMaxLevel() then r.cap = true end
+    local line = qx.Id((Try(GetRewardSkillLineID)))
+    local a, _, c = Try(GetRewardSkillPoints)
+    local pts = Int(a, 1)
+    if pts == nil and type(Plain(a)) == "string" then pts = Int(c, 1) end
+    if line and pts and pts <= qx.SKILL_PTS then r.skill = { line = line, pts = pts } end
+    local rows = quest and Q and Plain(Try(Q.GetQuestRewardCurrencies, quest))
+    if type(rows) == "table" then
+        local seen, list = {}, {}
+        pcall(function()
+            for _, row in ipairs(rows) do
+                row = Plain(row)
+                if type(row) == "table" then
+                    local id, n = qx.Id(row.currencyID), qx.Id(row.totalRewardAmount)
+                    if id and n and not seen[id] then seen[id] = true; list[#list + 1] = { id = id, n = n } end
+                end
+            end
+        end)
+        table.sort(list, function(x, y) return x.id < y.id end)
+        for i = #list, qx.CURRENCIES + 1, -1 do list[i] = nil end
+        if list[1] then r.cur = list end
+    end
+    return r, slots
+end
+
+-- Whether a rewards table lists anything (cap alone is a fact about the character, not a reward).
+function qx.Listed(r)
+    return type(r) == "table" and (r.items and r.items[1] or r.choose or r.money or r.xp or r.spells or r.title or r.skill
+        or r.cur) and true or false
+end
+
+-- The open offer or reward window (qx.window: the detail or turnin table) read again after QUEST_ITEM_UPDATE, see there.
+qx.REREAD = 4
+function qx.Count(r) return type(r) == "table" and #(r.items or {}) + #(r.choose or {}) or 0 end
+function qx.Reread()
+    local w = qx.window
+    if not w or (w ~= detail and w ~= turnin) then qx.window = nil; return end
+    local quest = Int(Try(GetQuestID), 1)
+    if not (quest and quest == w.quest) or (w.rereads or 0) >= qx.REREAD then return end
+    w.rereads = (w.rereads or 0) + 1
+    local ok, r, slots = pcall(qx.Rewards, quest)
+    if not (ok and type(r) == "table" and type(slots) == "table") or qx.Count(r) < qx.Count(w.rewards) then return end
+    if w == detail then
+        if qx.Listed(r) then w.rewards = r end
+    else
+        w.items, w.choices, w.rewards, w.xp = r.items, slots, r, r.xp
+    end
+end
+
 -- Standings by faction id: of the factions in ids (GetFactionDataByID), or of the whole list. For the whole list each
 -- collapsed header is opened on its own from the top down (so one nested in another shows up next and is opened too),
 -- the list is read, and those headers are closed again from the bottom up, also when the read fails part-way. Left
@@ -2891,6 +3001,11 @@ function handlers.QUEST_DETAIL(startItem)       -- (questStartItemID): the item 
     local what, id = Giver("questnpc", "npc")
     detail = { quest = Int(Try(GetQuestID), 1), what = what, id = id, at = time(), startItem = Int(startItem, 1),
                text = QuestText({ title = GetTitleText, details = GetQuestText, objectives = GetObjectiveText }) }
+    if detail.quest then                        -- the offer's rewards, only for a window that names its quest
+        local ok, r = pcall(qx.Rewards, detail.quest)
+        if ok and qx.Listed(r) then detail.rewards = r end
+    end
+    qx.window = detail
 end
 function handlers.QUEST_ACCEPTED(...)
     local quest = QuestId(...)
@@ -2901,7 +3016,9 @@ function handlers.QUEST_ACCEPTED(...)
     if p and p.what and (p.quest == quest or (not p.quest and time() - p.at <= 60)) then e[p.what] = p.id end
     if p and p.quest == quest then                                           -- only a sure match
         e.startItem = p.startItem
+        e.rewards = p.rewards
     end
+    if qx.window == p then qx.window = nil end
     detail = nil
     local ok, found = pcall(qx.Facts, quest, e)
     if p and p.quest == quest and p.text and WantsText(e, p.text) then e.text = p.text end
@@ -2931,24 +3048,29 @@ end
 function handlers.QUEST_PROGRESS()
     local text = QuestText({ progress = GetProgressText })
     progress = { quest = Int(Try(GetQuestID), 1), text = text and text.progress }
+    qx.window = nil                             -- another window of the quest frame: nothing to read again
 end
 function handlers.QUEST_COMPLETE()
     QuestGiverSeen()
     local what, id = Giver("questnpc", "npc")
     local quest = Int(Try(GetQuestID), 1)
-    turnin = { quest = quest, what = what, id = id,
-               items = RewardItems("reward", (Try(GetNumQuestRewards))), choices = {},
+    local ok, r, slots = pcall(qx.Rewards, quest)
+    if not ok or type(r) ~= "table" then r, slots = { items = {} }, {} end
+    turnin = { quest = quest, what = what, id = id, items = r.items, choices = slots, rewards = r,
                text = quest and QuestText({ title = GetTitleText, completion = GetRewardText }) }
     if turnin.text and progress and progress.quest == quest then turnin.text.progress = progress.text end
-    for i = 1, Int((Try(GetNumQuestChoices))) or 0 do
-        local cid = ItemId(Plain(Try(GetQuestItemLink, "choice", i)))
-        turnin.choices[i] = cid and { id = cid } or false
-    end
-    turnin.xp = quest and qx.Xp()
+    turnin.xp = quest and r.xp
+    qx.window, qx.rewardAt = turnin, Now()
     HookReward()
     qx.Watch(quest)
 end
-function handlers.QUEST_TURNED_IN(questId)        -- (questId, xp, money): the money is never read, nor GetRewardMoney
+-- A reward item the client had not loaded when the window opened has no link yet, so the read skipped it; the client
+-- says when it has loaded it. The open window is read again, at most qx.REREAD times, and the new read is kept only
+-- when it is of the same quest and lists at least as many items as the one before.
+function handlers.QUEST_ITEM_UPDATE() qx.Reread() end
+function handlers.QUEST_FINISHED() qx.window = nil end   -- the quest window closed
+function handlers.QUEST_TURNED_IN(questId)        -- (questId, xp, money): the money argument is never read (rewards.money
+                                                  -- is the reward window's listed GetRewardMoney, read at QUEST_COMPLETE)
     questId = Int(questId, 1)
     if questId then
         qx.waiting[questId] = nil
@@ -3009,6 +3131,7 @@ local RECORDING = { "LOOT_READY", "LOOT_OPENED", "LOOT_CLOSED",
                     "INSTANCE_ENCOUNTER_ENGAGE_UNIT", "ENCOUNTER_END", "START_LOOT_ROLL", "CHAT_MSG_LOOT",
                     "UNIT_LOOT", "LOOT_ROLLS_COMPLETE",
                     "QUEST_DETAIL", "QUEST_ACCEPTED", "QUEST_PROGRESS", "QUEST_COMPLETE", "QUEST_TURNED_IN", "QUEST_REMOVED",
+                    "QUEST_ITEM_UPDATE", "QUEST_FINISHED",
                     "QUEST_DATA_LOAD_RESULT", "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "PLAYER_REGEN_ENABLED",
                     "GOSSIP_SHOW", "QUEST_GREETING", "MAIL_SHOW", "MAIL_CLOSED",
                     "ITEM_TEXT_BEGIN", "ITEM_TEXT_READY", "ITEM_TEXT_CLOSED",
@@ -3054,7 +3177,7 @@ local function Disable()
     flag.Reset()
     taxi.Reset()
     gameText.mail, gameText.book, gameText.bookUse = false, nil, nil
-    qx.waiting = {}
+    qx.waiting, qx.window = {}, nil
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
     pet.arm, pet.read, pet.sent, pet.token = nil, nil, nil, pet.token + 1   -- a tame still being read is dropped
     credit.Reset()

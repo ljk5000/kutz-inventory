@@ -606,12 +606,64 @@ test("observations: only known fields with the right types; never money, players
     where: { map: 0, uiMap: 1429, x: 0.1235 }, who: { level: 60, class: 4, faction: "Alliance" }, items: [{ id: 2589, n: 1 }] });
   assert.deepEqual(mismatched.src, { kind: "mob", npc: 7 }, "a GUID that disagrees with the id is dropped");
   assert.deepEqual(quest, { id: "abcd-4", t: 103, type: "quest", act: "turnin", quest: 5, npc: 9, where: {},
-    who: { level: 60, class: 4, faction: "Alliance", name: "Tester" }, rewards: { items: [], choices: [1, 2] }, xp: 10 },
-    "who keeps the character's own name (3.3.0); a surname with game markup and any GUID go; xp since 3.11.0");
+    who: { level: 60, class: 4, faction: "Alliance", name: "Tester" }, rewards: { items: [], choices: [1, 2], money: 300 }, xp: 10 },
+    "who keeps the character's own name (3.3.0); a surname with game markup and any GUID go; xp since 3.11.0; the quest's listed money since 3.16.0");
   assert.deepEqual(vendor.items, [{ id: 4, n: 1, price: 7, limited: null }]);
   assert.deepEqual(inside.where, { map: 409, itype: "raid", difficulty: 9 }, "no x/y inside an instance");
   assert.deepEqual(inside.src, { kind: "mob", npc: 7, guid: "Creature-0-1-0-1-7-AB" });
-  assert.ok(!/money|gold|Player-|Bob|hello/.test(JSON.stringify(obs)));
+  assert.ok(!/gold|Player-|Bob|hello/.test(JSON.stringify(obs)));
+  // the only money anywhere is a quest's listed reward (3.16.0): never a loot, vendor or top-level quest money key
+  const withoutRewards = obs.events.map(({ rewards, ...e }) => e);
+  assert.ok(!/money/.test(JSON.stringify({ ...obs, events: withoutRewards })), "money only as rewards.money");
+});
+
+test("observations 3.16.0: quest rewards as the window listed them, on both acts; each new key checked alone", () => {
+  const L = (id) => `"|cffffffff|Hitem:${id}|h[X]|h|r"`;
+  const doc = convert.convertSavedVariables([obsFile(`{
+    { id = "rwds-1", t = 100, type = "quest", act = "accept", quest = 1032, npc = 9, ${WHO},
+      rewards = { items = {}, choose = { { id = 18471, n = 1, link = ${L(18471)} }, { id = 18472, n = 1, link = ${L(18472)} } },
+                  money = 125, xp = 160, choices = { 18471 }, chose = 18471 } },
+    { id = "rwds-2", t = 101, type = "quest", act = "turnin", quest = 1032, npc = 9, ${WHO}, xp = 160, money = 999,
+      rewards = { items = {}, choose = { { id = 18471, n = 1, link = ${L(18471)} }, { id = 18472, n = 1, link = ${L(18472)} } },
+                  choices = { 18471, 18472 }, chose = 18472, money = 125, xp = 160 } },
+    { id = "rwds-3", t = 102, type = "quest", act = "accept", quest = 7000, ${WHO},
+      rewards = { items = { { id = 2589, n = 5 } }, spells = { 300, 100, 300, 0, 2.5, "x" }, title = "Champion of the Example",
+                  cap = true, skill = { line = 197, pts = 5 }, cur = { { id = 61, n = 3 }, { id = 42, n = 10 }, { id = 61, n = 9 }, { id = 0, n = 1 }, { id = 8, n = 0 } } } },
+    { id = "rwds-4", t = 103, type = "quest", act = "accept", quest = 7001, ${WHO},
+      rewards = { items = {}, money = 0, xp = -1, spells = {}, title = "|cffff0000Red|r", cap = "yes", skill = { line = 197, pts = 1001 }, cur = {} } },
+    { id = "rwds-5", t = 104, type = "quest", act = "accept", quest = 7002, ${WHO}, rewards = { items = {}, cap = true } },
+    { id = "rwds-6", t = 105, type = "quest", act = "accept", quest = 7003, ${WHO},
+      rewards = { items = {}, money = 2147483648, skill = { line = 197 }, title = "${"x".repeat(81)}",
+                  spells = { 9, 8, 7, 6, 5, 4, 3, 2, 1, 10 }, cur = { { id = 9, n = 1 }, { id = 8, n = 1 }, { id = 7, n = 1 }, { id = 6, n = 1 },
+                  { id = 5, n = 1 }, { id = 4, n = 1 }, { id = 3, n = 1 }, { id = 2, n = 1 }, { id = 1, n = 1 } },
+                  choose = { ${Array.from({ length: 11 }, (_, i) => `{ id = ${30001 + i}, n = 1 }`).join(", ")} } } },
+    { id = "rwds-7", t = 106, type = "quest", act = "turnin", quest = 7004, ${WHO}, rewards = { items = {}, choices = {}, cap = true, money = 2147483647 } },
+    { id = "rwds-8", t = 107, type = "quest", act = "accept", quest = 7005, ${WHO}, rewards = "125" },
+  }`)]).inventory;
+  const by = Object.fromEntries(doc.observations.events.map((e) => [e.id, e]));
+  const amulets = [{ id: 18471, n: 1, link: "|cffffffff|Hitem:18471|h[X]|h|r" }, { id: 18472, n: 1, link: "|cffffffff|Hitem:18472|h[X]|h|r" }];
+  assert.deepEqual(by["rwds-1"].rewards, { items: [], choose: amulets, money: 125, xp: 160 }, "accept: no choices or chose");
+  assert.deepEqual(by["rwds-2"].rewards, { items: [], choose: amulets, choices: [18471, 18472], chose: 18472, money: 125, xp: 160 });
+  assert.equal(by["rwds-2"].xp, 160, "the turn-in's top-level xp stays");
+  assert.ok(!("money" in by["rwds-2"]), "never a top-level money");
+  assert.deepEqual(by["rwds-3"].rewards, { items: [{ id: 2589, n: 5 }], spells: [100, 300], title: "Champion of the Example", cap: true,
+    skill: { line: 197, pts: 5 }, cur: [{ id: 42, n: 10 }, { id: 61, n: 3 }] });
+  assert.ok(!("rewards" in by["rwds-4"]), "an accept whose keys all fail lists nothing: " + JSON.stringify(by["rwds-4"].rewards));
+  assert.ok(!("rewards" in by["rwds-5"]), "cap alone lists nothing on an accept");
+  assert.deepEqual(Object.keys(by["rwds-6"].rewards), ["items", "choose", "spells", "cur"]);
+  assert.deepEqual(by["rwds-6"].rewards.spells, [1, 2, 3, 4, 5, 6, 7, 8], "the lowest 8 spells");
+  assert.deepEqual(by["rwds-6"].rewards.cur.map((c) => c.id), [1, 2, 3, 4, 5, 6, 7, 8], "the lowest 8 currencies");
+  assert.equal(by["rwds-6"].rewards.choose.length, 10, "at most 10 to choose from");
+  assert.deepEqual(by["rwds-7"].rewards, { items: [], choices: [], money: 2147483647, cap: true }, "a turn-in keeps cap");
+  assert.ok(!("rewards" in by["rwds-8"]));
+  const { validateExport } = require("./validate_export");
+  assert.deepEqual(validateExport(doc), [], "the schema takes them");
+  const broken = structuredClone(doc);
+  broken.observations.events.find((e) => e.id === "rwds-1").rewards.choices = [18471];
+  assert.ok(validateExport(broken).length, "the schema refuses choices on an accept");
+  const noChoices = structuredClone(doc);
+  delete noChoices.observations.events.find((e) => e.id === "rwds-2").rewards.choices;
+  assert.ok(validateExport(noChoices).length, "the schema still wants choices on a turn-in");
 });
 
 test("observations 3.6.0: a quest's text rides on its accept and turn-in; only text, only that act's fields", () => {
