@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ljk5000/kutz-inventory/blob/main/schema/quest-cache.schema.json",
+  "title": "KutzInventory quest cache",
+  "description": "Quest facts read from the game client's quest cache (Cache/WDB/<locale>/questcache.wdb), sent by the Companion to POST /api/wow/quest-cache. Each row is the client's copy of what the server sent it for that build and locale. One document holds at most 500 quests of one cache file, sorted by id; a cache with more is sent as several documents with the same header. Only quests that are new or changed since the last accepted upload are included. It names no character, account, realm, guild, GUID, path or time. Quest text is never included. The required numbers of a row are always present (0 is a real zero); an optional id or list is left out exactly when the cache's slot is empty. A field this schema does not name is unknown.",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "build", "locale", "supportedBuilds", "companion", "total", "quests"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+      "description": "A reader that knows 1.0 can read any 1.x."
+    },
+    "kind": { "const": "quest-cache" },
+    "build": {
+      "type": "integer", "minimum": 1, "maximum": 4294967295,
+      "description": "The client build in the cache file's header. Always one of supportedBuilds."
+    },
+    "locale": {
+      "type": "string", "pattern": "^[a-z]{2}[A-Z]{2}$",
+      "description": "The cache's locale (its header, which must match its folder), for example enUS."
+    },
+    "supportedBuilds": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+      "description": "Every build whose record layout this Companion knows, ascending. A cache from any other build is not read or sent."
+    },
+    "companion": {
+      "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The version of the Companion (or exporter) that read the file."
+    },
+    "total": {
+      "type": "integer", "minimum": 0,
+      "description": "How many quests the cache file holds, sent or not."
+    },
+    "quests": {
+      "type": "array", "maxItems": 500,
+      "items": { "$ref": "#/$defs/quest" },
+      "description": "The new or changed quests, sorted by id, each id once."
+    }
+  },
+  "$defs": {
+    "id": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "stack": {
+      "type": "object",
+      "required": ["id", "n"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "n": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "The amount, as the cache holds it." }
+      }
+    },
+    "quest": {
+      "type": "object",
+      "required": ["id", "level", "minLevel", "sort", "xpDifficulty", "xpMultiplier", "money"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id", "description": "Quest id (record byte 0, equal to the record's key)." },
+        "level": { "type": "integer", "minimum": -1, "maximum": 255, "description": "Quest level (byte 8)." },
+        "minLevel": { "type": "integer", "minimum": 0, "maximum": 255, "description": "Minimum character level to take it (byte 16)." },
+        "sort": {
+          "type": "integer", "minimum": -2147483648, "maximum": 2147483647,
+          "description": "Quest sort (byte 24): a positive AreaTable id (the zone the quest log files it under), a negative QuestSort id (a category such as a class or profession), or 0."
+        },
+        "info": { "$ref": "#/$defs/id", "description": "QuestInfo id (byte 28): 1 Elite, 41 PvP, 62 Raid, 81 Dungeon and so on. Left out when 0 (an ordinary quest)." },
+        "next": { "$ref": "#/$defs/id", "description": "The quest the ender offers next (byte 36, RewardNextQuest). Left out when 0." },
+        "xpDifficulty": { "type": "integer", "minimum": 0, "maximum": 9, "description": "Column of the client's QuestXP table, row = quest level (byte 40). The cache holds no XP amount." },
+        "xpMultiplier": { "type": "number", "minimum": 0, "maximum": 100, "description": "Multiplier on that table value (byte 44, a 32-bit float rounded to 6 significant digits)." },
+        "money": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647, "description": "Reward money in copper (byte 48). 0 when the quest gives none." },
+        "spell": { "$ref": "#/$defs/id", "description": "The spell cast on the character at turn-in (byte 68). It can be a spell that teaches another spell. Left out when 0." },
+        "startItem": { "$ref": "#/$defs/id", "description": "The item handed to the character when the quest is accepted (byte 96). Left out when 0." },
+        "items": {
+          "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/$defs/stack" },
+          "description": "Items always given, in slot order (bytes 116 + 16k: item id, amount). Left out when there are none."
+        },
+        "choose": {
+          "type": "array", "minItems": 1, "maxItems": 6, "items": { "$ref": "#/$defs/stack" },
+          "description": "Items to choose one from, in slot order (bytes 180 + 12k: item id, quantity). Left out when there are none."
+        },
+        "rep": {
+          "type": "array", "minItems": 1, "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["faction", "tier"],
+            "additionalProperties": false,
+            "properties": {
+              "faction": { "$ref": "#/$defs/id", "description": "Faction id." },
+              "tier": { "type": "integer", "minimum": -9, "maximum": 9, "description": "The value as stored: an index into the client's QuestFactionReward table (row 1, its Difficulty column; tier 5 is 100 reputation). Only tiers 0 to 7 were seen in the verified files; how a negative tier reads was not checked." },
+              "override": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647, "not": { "const": 0 }, "description": "When present it replaces the tier: reputation in hundredths (7500 is 75 reputation)." }
+            }
+          },
+          "description": "Reputation rewards in slot order (bytes 300 + 16k: faction id, tier, override). Before any racial or other bonus. Left out when there are none."
+        },
+        "currencies": {
+          "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/$defs/stack" },
+          "description": "Currency rewards (bytes 384 + 8k: CurrencyTypes id, amount). Left out when there are none."
+        }
+      }
+    }
+  }
+}
