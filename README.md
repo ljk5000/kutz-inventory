@@ -4,7 +4,7 @@ KutzInventory records your characters' possessions, professions and activity in 
 
 The addon works on its own. Retail and Classic are not supported targets. It has no desktop network access; uploading requires a separate action outside the game.
 
-**Release versions:** KutzInventory **1.22.1** and Companion **0.12.7**. See [release notes](CHANGELOG.md).
+**Release versions:** KutzInventory **1.23.0** and Companion **0.12.7**. See [release notes](CHANGELOG.md).
 
 - [Install the addon](#install-the-addon)
 - [Features and commands](#features-and-commands)
@@ -95,7 +95,7 @@ While enabled, it records:
 - Random suffixes (1.21.0): a copy "of the Bear" stays the one item it is. Its suffix is kept beside the item on loot, roll, quest and vendor links and as a variant under the item's facts, never as an item of its own.
 - Kills per day (1.21.0): how many of each creature (NPC ID and level) died in front of you on a day while you were fighting and no other player had tapped it, whether or not anyone looted it. One number per day, creature and level, for 30 days and at most 800 numbers. No corpse ID, no time of day, nothing about any player.
 
-Events include time, game build, map/instance, coordinates outside instances, and **your level, class, faction, given name and surname**. Creature/object GUIDs may identify loot sources. Vendor prices, trainer costs and flight prices are game prices as shown to you (after any reputation discount), not your money. This module does not store player GUIDs, guild, coin loot, quest money, reputation standings or player chat. Raids and inventory have their own, broader data described above. The addon retains at most 5,000 events, 30 days and roughly 2 MB, pruning oldest entries. The NPC summary has its own cap of about 500 KB.
+Events include time, game build, map/instance, coordinates outside instances, and **your level, class, faction, given name and surname**. Creature/object GUIDs may identify loot sources. Vendor prices, trainer costs and flight prices are game prices as shown to you (after any reputation discount), not your money. This module does not store player GUIDs, guild, coin loot, your money, reputation standings or player chat; the only money it keeps is a quest's listed reward as the quest window showed it (1.23.0), a fact about the quest. Raids and inventory have their own, broader data described above. The addon retains at most 5,000 events, 30 days and roughly 2 MB, pruning oldest entries. The NPC summary has its own cap of about 500 KB.
 
 ### Items created — `Crafts.lua`
 
@@ -202,7 +202,7 @@ node tools/inventory_export.js --format 2 <path-to-KutzInventory.lua> <output.js
 
 With no input it looks for all accounts in the conventional Windows `Program Files (x86)/World of Warcraft/_forever_/WTF/Account` folder. Default output is `export/inventory.json` beside the source tree, with `auction-scans.json` alongside it. It prints a local crafting-profit/levelling estimate using observed vendor and AH prices (5% AH sale cut); these are estimates, not guaranteed sale prices. Add `--upload` only after setting `WOW_IMPORT_URL` and `WOW_IMPORT_TOKEN`. `--no-inventory` and `--no-auctions` select upload categories; local conversion still includes both. Details and all tooling: [tools/README.md](tools/README.md).
 
-[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.15.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
+[JSON schemas and synthetic examples](schema/README.md) describe inventory **3.16.0** (default), inventory **2.1.0** (`--format 2`), auction-scan **1.2.0**, and historical inventory 1.x. `tools/convert.js` parses saved Lua values without executing the file and can also run in a browser.
 
 From the repository root:
 

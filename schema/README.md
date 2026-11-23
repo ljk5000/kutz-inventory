@@ -4,7 +4,7 @@ These JSON Schema 2020-12 files describe the local exporter's output. The Compan
 
 | Schema | Version | Contents |
 | --- | --- | --- |
-| `inventory-export.v3.schema.json` | **3.15.0**, default | Inventory, selected character records, Legacy Trees, current quest log, tracked raids, crafted history, hearth, retained observations, the NPC summary, item facts and kills per day |
+| `inventory-export.v3.schema.json` | **3.16.0**, default | Inventory, selected character records, Legacy Trees, Legacy challenges, current quest log, tracked raids, crafted history, hearth, retained observations (with quest rewards, kill reputation and disenchanting), the NPC summary (with health and power), item facts and kills per day |
 | `inventory-export.schema.json` | **2.1.0**, `--format 2` | Broader character profile including stats/sheet/talents/reputation/PvP, without raids/observations/crafted/hearth/questLog |
 | `auction-scan.schema.json` | **1.2.0** | One realm/auction house's prices and optional exact stack supply |
 | `inventory-export.v1.schema.json` | Historical 1.x | Older inventory with crafting estimates and AH prices; current tools do not write it |
@@ -132,7 +132,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `where`: instance/map ID, UI map, instance type/difficulty inside an instance, otherwise `x`/`y` from 0–1 rounded to four places.
 - `who`: recording character's level, numeric class, faction, and optional **name/surname** (3.3.0). No realm or player GUID in this block.
 - `loot`: `src` with kind (mob/boss/chest/fishing/herb/mine/skin/container/other, plus schema-compatible future kinds), NPC/object/item ID, creature/object GUID when known, level and attribution method; `items: [{ id, n, link?, won? }]`. Coins-only windows have empty items. Known reopened corpses are deduplicated, with skinning separate.
-- `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice, never quest money. From 3.11.0, accept may carry the quest's level, group size, daily/weekly, time limit and starting item, and turn-in the XP and the reputation changes ([below](#quest-extras-3110)). From 3.12.0, accept may also carry `obj` and `poi` ([below](#quest-objectives-and-places-3120)); from 3.13.0, `rows` beside `obj`.
+- `quest`: `act` (`accept`/`turnin`), quest ID, NPC/object giver/ender; turn-in can include item rewards/choice IDs/selected choice; from 3.16.0 both acts can carry the rewards as the window listed them, including the quest's listed money ([below](#quest-rewards-kill-reputation-creature-health-and-disenchanting-3160)). From 3.11.0, accept may carry the quest's level, group size, daily/weekly, time limit and starting item, and turn-in the XP and the reputation changes ([below](#quest-extras-3110)). From 3.12.0, accept may also carry `obj` and `poi` ([below](#quest-objectives-and-places-3120)); from 3.13.0, `rows` beside `obj`.
 - `vendor`: NPC ID, items with quantity, copper `price` per that quantity, optional item/currency costs and limited stock/null. Same vendor and stock are recorded at most once an hour in a session. From 3.9.0, optional `rx` and `filtered` (below).
 - `trainer` (3.9.0): a class or profession trainer's whole list, with costs, spell IDs and `rx` (below).
 - `taxi` and `flight` (3.11.0): a flight master's reachable nodes with their prices, and how long a flight took ([below](#flight-masters-and-flights-3110)).
@@ -141,6 +141,7 @@ Events include `id`, Unix `t`, optional game build `b`, `type`, `where` and `who
 - `line` (3.12.0): game-authored creature speech and emotes ([below](#game-text-3120)).
 - `tame` (3.13.0): a hunter's tamed beast and what its new pet showed ([below](#hunter-tames-3130)).
 - `credit` (3.13.0): which creature, item or object counted for a quest objective ([below](#objective-credit-3130)).
+- `killrep` (3.16.0): the reputation one kill gave ([below](#quest-rewards-kill-reputation-creature-health-and-disenchanting-3160)).
 - `npcs` and `install` (3.10.0) are not events but a cumulative per-install summary of the creatures the player looked at ([below](#npc-summary-3100)).
 
 From 3.3.0, short links retain only colour, matching item ID and item name: `|cffRRGGBB|Hitem:<id>|h[<name>]|h|r`. Full game link payloads are excluded from these observation item fields.
@@ -288,7 +289,7 @@ From 3.11.0 (KutzInventory 1.18.0) quest events may carry a few more facts; `obs
 
 `d` is what this character received, not the quest's listed reward: it includes the character's reputation bonuses, and `rep` includes any spill-over to other factions, so the same quest can differ between characters.
 
-**Never recorded:** quest money (`GetRewardMoney` is never called and the money argument of `QUEST_TURNED_IN` is never read), the player's money, and any standing, reputation level or renown level: `d` is a change, so a reader cannot tell from it where the character stands. Measured as compact JSON with a named `who`: the five accept fields add about 65 bytes to an accept (`lv` alone about 8), `xp` about 10 bytes to a turn-in and each `rep` entry about 20 (xp with two changes about 50; six changes about 120).
+**Never recorded:** the player's money (`GetMoney` is never called and the money argument of `QUEST_TURNED_IN` is never read; from 3.16.0 the quest's own listed reward, `GetRewardMoney` with its window open, is recorded as `rewards.money`), and any standing, reputation level or renown level: `d` is a change, so a reader cannot tell from it where the character stands. Measured as compact JSON with a named `who`: the five accept fields add about 65 bytes to an accept (`lv` alone about 8), `xp` about 10 bytes to a turn-in and each `rep` entry about 20 (xp with two changes about 50; six changes about 120).
 
 ### Quest objectives and places (3.12.0)
 
@@ -446,7 +447,36 @@ npcs: [ 1-3000 of {                 sorted by npc; the most recently seen kept; 
 
 Labels follow the trainer label rules above (no `|` markup, control characters or GUID-shaped text, at most the limit in characters). **Privacy:** the summary holds no time finer than a day (one `day` per NPC, the last), no player names (`name` and `sub` are the NPC's own, with the guards above), no GUIDs and no ordered trail: cells are unordered counts sorted by place, and nothing older than 180 days is kept. It still says which NPCs this install's characters looked at, the last day for each, and roughly where the player stood beside them. The addon drops an NPC not seen for 180 days when the game loads, and keeps at most 3,000 NPCs (the least recently seen go first: oldest `day`, then fewest counts) and about 500 KB of saved data for them (its own cap, apart from the events' 2 MB, so the summary and the events never push each other out; 3,000 realistic entries with names measured about 440 KB), and at most 40 squares per NPC. Measured with realistic data (every NPC named, most with 0-3 squares, about one in eight with a subtitle), compact JSON is about 140 bytes per NPC (before `svc`, which adds roughly 15 bytes of saved data per service flag, about 10 in compact JSON): 500 NPCs 70 KB (13 KB gzipped), 3,000 NPCs 432 KB (77 KB gzipped); the exporter's indented file is about 1.8 times that (500 NPCs 127 KB, 3,000 NPCs 791 KB; 15 KB and 93 KB gzipped).
 
-No observation field is intended for coin loot, quest/player money, player chat, guild data or other players' names/GUIDs. Ordinary inventory, monitor errors and raids have different data and must be reviewed separately. Recording defaults on in new installs since addon 1.13.0; existing off choices persist. `/kinv track drops off` also stops the NPC summary; old retained events and the summary still export after it.
+No observation field is intended for coin loot, the player's money, player chat, guild data or other players' names/GUIDs; the only money is a quest's listed reward (`rewards.money`, 3.16.0), a game fact like a vendor price. Ordinary inventory, monitor errors and raids have different data and must be reviewed separately. Recording defaults on in new installs since addon 1.13.0; existing off choices persist. `/kinv track drops off` also stops the NPC summary; old retained events and the summary still export after it.
+
+### Quest rewards, kill reputation, creature health and disenchanting (3.16.0)
+
+All optional and additive (KutzInventory 1.23.0); `observations.v` stays 1. The full spec, with how each call was checked and what is still to be seen in the game, is [docs/quest-rewards-and-creature-facts.md](../docs/quest-rewards-and-creature-facts.md).
+
+**Quest rewards as the window listed them, on both acts.** An accept may now carry `rewards` (read at `QUEST_DETAIL`, kept only when that window showed this very quest and listed at least one reward), and a turn-in's `rewards` gains the same keys (read at `QUEST_COMPLETE`). `rewards.items`, `choices` and `chose` keep their meaning; `choices` and `chose` stay turn-in only, so the schema now requires only `items`.
+
+```text
+rewards: {
+  items:   [ { id, n, link? } ]         the rewards everyone gets (as before)
+  choose?: [ 1-10 of { id, n, link? } ] the choose-one items in the window's order, with counts
+  money?:  integer >= 1                 the quest's listed money reward in copper (GetRewardMoney with that window open)
+  xp?:     integer >= 1                 GetRewardXP, under the level cap with XP not turned off
+  spells?: [ 1-8 ids ]                  C_QuestInfoSystem.GetQuestRewardSpells, ascending
+  title?:  string 1-80                  GetRewardTitle
+  cap?:    true                         the character was at the level cap (money can then include converted XP)
+  skill?:  { line, pts 1-1000 }         GetRewardSkillLineID / GetRewardSkillPoints, only when both are known
+  cur?:    [ 1-8 of { id, n } ]         C_QuestInfoSystem.GetQuestRewardCurrencies, sorted by id
+  choices?, chose?                      turn-in only, as before
+}
+```
+
+**Money.** `rewards.money` is a fact about the quest (what the window lists at this character's level), not anyone's gold. The addon never calls `GetMoney` and never reads `QUEST_TURNED_IN`'s money argument; no other money of the player is read or exported.
+
+**`killrep` events (new type).** `{ id, t, b?, type: "killrep", npc, lv?, f, d, where, who }`: the reputation one kill gave this character, from the client's own "Reputation with %s increased by %d." line (or decreased), tied to a creature only when every creature this player saw die untapped by others from 2 s before the line to 1 s after it had the same NPC id; nothing within 5 s of a turn-in or while a reward window is open. `f` is the faction id found by name in the character's reputation list (built out of combat and cached; a name two factions share records nothing), `d` the signed change (never 0, at most 100,000 either way). Never a standing, never the creature's GUID. Once per `npc`, `lv`, `f` and `d` per install (a saved 2,000-key index), at most 100 a session, under the events' half caps.
+
+**`npcs[].hp` and `pw`.** `hp: [ 1-6 of { lv 1-255, diff? 0-99999, v >= 1 } ]` and `pw: [ 1-6 of { lv, diff?, t 0-30, v >= 1 } ]`: a living creature's `UnitHealthMax`, and `UnitPowerType` with `UnitPowerMax` for that type, per level and (inside an instance) difficulty. Each value is the one read most often (the addon's tally `c` stays in the saved file). The six most recently read levels are kept; two installs merge per level and difficulty, the newer install winning. A creature without power has no `pw`. Show a value only when two installs agree.
+
+**Disenchanting.** A loot window within 5 s of the player's own Disenchant (spell 13262, or a spell of that name) that succeeded is `src: { kind: "disenchant", item }`, where `item` is the destroyed item (from the window's `Item-` source GUID, else the bag item clicked at most 1 s before the cast began). Nothing else rides in `src`. A window without the item's id is not recorded at all; one window per cast; a bag item used after the cast makes the window that item's `container` window, as before. An older addon recorded such windows as `container`, often without `item`.
 
 ### Item facts, random suffixes and kills (3.15.0)
 

@@ -7,7 +7,8 @@
 -- only call ns.ObsCommand / ns.ObsNote when they exist). Leave this file and its .toc lines out and the addon is the same.
 --
 -- KutzInventoryObsDB = { v = 1, on = true|false, agreed = true|nil, noted = true|nil,
---                        notedGameText = true|nil, notedPets = true|nil, addon = "1.8.0", prefix = "k1f9c2", n = 17,
+--                        notedGameText = true|nil, notedPets = true|nil, notedRewards = true|nil (1.23.0),
+--                        addon = "1.8.0", prefix = "k1f9c2", n = 17,
 --                        events = { oldest first }, npcs = { [npcId] = ... }, textSeen = { [kind] = { next, keys } } }
 --   prefix: random, made once per install; the event ids start with it and the export names the npcs summary's install by it.
 --   on: a new table starts true (KutzInventory 1.13.0); an existing one keeps what it holds, only a missing on becomes
@@ -3498,7 +3499,7 @@ function ns.ObsCommand(msg)
     return true
 end
 
--- Existing installs get each release's notice they have not seen yet at login (1.19.0, 1.20.0). The first /kinv still
+-- Existing installs get each release's notice they have not seen yet at login (1.19.0, 1.20.0, 1.23.0). The first /kinv still
 -- explains the tracking preference.
 function ns.ObsNote(atLogin, hadInventory)
     local d = DB(true)
@@ -3509,16 +3510,19 @@ function ns.ObsNote(atLogin, hadInventory)
         if (hadInventory or gameText.upgrade) and not d.notedPets then
             Say("1.20.0 adds hunter tames (the beast, and its pet's abilities, attack speed and diet) and which creature, item or object counted for a quest objective when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
         end
-        d.notedGameText, d.notedPets = true, true
+        if (hadInventory or gameText.upgrade) and not d.notedRewards then
+            Say("1.23.0 adds the rewards a quest window lists (its money too: the quest's, never yours), the reputation a kill gives, creatures' health and power, and what disenchanting gives when drop tracking is on. |cffaaaaaa/kinv track drops off|r stops recording.")
+        end
+        d.notedGameText, d.notedPets, d.notedRewards = true, true, true
         return
     end
     if d.noted then return end
     d.noted = true
     if d.on and d.agreed then
         Say("drop, quest, vendor, trainer, NPC and game text tracking is enabled by default for cr0m's item database. |cffaaaaaa/kinv track|r shows the status.")
-        print("  It never records gold or player chat. |cffaaaaaa/kinv track drops off|r stops recording.")
+        print("  It never records your gold or player chat. |cffaaaaaa/kinv track drops off|r stops recording.")
     else
         Say("drop, quest, vendor, trainer, NPC and game text tracking for cr0m's item database is off here, as you left it. |cffaaaaaa/kinv track drops on|r starts it.")
-        print("  It never records gold or player chat. |cffaaaaaa/kinv track|r shows the status.")
+        print("  It never records your gold or player chat. |cffaaaaaa/kinv track|r shows the status.")
     end
 end

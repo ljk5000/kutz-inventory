@@ -66,7 +66,7 @@ test("convert.js loads as a browser script with no Node globals and defines only
   for (const fn of ["parseSavedVariables", "buildAll", "toFormat3", "auctionScans", "convertSavedVariables", "plain"]) {
     assert.equal(typeof k[fn], "function", fn);
   }
-  assert.equal(k.SCHEMA_VERSION_3, "3.15.0");
+  assert.equal(k.SCHEMA_VERSION_3, "3.16.0");
   // and it does the whole job in there
   assert.equal(pinned(k.convertSavedVariables([LUA]).inventory), V3);
 });
@@ -196,17 +196,26 @@ const WHO = `who = { level = 60, class = 4, faction = "Alliance" }`;
 
 test("observations: the example's events are exported in the documented shape; the broken one is not; 2.x has none", () => {
   const obs = convert.convertSavedVariables([LUA]).inventory.observations;
-  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.21.0");
+  assert.equal(obs.v, 1); assert.equal(obs.addon, "1.23.0");
   assert.deepEqual(Object.keys(convert.convertSavedVariables([LUA]).inventory).slice(-2), ["raids", "observations"]);
   assert.deepEqual(obs.events.map((e) => e.id.slice(-2) + e.type + (e.act || "")),
-    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame", "30credit", "31loot"]);
+    ["17loot", "18loot", "19loot", "20questaccept", "21questturnin", "22vendor", "23trainer", "24taxi", "25flight", "26gossip", "27read", "28line", "29tame", "30credit", "31loot", "32killrep", "33loot"]);
   assert.deepEqual(obs.events[0], { id: "k1f9c2-000017", t: 1762905600, b: "1.60.1.70888", type: "loot",
     src: { kind: "boss", npc: 11502, guid: "Creature-0-4170-409-1234-11502-000012ABCD", via: "slot" },
     where: { map: 409, uiMap: 232, itype: "raid", difficulty: 9 },
     who: { level: 60, class: 4, faction: "Alliance", name: "Exampleobserver", surname: "Examplefamily" },
     items: [{ id: 17076, n: 1, link: "|cffff8000|Hitem:17076|h[Bonereaver's Edge]|h|r" }, { id: 18264, n: 2 }] }, "a link for another id is dropped");
   assert.deepEqual(obs.events[1].items, [], "a coins-only corpse is an open with no items");
-  assert.deepEqual(obs.events[4].rewards, { items: [{ id: 19019, n: 1 }], choices: [19018, 19019], chose: 19019 });
+  assert.deepEqual(obs.events[4].rewards, { items: [{ id: 19019, n: 1 }], choose: [{ id: 19018, n: 1 }, { id: 19019, n: 1 }],
+    choices: [19018, 19019], chose: 19019, money: 125, xp: 6600 });
+  // 3.16.0: the offer window's rewards on the accept, a kill's reputation and a Disenchant's window
+  assert.deepEqual(obs.events[3].rewards, { items: [],
+    choose: [{ id: 19018, n: 1, link: "|cffa335ee|Hitem:19018|h[Made-up Amulet]|h|r" }, { id: 19019, n: 1, link: "|cffa335ee|Hitem:19019|h[Made-up Charm]|h|r" }],
+    money: 125, xp: 6600, spells: [7322], skill: { line: 197, pts: 5 }, cur: [{ id: 4225, n: 1 }] });
+  assert.deepEqual(obs.events[15], { id: "k1f9c2-000032", t: 1762906650, b: "1.60.1.70888", type: "killrep", npc: 2958, lv: 14, f: 72, d: 5,
+    where: { map: 0, uiMap: 1429, x: 0.4219, y: 0.6784 }, who: { level: 14, class: 4, faction: "Alliance" } });
+  assert.deepEqual(obs.events[16].src, { kind: "disenchant", item: 6560 });
+  assert.deepEqual(obs.events[16].items, [{ id: 10940, n: 2, link: "|cffffffff|Hitem:10940|h[Strange Dust]|h|r" }]);
   assert.deepEqual(obs.events[5].items, [{ id: 19326, n: 1, link: "|cffa335ee|Hitem:19326|h[Made-up Cloak]|h|r", price: 0,
     cost: [{ item: 17010, n: 1 }], limited: null },
     { id: 4470, n: 1, price: 38, limited: 5 }]);
@@ -734,7 +743,7 @@ test("observations 3.6.0: a quest's text rides on its accept and turn-in; only t
   assert.deepEqual(obs.events[0].text, { title: "A Title", details: "Hello, $N.", objectives: "Do it." });
   assert.deepEqual(obs.events[1].text, { completion: "Done, $N." });
   for (const e of obs.events.slice(2)) assert.ok(!("text" in e), e.id);
-  assert.equal(convert.SCHEMA_VERSION_3, "3.15.0");
+  assert.equal(convert.SCHEMA_VERSION_3, "3.16.0");
   assert.deepEqual(convert.convertSavedVariables([LUA]).inventory.observations.events[3].text,
     { title: "A Made-up Errand", details: "You look capable, $N.\n\nTake this crate to the far camp.", objectives: "Carry the crate to the far camp." });
 });
@@ -800,11 +809,13 @@ test("observations 3.10.0: the example's npcs are exported sorted by npc with th
   assert.equal(obs.install, "k1f9c2");
   assert.deepEqual(Object.keys(obs), ["v", "addon", "install", "events", "npcs", "items", "killsInstall", "kills"]);
   assert.deepEqual(obs.npcs, [
-    { npc: 525, name: "Made-up Wolf", lv: [10, 12], cls: "normal", ct: 1, fam: 1, rxA: 2, spd: 200, day: 20404, cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] },
+    { npc: 525, name: "Made-up Wolf", lv: [10, 12], cls: "normal", ct: 1, fam: 1, rxA: 2, spd: 200, hp: [{ lv: 10, v: 156 }, { lv: 12, v: 198 }],
+      day: 20404, cells: [[1429, 41, 65, 2], [1429, 42, 65, 1]] },
     { npc: 1346, name: "Made-up Tailor", lv: [30, 30], cls: "normal", ct: 7, rxA: 5, sub: "Made-up Tailoring Supplies", svc: ["repair", "vendor"],
       day: 20405, cells: [[1453, 63, 72, 4]] },
     { npc: 6109, name: "Made-up Dragon", boss: true, cls: "worldboss", ct: 2, rxA: 1, day: 20403 },
-    { npc: 11671, name: "Made-up Hound", lv: [62, 62], cls: "elite", ct: 1, rxA: 2, day: 20404, inst: [[409, 9, 3]] }], "no spds, no entry without a day, no junk cell");
+    { npc: 11671, name: "Made-up Hound", lv: [62, 62], cls: "elite", ct: 1, rxA: 2, hp: [{ lv: 62, diff: 9, v: 42000 }],
+      pw: [{ lv: 62, diff: 9, t: 0, v: 9800 }], day: 20404, inst: [[409, 9, 3]] }], "no spds or tally, no entry without a day, no junk cell");
 });
 
 test("observations 3.10.0: npcs keep only the documented fields with the right types and ranges", () => {

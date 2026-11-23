@@ -30,7 +30,7 @@ report("scan scheduling, retries and failure recovery", r.ok, r.out);
 r = node([tool("check_raids.js")]);
 report("raid tracking: /kinv raid, raid string shape, active window, events, loot lines, caps and pruning", r.ok && /^OK/m.test(r.out) && !/^FAIL/m.test(r.out), r.out);
 r = node([tool("check_observations.js")]);
-report("drop tracking: on by default for a new install, /kinv track, one-time note, loot / quest (with its objectives, places, level, XP and reputation changes) / vendor / trainer / taxi / flight / gossip / read / line / tame / credit events, the npcs summary and its services, no gold, standings or other players, caps",
+report("drop tracking: on by default for a new install, /kinv track, one-time note, loot (also disenchanting) / quest (with its objectives, places, level, XP, reputation changes and listed rewards) / kill reputation / vendor / trainer / taxi / flight / gossip / read / line / tame / credit events, the npcs summary with its services, health and power, the 1.23.0 login line, no player gold, standings or other players, caps",
     r.ok && /^OK/m.test(r.out) && !/^FAIL/m.test(r.out), r.out);
 r = node([tool("check_crafts.js")]);
 report("items crafted: own 'You create' lines only, stacks, per-day counts, the 120-day window, export shape, nothing crafted unchanged",
