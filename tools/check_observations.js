@@ -1452,6 +1452,210 @@ do
   print("OK   quest rewards as listed: choose, money (the quest's, never the player's), xp, spells, title, cap, skill, cur; on accept only for its own offer window; re-read when an item loads")
 end
 
+-- 6e) killrep (1.23.0): the reputation a kill gave, from the faction message, tied to the one creature id that died around
+--     it (2 s before to 1 s after); the faction's id from a name table read out of combat; never a standing or a GUID.
+--     kr() adds the reputation list (s.factions, in list order, a collapsed header hiding its children; s.walks counts
+--     GetNumFactions, i.e. reads of the list), combat (s.combat) and the tap API.
+do
+  local SECRET = {}
+  local function kr(opts)
+    opts = opts or {}
+    opts.globals = opts.globals or {}
+    opts.globals.issecretvalue = function(v) return v == SECRET end
+    local h = fresh(opts); h.on()
+    local s, G = h.s, h.G
+    s.combat, s.walks, s.n = false, 0, 0
+    s.factions = { { id = 1118, name = "Classic", header = true, collapsed = true },
+                   { id = 72, name = "Stormwind", st = 31337, parent = 1118 },
+                   { id = 87, name = "Bloodsail Buccaneers", st = -27183, parent = 1118 },
+                   { id = 21, name = "Booty Bay", st = 3000, parent = 1118 } }
+    local function shown()
+      local out, hidden = {}, {}
+      for _, f in ipairs(s.factions) do
+        local under = f.parent and hidden[f.parent]
+        if not under then out[#out + 1] = f end
+        if f.header and (f.collapsed or under) then hidden[f.id] = true end
+      end
+      return out
+    end
+    local function data(f)
+      if f then return { factionID = f.id, name = f.name, currentStanding = f.st or 0, isHeader = f.header or false,
+                         isHeaderWithRep = false, isCollapsed = f.collapsed or false } end
+    end
+    G.C_Reputation = { GetNumFactions = function() s.walks = s.walks + 1; return #shown() end,
+                       GetFactionDataByIndex = function(i) return data(shown()[i]) end,
+                       ExpandFactionHeader = function(i) local f = shown()[i]; if f then f.collapsed = false end end,
+                       CollapseFactionHeader = function(i) local f = shown()[i]; if f then f.collapsed = true end end }
+    G.InCombatLockdown = function() return s.combat end
+    G.UnitIsTapDenied = function(u) local x = s.units[u]; return x and x.tapped or false end
+    G.FACTION_STANDING_INCREASED = "Reputation with %s increased by %d."
+    G.FACTION_STANDING_DECREASED = "Reputation with %s decreased by %d."
+    G.FACTION_STANDING_INCREASED_BONUS = "Reputation with %s increased by %d. (+%.1f bonus)"
+    h.event("PLAYER_ENTERING_WORLD")            -- out of combat: the name table is read here
+    return h
+  end
+  local function die(h, npc, extra)             -- a creature this player sees die (a nameplate's UNIT_HEALTH)
+    h.s.n = h.s.n + 1
+    local u = { guid = string.format("Creature-0-4170-0-1234-%d-%010X", npc, h.s.n), dead = true, level = 12 }
+    for k, v in pairs(extra or {}) do u[k] = v end
+    h.s.units["nameplate" .. h.s.n] = u
+    h.event("UNIT_HEALTH", "nameplate" .. h.s.n)
+  end
+  local function msg(h, text) h.event("CHAT_MSG_COMBAT_FACTION_CHANGE", text) end
+  local function settle(h, sec) h.s.clock = h.s.clock + (sec or 1); h.drain() end
+  local function reps(h) local out = {}; for _, e in ipairs(h.events()) do if e.type == "killrep" then out[#out + 1] = e end end; return out end
+  local function clean(h)
+    assert(not h.db().lastError, tostring(h.db().lastError))
+    local all = dump(h.db())
+    assert(not all:find("Creature%-") and not all:find("31337") and not all:find("27183"), "no GUID, no standing: " .. all)
+  end
+
+  -- one creature, one message: npc, lv, f, d; the list is read once, at login, and its headers put back
+  local h = kr()
+  assert(h.s.walks > 0 and h.s.factions[1].collapsed == true, "the name table is read at login, the header closed again")
+  local walks = h.s.walks
+  die(h, 1234); msg(h, "Reputation with Stormwind increased by 25."); settle(h)
+  local r = reps(h)
+  assert(#r == 1 and r[1].npc == 1234 and r[1].lv == 12 and r[1].f == 72 and r[1].d == 25 and r[1].where and r[1].who
+         and r[1].id:match("^[0-9a-z]+%-%d+$") and r[1].b, dump(r))
+  local keys = {}
+  for k in pairs(r[1]) do keys[#keys + 1] = k end
+  table.sort(keys)
+  assert(table.concat(keys, ",") == "b,d,f,id,lv,npc,t,type,where,who", table.concat(keys, ","))
+  -- a decrease is negative; the death may show up to a second after the message; the same again is not kept twice
+  settle(h, 5); msg(h, "Reputation with Bloodsail Buccaneers decreased by 5."); h.s.clock = h.s.clock + 0.5; die(h, 1234); settle(h, 0.5)
+  r = reps(h)
+  assert(#r == 2 and r[2].f == 87 and r[2].d == -5 and r[2].npc == 1234, dump(r))
+  settle(h, 5); die(h, 1234); msg(h, "Reputation with Stormwind increased by 25."); settle(h)
+  assert(#reps(h) == 2, "the same npc, lv, f and d once per install")
+  assert(h.s.walks == walks, "known names: the list is not read again on a kill")
+  clean(h)
+  -- the dedup index is saved: the same kill after a reload is not recorded again, a different amount is
+  local again = fresh({ db = h.db() })
+  again.G.C_Reputation, again.G.InCombatLockdown, again.G.UnitIsTapDenied = h.G.C_Reputation, h.G.InCombatLockdown, h.G.UnitIsTapDenied
+  again.G.FACTION_STANDING_INCREASED = "Reputation with %s increased by %d."
+  again.s.n = 100
+  again.event("PLAYER_ENTERING_WORLD")
+  local function dieIn(x, npc) x.s.n = (x.s.n or 0) + 1; x.s.units["nameplate" .. x.s.n] = { guid = string.format("Creature-0-4170-0-1234-%d-%010X", npc, x.s.n), dead = true, level = 12 }; x.event("UNIT_HEALTH", "nameplate" .. x.s.n) end
+  dieIn(again, 1234); again.event("CHAT_MSG_COMBAT_FACTION_CHANGE", "Reputation with Stormwind increased by 25."); again.s.clock = again.s.clock + 1; again.drain()
+  assert(#reps(again) == 2, "saved index: " .. #reps(again))
+  again.s.clock = again.s.clock + 5
+  dieIn(again, 1234); again.event("CHAT_MSG_COMBAT_FACTION_CHANGE", "Reputation with Stormwind increased by 20."); again.s.clock = again.s.clock + 1; again.drain()
+  assert(#reps(again) == 3 and reps(again)[3].d == 20, dump(reps(again)))
+
+  -- refusals: two different creatures; none; a death too early; a tapped one, a player's, a controlled one; levels that differ
+  local function none(why, setup)
+    local x = kr()
+    setup(x)
+    settle(x)
+    assert(#reps(x) == 0, why .. ": " .. dump(reps(x)))
+    clean(x)
+  end
+  none("two different creatures", function(x) die(x, 1234); die(x, 5678); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("one before, one just after", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased by 25."); x.s.clock = x.s.clock + 0.5; die(x, 5678) end)
+  none("no death", function(x) msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("the death 3 s before", function(x) die(x, 1234); x.s.clock = x.s.clock + 3; msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("the death 2 s after", function(x) msg(x, "Reputation with Stormwind increased by 25."); x.s.clock = x.s.clock + 2; die(x, 1234) end)
+  none("tapped by another player", function(x) die(x, 1234, { tapped = true }); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("a player", function(x) die(x, 1234, { player = true }); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("a controlled creature", function(x) die(x, 1234, { controlled = true }); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("a pet's GUID", function(x) x.s.n = 1; x.s.units.nameplate1 = { guid = "Pet-0-4170-0-1234-1234-0000000001", dead = true }; x.event("UNIT_HEALTH", "nameplate1"); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("alive", function(x) die(x, 1234, { dead = false }); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("no tap API", function(x) x.G.UnitIsTapDenied = nil; die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("the bonus form", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased by 25. (+2.5 bonus)") end)
+  none("the generic form", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased.") end)
+  none("a secret line", function(x) die(x, 1234); msg(x, SECRET) end)
+  none("an amount of 0", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased by 0.") end)
+  none("an amount past 100000", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased by 100001.") end)
+  none("a name two factions share", function(x)
+    x.s.factions[#x.s.factions + 1] = { id = 99, name = "Stormwind", st = 0 }
+    x.s.clock = x.s.clock + 61; msg(x, "Reputation with Nowhere increased by 25.")   -- unknown: read again, now with the twin
+    die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.")
+  end)
+  none("tracking switched off while it waits", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased by 25."); x.cmd("track drops off") end)
+  local lv = kr()
+  die(lv, 1234, { level = 12 }); die(lv, 1234, { level = 13 }); msg(lv, "Reputation with Stormwind increased by 25."); settle(lv)
+  assert(#reps(lv) == 1 and reps(lv)[1].npc == 1234 and reps(lv)[1].lv == nil, "levels that differ: no lv " .. dump(reps(lv)))
+  local skull = kr()
+  die(skull, 1234, { level = -1 }); msg(skull, "Reputation with Stormwind increased by 25."); settle(skull)
+  assert(#reps(skull) == 1 and reps(skull)[1].lv == nil, dump(reps(skull)))
+
+  -- a quest's reputation: the reward window open, a turn-in within 5 s either side, also one during the wait
+  local q = kr()
+  q.s.quest = 7600; q.event("QUEST_COMPLETE")
+  q.s.clock = q.s.clock + 20; die(q, 1234); msg(q, "Reputation with Stormwind increased by 25."); settle(q)
+  assert(#reps(q) == 0, "reward window open")
+  q.event("QUEST_TURNED_IN", 7600); q.s.clock = q.s.clock + 4; die(q, 1234); msg(q, "Reputation with Stormwind increased by 25."); settle(q)
+  assert(#reps(q) == 0, "4 s after a turn-in")
+  q.s.clock = q.s.clock + 6; die(q, 1234); msg(q, "Reputation with Stormwind increased by 25."); settle(q)
+  assert(#reps(q) == 1, "past 5 s: " .. dump(q.events()))
+  local w = kr()
+  die(w, 1234); msg(w, "Reputation with Stormwind increased by 25."); w.s.quest = 7600; w.event("QUEST_COMPLETE"); w.event("QUEST_TURNED_IN", 7600); settle(w)
+  assert(#reps(w) == 0, "a turn-in during the wait")
+  local fin = kr()
+  fin.s.quest = 7600; fin.event("QUEST_COMPLETE"); fin.event("QUEST_FINISHED")
+  fin.s.clock = fin.s.clock + 6; die(fin, 1234); msg(fin, "Reputation with Stormwind increased by 25."); settle(fin)
+  assert(#reps(fin) == 1, "the reward window closed without a turn-in, 6 s ago")
+
+  -- the name table: never read in combat; a name it does not know reads it again out of combat, at most once a minute
+  local c = kr()
+  local before = c.s.walks
+  c.s.factions[#c.s.factions + 1] = { id = 470, name = "Ratchet", st = 100 }
+  c.s.combat = true
+  die(c, 1234); msg(c, "Reputation with Ratchet increased by 25."); settle(c)
+  assert(#reps(c) == 0 and c.s.walks == before, "in combat: not read, nothing recorded")
+  c.s.combat = false; c.s.clock = c.s.clock + 60; c.event("PLAYER_REGEN_ENABLED")
+  assert(c.s.walks > before, "read again when combat ends")
+  before = c.s.walks
+  c.s.clock = c.s.clock + 5; die(c, 1234); msg(c, "Reputation with Ratchet increased by 25."); settle(c)
+  assert(#reps(c) == 1 and reps(c)[1].f == 470 and c.s.walks == before, dump(reps(c)))
+  c.s.factions[#c.s.factions + 1] = { id = 471, name = "Gadgetzan", st = 100 }
+  c.s.clock = c.s.clock + 5; die(c, 1234); msg(c, "Reputation with Nowhere increased by 25."); settle(c)
+  local afterMiss = c.s.walks
+  assert(afterMiss == before, "a miss within the minute: not read again")
+  c.s.clock = c.s.clock + 5; die(c, 1234); msg(c, "Reputation with Gadgetzan increased by 25."); settle(c)
+  assert(#reps(c) == 1 and c.s.walks == afterMiss, "still within the minute")
+  c.s.clock = c.s.clock + 61; die(c, 1234); msg(c, "Reputation with Gadgetzan increased by 25."); settle(c)
+  assert(#reps(c) == 2 and reps(c)[2].f == 471 and c.s.walks > afterMiss, dump(reps(c)))
+  -- combat state unknown or secret: the list is never read
+  local u = kr()
+  u.G.InCombatLockdown = function() return SECRET end
+  u.s.clock = u.s.clock + 61; u.event("PLAYER_ENTERING_WORLD")
+  local n0 = u.s.walks
+  u.s.factions[#u.s.factions + 1] = { id = 470, name = "Ratchet", st = 100 }
+  die(u, 1234); msg(u, "Reputation with Ratchet increased by 25."); settle(u)
+  assert(#reps(u) == 0 and u.s.walks == n0, "secret combat state: no read")
+
+  -- a translation that names the amount first (%2$d ... %1$s)
+  local de = kr()
+  de.G.FACTION_STANDING_INCREASED = "%2$d Ruf bei %1$s gewonnen."
+  die(de, 1234); msg(de, "25 Ruf bei Stormwind gewonnen."); settle(de)
+  assert(#reps(de) == 1 and reps(de)[1].f == 72 and reps(de)[1].d == 25, dump(reps(de)))
+  -- no format strings: the English forms
+  local en = kr()
+  en.G.FACTION_STANDING_INCREASED, en.G.FACTION_STANDING_DECREASED = nil, nil
+  die(en, 1234); msg(en, "Reputation with Stormwind decreased by 10."); settle(en)
+  assert(#reps(en) == 1 and reps(en)[1].d == -10, dump(reps(en)))
+
+  -- at most 100 a session
+  local many = kr()
+  for i = 1, 101 do die(many, 1234); msg(many, "Reputation with Stormwind increased by " .. i .. "."); settle(many, 5) end
+  assert(#reps(many) == 100, "100 a session: " .. #reps(many))
+  clean(many)
+  -- no C_Timer: decided at once, from the deaths before it
+  local nt = kr({ globals = { C_Timer = false } })
+  nt.G.C_Timer = nil
+  die(nt, 1234); msg(nt, "Reputation with Stormwind increased by 25.")
+  assert(#reps(nt) == 1, "no C_Timer: " .. dump(nt.events()))
+  -- a client without the reputation list: nothing, no error
+  local b2 = fresh({ db = nil }); b2.on(); b2.G.InCombatLockdown = function() return false end
+  b2.event("PLAYER_ENTERING_WORLD"); b2.s.units.nameplate1 = { guid = MOB, dead = true }; b2.event("UNIT_HEALTH", "nameplate1")
+  b2.event("CHAT_MSG_COMBAT_FACTION_CHANGE", "Reputation with Stormwind increased by 25."); b2.drain()
+  b2.event("PLAYER_REGEN_ENABLED"); b2.drain()
+  assert(#reps(b2) == 0 and not b2.db().lastError, tostring(b2.db().lastError))
+  print("OK   kill reputation: one creature id around the faction message, f from a name table read out of combat, d signed; refusals, quests, dedup, caps")
+end
+
 -- 7) vendors: items, stack, price, extended costs, limited stock; the same stock once an hour
 do
   local h = fresh(); h.on()
@@ -2174,7 +2378,7 @@ do
                        "ENCOUNTER_END", "START_LOOT_ROLL", "UNIT_LOOT", "LOOT_ROLLS_COMPLETE", "CHAT_MSG_LOOT", "TRAINER_SHOW", "TRAINER_UPDATE", "TRAINER_CLOSED",
                        "TAXIMAP_OPENED", "TAXIMAP_CLOSED", "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
                        "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "CONFIRM_BINDER",
-                       "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED" }) do
+                       "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED", "CHAT_MSG_COMBAT_FACTION_CHANGE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" }) do
     h.event(e, 1, 2, 3)
   end
   h.drain()

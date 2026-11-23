@@ -81,6 +81,9 @@
 --          (how the cause was told; sole only for a creature, solo and with no pet out): when the objective's
 --          numFulfilled rose and this player's own evidence of the last 6 s named one cause. numFulfilled is read in
 --          memory to see the rise and never saved; nothing about other players. Once per quest, index and id.
+--   killrep (1.23.0) npc, lv, f (faction id), d (the change, signed): the reputation one kill gave this character, from
+--          its own "Reputation with %s increased by %d." line, when every creature it saw die untapped from 2 s before
+--          the line to 1 s after it had that one npc id; not near a quest turn-in. Never a standing. Once per npc, lv, f, d.
 --   rx: UnitReaction("npc", "player"), 1 hated .. 4 neutral .. 8 exalted. Prices and costs are what the game shows,
 --           which already includes this character's reputation discount: rx tells a list price from a discounted one.
 --           They are game prices, not the player's money (taxi costs too).
@@ -2402,8 +2405,9 @@ end
 -- collapsed header is opened on its own from the top down (so one nested in another shows up next and is opened too),
 -- the list is read, and those headers are closed again from the bottom up, also when the read fails part-way. Left
 -- out: headers without a standing of their own, the Guild faction (not the quest's), and, where the client says so,
--- renown factions (their standing restarts each level). nil when unreadable or a header would not open.
-function qx.Standings(ids)
+-- renown factions (their standing restarts each level). nil when unreadable or a header would not open. With names, also
+-- fills names[faction name] = factionID for those same factions (false for a name two of them share; killrep).
+function qx.Standings(ids, names)
     local R = C_Reputation
     if type(R) ~= "table" then return nil end
     local out = {}
@@ -2413,6 +2417,8 @@ function qx.Standings(ids)
         if not (id and s) or id == qx.GUILD or (Plain(f.isHeader) ~= false and Plain(f.isHeaderWithRep) ~= true) then return end
         if type(R.IsMajorFaction) == "function" and not False(R.IsMajorFaction, id) then return end
         out[id] = s
+        local name = names and Plain(f.name)
+        if type(name) == "string" and name ~= "" then names[name] = (names[name] == nil or names[name] == id) and id or false end
     end
     if ids then
         if type(R.GetFactionDataByID) ~= "function" then return nil end
@@ -2737,8 +2743,9 @@ end
 
 -- UNIT_HEALTH(unit): a creature this unit token shows dead, once per corpse. Not a player's, not one someone controls, and
 -- not one another player had tapped (UnitIsTapDenied plainly false); a missing API or a secret is no answer: no evidence.
+-- Called only when UnitIsDead(unit) was plainly true (handlers.UNIT_HEALTH reads it once for this and kr.Died).
 function credit.Died(unit)
-    if not credit.want.monster or type(unit) ~= "string" or unit == "player" or Plain(Try(UnitIsDead, unit)) ~= true then return end
+    if not credit.want.monster then return end
     local guid = Plain(Try(UnitGUID, unit))
     local what, id = FromGuid(guid)
     if what ~= "npc" or credit.dead[guid] then return end
@@ -2898,6 +2905,110 @@ function credit.Reset()                         -- tracking switched off: the ba
 end
 
 ---------------------------------------------------------------------------
+-- killrep (1.23.0): the reputation a kill gave, tied to the one creature it can only have come from
+---------------------------------------------------------------------------
+-- The faction message ("Reputation with %s increased by %d.", in the client's own words; the bonus and generic forms do
+-- not match) is held for a second, because the creature's death can show after the message. It is kept only when every
+-- creature this player saw die untapped by others (kr.Died, the same evidence as credit.Died) from 2 s before the message
+-- to 1 s after it has the same npc id; lv only when all of them showed the same level. Nothing within 5 s of a quest
+-- turn-in or while a reward window is open (its reputation is the quest's). The faction name becomes its id through a
+-- name-to-id table read from the reputation list (qx.Standings) out of combat and reused; it is read again, out of combat
+-- and at most once a minute, after a name it did not know. A name it still does not know, or that two factions share,
+-- records nothing. Never a standing, never a GUID (the corpses' GUIDs are in memory only, to count each once).
+local kr = { BEFORE = 2, AFTER = 1, QUEST = 5, SESSION = 100, DEAD = 500, KEEP = 40, D = 100000, REBUILD = 60,
+             deaths = {}, dead = {}, ndead = 0, n = 0, names = nil, stale = true, builtAt = nil, patterns = nil, token = 0 }
+kr.FORMATS = { { "FACTION_STANDING_INCREASED", "Reputation with %s increased by %d.", 1 },
+               { "FACTION_STANDING_DECREASED", "Reputation with %s decreased by %d.", -1 } }
+
+function kr.Died(unit)                          -- as credit.Died, whether or not a quest wants the creature
+    local guid = Plain(Try(UnitGUID, unit))
+    local what, id = FromGuid(guid)
+    if what ~= "npc" or kr.dead[guid] then return end
+    if not (False(UnitIsPlayer, unit) and False(UnitPlayerControlled, unit) and False(UnitIsTapDenied, unit)) then return end
+    if kr.ndead >= kr.DEAD then kr.dead, kr.ndead = {}, 0 end
+    kr.dead[guid], kr.ndead = true, kr.ndead + 1
+    local now, lv = Now(), Int(Try(UnitLevel, unit), 1)
+    while kr.deaths[1] and (#kr.deaths >= kr.KEEP or kr.deaths[1].at < now - 10) do table.remove(kr.deaths, 1) end
+    kr.deaths[#kr.deaths + 1] = { npc = id, lv = lv and lv <= 255 and lv or nil, at = now }
+end
+
+function kr.Build()                             -- the name-to-id table, out of combat, at most once a minute
+    local now = Now()
+    if not False(InCombatLockdown) or (kr.builtAt and now - kr.builtAt < kr.REBUILD) then return end
+    kr.builtAt = now
+    local names = {}
+    if qx.Standings(nil, names) then kr.names, kr.stale = names, false end
+end
+
+function kr.Faction(name)
+    local f = kr.names and kr.names[name]
+    if f == nil then
+        kr.stale = true
+        kr.Build()
+        f = kr.names and kr.names[name]
+    end
+    return f or nil                             -- false: two factions share the name
+end
+
+function kr.Patterns()
+    if kr.patterns then return kr.patterns end
+    kr.patterns = {}
+    for _, f in ipairs(kr.FORMATS) do
+        local fmt = _G[f[1]]
+        if type(fmt) ~= "string" or not fmt:find("%%%d*%$?s") or not fmt:find("%%%d*%$?d") then fmt = f[2] end
+        local numFirst = fmt:find("%%%d*%$?d") < fmt:find("%%%d*%$?s")   -- a translation may name the amount first
+        kr.patterns[#kr.patterns + 1] = { FormatPattern(fmt), f[3], numFirst }
+    end
+    return kr.patterns
+end
+
+function kr.Quest(at)                           -- a quest's reputation could be the one in the message
+    if qx.window and qx.window == turnin and qx.rewardAt and Now() - qx.rewardAt < qx.STALE then return true end
+    return (qx.turnedAt and math.abs(at - qx.turnedAt) <= kr.QUEST) or (qx.rewardAt and math.abs(at - qx.rewardAt) <= kr.QUEST)
+        or false
+end
+
+function kr.Message(text)                       -- CHAT_MSG_COMBAT_FACTION_CHANGE
+    text = Plain(text)
+    if type(text) ~= "string" or kr.n >= kr.SESSION or not gameText.Room() then return end
+    local name, amount, sign
+    for _, p in ipairs(kr.Patterns()) do
+        local a, b = text:match(p[1])
+        if a and b then
+            if p[3] then a, b = b, a end
+            name, amount, sign = a, tonumber(b), p[2]
+            break
+        end
+    end
+    if not (name and amount) or amount < 1 or amount > kr.D then return end
+    local at, f = Now(), kr.Faction(name)
+    if not f or kr.Quest(at) then return end
+    local token = kr.token
+    local function decide() if token == kr.token then kr.Decide(at, f, sign * amount) end end
+    if C_Timer and C_Timer.After then C_Timer.After(kr.AFTER, function() pcall(decide) end) else decide() end
+end
+
+function kr.Decide(at, f, d)
+    if kr.n >= kr.SESSION or kr.Quest(at) then return end
+    local npc, lv, first = nil, nil, true
+    for _, x in ipairs(kr.deaths) do
+        if x.at >= at - kr.BEFORE and x.at <= at + kr.AFTER then
+            if npc and x.npc ~= npc then return end   -- two different creatures: either could have given it
+            if first then lv, first = x.lv, false elseif lv ~= x.lv then lv = nil end
+            npc = x.npc
+        end
+    end
+    if not npc then return end
+    local key = table.concat({ npc, lv or "", f, d }, ":")
+    if gameText.Index("killrep").seen[key] then return end
+    if gameText.Record("killrep", key, { npc = npc, lv = lv, f = f, d = d }) then kr.n = kr.n + 1 end
+end
+
+function kr.Reset()                             -- tracking switched off: the evidence and a message still waiting go
+    kr.deaths, kr.dead, kr.ndead, kr.token = {}, {}, 0, kr.token + 1
+end
+
+---------------------------------------------------------------------------
 -- events: only registered while recording is on
 ---------------------------------------------------------------------------
 local handlers = {}
@@ -2973,10 +3084,14 @@ end
 
 function handlers.CHAT_MSG_LOOT(text) text = Plain(text); Won(text); credit.Loot(text) end
 function handlers.UNIT_HEALTH(unit)
-    credit.Died(unit)
+    local dead = type(unit) == "string" and unit ~= "player" and Plain(Try(UnitIsDead, unit)) == true   -- read once
+    if dead then credit.Died(unit) end
     local died = ns.Facts and ns.Facts.Died     -- Facts.lua: kills per day, also for corpses nobody loots
     if died then pcall(died, unit) end
+    if dead then kr.Died(unit) end
 end
+handlers.CHAT_MSG_COMBAT_FACTION_CHANGE = kr.Message
+function handlers.PLAYER_ENTERING_WORLD() if kr.stale then kr.Build() end end
 
 local function QuestGiverSeen()                 -- the quest window is open with it (questnpc, else npc)
     pcall(Sighting, "questnpc", true)
@@ -3040,7 +3155,7 @@ function handlers.QUEST_LOG_UPDATE() qx.RetryPending(); credit.Soon() end
 handlers.QUEST_WATCH_UPDATE = credit.Soon
 function handlers.UNIT_QUEST_LOG_CHANGED(unit) if unit == "player" then credit.Soon() end end
 handlers.QUEST_POI_UPDATE = qx.RetryPending
-handlers.PLAYER_REGEN_ENABLED = qx.RetryPending
+function handlers.PLAYER_REGEN_ENABLED() qx.RetryPending(); if kr.stale then kr.Build() end end
 function handlers.QUEST_REMOVED(quest)
     quest = gameText.Id(quest)
     if quest then qx.waiting[quest] = nil end
@@ -3141,7 +3256,7 @@ local RECORDING = { "LOOT_READY", "LOOT_OPENED", "LOOT_CLOSED",
                     "HEARTHSTONE_BOUND", "PLAYER_REGEN_DISABLED",
                     "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_PET", "PET_BAR_UPDATE", "SPELLS_CHANGED",
                     "UNIT_HEALTH", "QUEST_WATCH_UPDATE", "UNIT_QUEST_LOG_CHANGED", "UNIT_SPELLCAST_SENT",
-                    "UNIT_SPELLCAST_CHANNEL_STOP" }
+                    "UNIT_SPELLCAST_CHANNEL_STOP", "CHAT_MSG_COMBAT_FACTION_CHANGE", "PLAYER_ENTERING_WORLD" }
 
 local ev = CreateFrame("Frame")
 local hookedBags = false
@@ -3181,6 +3296,7 @@ local function Disable()
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
     pet.arm, pet.read, pet.sent, pet.token = nil, nil, nil, pet.token + 1   -- a tame still being read is dropped
     credit.Reset()
+    kr.Reset()
 end
 
 local function AddonVersion()

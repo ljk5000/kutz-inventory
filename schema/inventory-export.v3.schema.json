@@ -3320,6 +3320,75 @@
               }
             }
           ]
+        },
+        {
+          "type": "object",
+          "description": "Since 3.16.0: the reputation one kill gave this character. From the client's own \"Reputation with %s increased by %d.\" (or decreased) line, tied to a creature only when every creature this player saw die untapped by others, from 2 s before the line to 1 s after it, had the same NPC id; nothing within 5 s of a quest turn-in or while a reward window was open. The faction's id comes from the character's reputation list by its name (a name two factions share records nothing). Never a standing, never the creature's GUID. Once per npc, lv, f and d per install.",
+          "required": [
+            "id",
+            "t",
+            "type",
+            "where",
+            "who",
+            "npc",
+            "f",
+            "d"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{4,16}-[0-9]{1,12}$",
+              "description": "Unique per recording install: a random prefix made once, a dash and a counter. cr0m ignores ids it already stored for that person, so uploading the same file twice is harmless."
+            },
+            "t": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000000,
+              "description": "When, from the game's time(): Unix seconds."
+            },
+            "b": {
+              "type": "string",
+              "pattern": "^[0-9][0-9.]{0,39}$",
+              "description": "The game build when it was recorded: GetBuildInfo() version.build, e.g. 1.60.1.70888. Left out when the client did not say."
+            },
+            "type": {
+              "const": "killrep"
+            },
+            "npc": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The creature's NPC id, from the dead creature's GUID (the GUID is never kept)."
+            },
+            "lv": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 255,
+              "description": "The creature's level, when every death tied to the line showed the same plain level. Absent for a skull, when unreadable, or when they differed."
+            },
+            "f": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647,
+              "description": "The faction id (C_Reputation factionID), found by the faction's name in this character's reputation list."
+            },
+            "d": {
+              "type": "integer",
+              "minimum": -100000,
+              "maximum": 100000,
+              "not": {
+                "const": 0
+              },
+              "description": "The change this character received, as the line gave it: positive for increased, negative for decreased. Includes this character's own reputation bonuses, like a turn-in's rep.d; who.level tells a reduced amount from a full one."
+            },
+            "where": {
+              "$ref": "#/$defs/observationWhere"
+            },
+            "who": {
+              "$ref": "#/$defs/observationWho"
+            }
+          }
         }
       ]
     },
