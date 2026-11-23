@@ -773,6 +773,9 @@
         },
         "questLog": {
           "$ref": "#/$defs/questLog"
+        },
+        "legacyChallenges": {
+          "$ref": "#/$defs/legacyChallenges"
         }
       }
     },
@@ -4170,6 +4173,133 @@
           "minimum": 1,
           "maximum": 2147483647,
           "description": "Kills counted."
+        }
+      }
+    },
+    "legacyChallenges": {
+      "type": "object",
+      "description": "Since 3.16.0 (KutzInventory 1.23.0). This character's view of the Legacy challenge achievements, read from GetAchievementInfo, GetAchievementNumCriteria and GetAchievementCriteriaInfo after login, after ACHIEVEMENT_EARNED / CRITERIA_EARNED / CRITERIA_UPDATE (at most one read per 30 s, never in combat), on /kinv scan and at a pre-logout checkpoint when a read is waiting. Saved only when something changed. Absent when not recorded (old addon, a client without the achievement functions, or no achievement answered). Format 2 never carries it. Private: earnedBy names another of the owner's characters.",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "list"
+      ],
+      "properties": {
+        "at": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000000,
+          "description": "Unix seconds (time()) of the last read that changed the content (also updated.legacyChallenges)."
+        },
+        "list": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 130,
+          "description": "Sorted by id, ids unique. Set 60: every Legacy challenge (65 ids, from the legacy-challenges dataset of build 1.60.1.70938) the client knows. Set 61: ids 63969-64033, only those completed or with a criterion whose quantity is above 0.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "set",
+              "completed",
+              "criteria"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "Achievement ID."
+              },
+              "set": {
+                "type": "integer",
+                "enum": [
+                  60,
+                  61
+                ],
+                "description": "60: the Legacy challenges; 61: the second set (ids 63969-64033)."
+              },
+              "completed": {
+                "type": "boolean",
+                "description": "GetAchievementInfo return 4: completed on this account as this character's client reports it."
+              },
+              "wasEarnedByMe": {
+                "type": "boolean",
+                "description": "GetAchievementInfo return 13, when a plain boolean: this character earned it."
+              },
+              "earnedBy": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^|\u0000-\u001f]+$",
+                "description": "GetAchievementInfo return 14, when a non-empty string: the name of the owner's character that earned it. Private: never show it to anyone but the owner."
+              },
+              "date": {
+                "type": "string",
+                "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+                "description": "YYYY-MM-DD the client gives for completion (GetAchievementInfo returns 5-7: month, day, years since 2000). Only when completed and a real date."
+              },
+              "criteria": {
+                "type": "array",
+                "maxItems": 40,
+                "description": "GetAchievementCriteriaInfo for each of GetAchievementNumCriteria's criteria (at most 40), in the client's order; a criterion without its id or completion is left out.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "completed"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647,
+                      "description": "Criteria ID (return 10)."
+                    },
+                    "completed": {
+                      "type": "boolean",
+                      "description": "Return 3."
+                    },
+                    "quantity": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647,
+                      "description": "Return 4: progress so far, when a whole number of 0 or more."
+                    },
+                    "reqQuantity": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647,
+                      "description": "Return 5: the progress needed, when a whole number of 0 or more."
+                    }
+                  }
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "type": "object",
+                  "properties": {
+                    "completed": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "completed"
+                  ]
+                },
+                "then": {
+                  "type": "object",
+                  "properties": {
+                    "date": false
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     }

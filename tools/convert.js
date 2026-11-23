@@ -426,6 +426,7 @@ function crafting(book, c) {
 const DROPPED_IN_3 = ["spec", "role", "stats", "sheet", "talents", "reputation", "achievementPoints", "pvp"];
 const DROPPED_SECTIONS_IN_3 = ["sheet", "stats", "talents", "reputation", "pvp"];   // keys of characters[].updated
 // more (3.15.0): { statDays: Map(character key -> statisticsDays), questLogs: Map(character key -> questLog), prices: { itemId: vendorDetails } }
+// and (3.16.0) legacyChallenges: Map(character key -> legacyChallenges)
 function toFormat3(inventory, raids, observations, crafted, hearths, more) {
   const characters = inventory.characters.map((c) => {
     const out = { ...c };
@@ -442,6 +443,8 @@ function toFormat3(inventory, raids, observations, crafted, hearths, more) {
     if (statDays) out.statisticsDays = statDays;
     const questLog = more && more.questLogs && more.questLogs.get(c.key);
     if (questLog) out.questLog = questLog;
+    const legacy = more && more.legacyChallenges && more.legacyChallenges.get(c.key);
+    if (legacy) out.legacyChallenges = legacy;
     return out;
   });
   const prices = more && more.prices
@@ -1271,6 +1274,49 @@ function exportQuestLog(raw) {
   return { at: raw.at, quests };
 }
 
+// ---------------------------------------------------------------------------
+// Legacy challenges (inventory 3.16.0+, KutzInventory 1.23.0): KutzInventoryDB.chars[key].legacyChallenges = { at, list[] }.
+// Exported on the character as { at, list: [{ id, set (60 | 61), completed, wasEarnedByMe?, earnedBy?, date?, criteria:
+// [{ id, completed, quantity?, reqQuantity? }] }] } sorted by id, at most 130 entries and 40 criteria each. earnedBy names
+// another of the owner's characters: private. Absent = not recorded; format 2 never carries it.
+// ---------------------------------------------------------------------------
+const LEGACY_SETS = { 60: true, 61: true };
+const LEGACY_SET61 = [63969, 64033];
+const LEGACY_MAX = 130, LEGACY_MAX_CRITERIA = 40;
+function legacyDate(v) {
+  const m = typeof v === "string" && /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return undefined;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return +m[1] >= 2000 && +m[1] <= 2099 && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? v : undefined;
+}
+function exportLegacyChallenges(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  if (!Number.isInteger(raw.at) || raw.at < 1 || raw.at > 1e11) return undefined;
+  const byId = new Map();
+  for (const e of asList(raw.list)) {
+    if (!e || typeof e !== "object") continue;
+    const id = obsInt(e.id, 1);
+    if (id === undefined || byId.has(id) || !LEGACY_SETS[e.set] || typeof e.completed !== "boolean") continue;
+    if ((e.set === 61) !== (id >= LEGACY_SET61[0] && id <= LEGACY_SET61[1])) continue;
+    const criteria = [], seen = new Set();
+    for (const c of asList(e.criteria)) {
+      if (!c || typeof c !== "object") continue;
+      const cid = obsInt(c.id, 1);
+      if (cid === undefined || seen.has(cid) || typeof c.completed !== "boolean") continue;
+      seen.add(cid);
+      criteria.push(pick({ id: cid, completed: c.completed, quantity: obsInt(c.quantity, 0), reqQuantity: obsInt(c.reqQuantity, 0) }));
+      if (criteria.length === LEGACY_MAX_CRITERIA) break;
+    }
+    const earnedBy = typeof e.earnedBy === "string" && e.earnedBy.length >= 1 && e.earnedBy.length <= 64
+      && !/[|\u0000-\u001f\u007f]/.test(e.earnedBy) ? e.earnedBy : undefined;
+    byId.set(id, pick({ id, set: e.set, completed: e.completed,
+      wasEarnedByMe: typeof e.wasEarnedByMe === "boolean" ? e.wasEarnedByMe : undefined, earnedBy,
+      date: e.completed ? legacyDate(e.date) : undefined, criteria }));
+  }
+  const list = [...byId.values()].sort((a, b) => a.id - b.id).slice(0, LEGACY_MAX);
+  return list.length ? { at: raw.at, list } : undefined;
+}
+
 // -> { inventory (inventory-export 2.x, or 3.x with { format: 3 }), auctions (auction-scan documents), report (local profit report per character) }
 function buildAll(dbs, uiHealthRaw, options = {}) {
   const format = options.format == null ? 3 : Number(options.format);
@@ -1313,6 +1359,12 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
   for (const [key, c] of characters) {
     const ql = exportQuestLog(c.questLog);
     if (ql) questLogs.set(key, ql);
+  }
+  // Legacy challenge completion (inventory 3.16.0+; KutzInventory 1.23.0 records it). Absent when not recorded; 2.x never carries it.
+  const legacyChallenges = new Map();
+  for (const [key, c] of characters) {
+    const lc = exportLegacyChallenges(c.legacyChallenges);
+    if (lc) legacyChallenges.set(key, lc);
   }
   const chars = [...characters.entries()].map(([key, c]) => {
     const u = c.updated || {};
@@ -1387,7 +1439,7 @@ function buildAll(dbs, uiHealthRaw, options = {}) {
       tabs: containers(g.tabs, "guild").map((t) => ({ ...t, tab: t.bag, updated: iso(t.updated) })),
     })),
   };
-  const more = { statDays, questLogs, prices: Object.fromEntries([...ids].map((id) => [id, vendorDetails(book, id)])) };
+  const more = { statDays, questLogs, legacyChallenges, prices: Object.fromEntries([...ids].map((id) => [id, vendorDetails(book, id)])) };
   const v3 = () => toFormat3(inventory, exportRaids(dbs), exportObservations(options.observations), crafted, hearths, more);
   return { inventory: format === 3 ? v3() : inventory, auctions: auctionScans(book), report,
            ahItems: Object.keys(book.ah).length };
@@ -1483,5 +1535,5 @@ function convertSavedVariables(texts, options) {
 return { SCHEMA_VERSION, SCHEMA_VERSION_3, FORMATS, AUCTION_SCHEMA_VERSION, DROPPED_IN_3, MAX_TABLE_DEPTH,
   parseSavedVariables, plain, buildAll, build, toFormat3, auctionScans, exportRaids, RAID_STRING,
   exportObservations, exportNpcs, exportItems, exportKills, exportStatDays, cleanTooltip, cleanTooltipText,
-  OBSERVATIONS_VERSION, exportCrafted, exportQuestLog, exportUiHealth, newerUiHealth, convertSavedVariables };
+  OBSERVATIONS_VERSION, exportCrafted, exportQuestLog, exportLegacyChallenges, exportUiHealth, newerUiHealth, convertSavedVariables };
 });

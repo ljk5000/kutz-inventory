@@ -1251,3 +1251,71 @@ test("questLog 3.15.0: current quest log exports in order, sanitized and bounded
   ex2.characters[0].questLog = capped;
   assert.ok(validateExport(ex2).length > 0, "2.x schema refuses questLog");
 });
+
+test("legacyChallenges 3.16.0: per-character Legacy challenges, sanitized, sorted and bounded; absent when not recorded; 2.x omits it", () => {
+  const { validateExport } = require("./validate_export");
+  const lua = `KutzInventoryDB = { chars = {
+    ["First-Realm"] = { name = "First", realm = "Realm", updated = { legacyChallenges = 1762905600 }, legacyChallenges = {
+      at = 1762905600, extra = "dropped",
+      list = {
+        { id = 62054, set = 60, completed = false, wasEarnedByMe = false, date = "2026-11-23",
+          criteria = { { id = 3001, completed = false, quantity = 7, reqQuantity = 25, extra = 1 }, { id = 3002, completed = false, quantity = -1, reqQuantity = 1.5 },
+                       { completed = true }, { id = 3003, completed = "yes" }, { id = 3001, completed = true } } },
+        { id = 684, set = 60, completed = true, wasEarnedByMe = true, earnedBy = "First", date = "2026-03-14",
+          criteria = { { id = 1001, completed = true, quantity = 1, reqQuantity = 1 } } },
+        { id = 61502, set = 60, completed = true, wasEarnedByMe = "no", earnedBy = "Bad|name", date = "2026-02-29", criteria = {} },
+        { id = 63969, set = 61, completed = true, earnedBy = "", date = "2024-02-29", criteria = {} },
+        { id = 684, set = 60, completed = false, criteria = {} },
+        { id = 62000, set = 61, completed = true, criteria = {} },
+        { id = 63970, set = 60, completed = true, criteria = {} },
+        { id = 63971, set = 62, completed = true, criteria = {} },
+        { id = 63972, set = 61, criteria = {} },
+        { id = 0, set = 60, completed = true, criteria = {} },
+      },
+    } },
+    ["Old-Realm"] = { name = "Old", realm = "Realm" },
+    ["Broken-Realm"] = { name = "Broken", realm = "Realm", legacyChallenges = { at = 0, list = { { id = 684, set = 60, completed = true, criteria = {} } } } },
+    ["Empty-Realm"] = { name = "Empty", realm = "Realm", legacyChallenges = { at = 1762905600, list = { { id = 0, set = 60, completed = true } } } },
+  } }`;
+  const v3 = convert.convertSavedVariables([lua]).inventory;
+  const v2 = convert.convertSavedVariables([lua], { format: 2 }).inventory;
+  const by = (doc, k) => doc.characters.find((c) => c.key === k);
+  assert.deepEqual(by(v3, "First-Realm").legacyChallenges, {
+    at: 1762905600,
+    list: [
+      { id: 684, set: 60, completed: true, wasEarnedByMe: true, earnedBy: "First", date: "2026-03-14",
+        criteria: [{ id: 1001, completed: true, quantity: 1, reqQuantity: 1 }] },
+      { id: 61502, set: 60, completed: true, criteria: [] },
+      { id: 62054, set: 60, completed: false, wasEarnedByMe: false,
+        criteria: [{ id: 3001, completed: false, quantity: 7, reqQuantity: 25 }, { id: 3002, completed: false }] },
+      { id: 63969, set: 61, completed: true, date: "2024-02-29", criteria: [] },
+    ],
+  });
+  assert.equal(by(v3, "First-Realm").updated.legacyChallenges, "2025-11-12T00:00:00.000Z");
+  for (const k of ["Old-Realm", "Broken-Realm", "Empty-Realm"]) assert.ok(!("legacyChallenges" in by(v3, k)), "absent: " + k);
+  for (const c of v2.characters) assert.ok(!("legacyChallenges" in c), "2.x never carries legacyChallenges: " + c.key);
+  // caps: 130 entries, 40 criteria each
+  const many = Array.from({ length: 140 }, (_, i) => ({ id: 140 - i, set: 60, completed: false,
+    criteria: Array.from({ length: 45 }, (_, j) => ({ id: j + 1, completed: false, quantity: j, reqQuantity: 45 })) }));
+  const capped = convert.exportLegacyChallenges({ at: 1762905600, list: many });
+  assert.equal(capped.list.length, 130);
+  assert.deepEqual([capped.list[0].id, capped.list[129].id], [1, 130]);
+  assert.equal(capped.list[0].criteria.length, 40);
+  // the schema: valid as exported and capped; broken shapes refused; 2.x refuses the field
+  const ex3 = convert.convertSavedVariables([LUA]).inventory;
+  ex3.characters[0].legacyChallenges = by(v3, "First-Realm").legacyChallenges;
+  assert.deepEqual(validateExport(ex3), []);
+  ex3.characters[0].legacyChallenges = capped;
+  assert.deepEqual(validateExport(ex3), []);
+  const good = { id: 684, set: 60, completed: true, criteria: [] };
+  for (const bad of [{ at: 1, list: [] }, { at: 1, list: [{ ...good, set: 62 }] }, { at: 1, list: [{ ...good, date: "2026-13-01" }] },
+                     { at: 1, list: [{ ...good, completed: false, date: "2026-01-01" }] }, { at: 1, list: [{ ...good, earnedBy: "" }] },
+                     { at: 1, list: [{ ...good, criteria: [{ id: 1 }] }] }, { at: 1, list: [{ ...good, criteria: [{ id: 1, completed: true, quantity: -1 }] }] },
+                     { at: 1, list: [{ ...good, extra: 1 }] }, { list: [good] }]) {
+    ex3.characters[0].legacyChallenges = bad;
+    assert.ok(validateExport(ex3).length, "schema rejected " + JSON.stringify(bad));
+  }
+  const ex2 = convert.convertSavedVariables([LUA], { format: 2 }).inventory;
+  ex2.characters[0].legacyChallenges = capped;
+  assert.ok(validateExport(ex2).length > 0, "2.x schema refuses legacyChallenges");
+});

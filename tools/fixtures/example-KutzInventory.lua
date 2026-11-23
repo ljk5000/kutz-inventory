@@ -20,6 +20,17 @@ KutzInventoryDB = {
           { id = 463, title = "The Greenwarden", lv = 21, header = "Wetlands", done = true, obj = {} },
         },
       },
+      legacyChallenges = {
+        at = 1762905000,
+        list = {
+          { id = 61499, set = 60, completed = true, wasEarnedByMe = false, earnedBy = "Examplewarrior", date = "2025-10-04",
+            criteria = { { id = 101, completed = true, quantity = 25, reqQuantity = 25 } } },
+          { id = 61989, set = 60, completed = false, wasEarnedByMe = false,
+            criteria = { { id = 202, completed = false, quantity = 24, reqQuantity = 40 } } },
+          { id = 63969, set = 61, completed = false, wasEarnedByMe = false,
+            criteria = { { id = 303, completed = false, quantity = 3, reqQuantity = 10 } } },
+        },
+      },
       legacyTree = {
         currency = { available = 12, spent = 4, max = 16 },
         trees = { ["1187"] = { spentInTree = 3, nodes = { ["100"] = 2, ["101"] = 1 } },
@@ -29,7 +40,8 @@ KutzInventoryDB = {
       updated = { bags = 1762905600, bank = 1762819200, equipped = 1762905600, stats = 1762905500, sheet = 1762905500,
                   talents = 1762905400, reputation = 1762905300, statistics = 1762905200, pvp = 1762905100,
                   money = 1762905600, location = 1762905600, professions = 1762905000, currencies = 1762905000,
-                  skills = 1762905000, spells = 1762905000, recipes = 1762900000, trainers = 1762800000 },
+                  skills = 1762905000, spells = 1762905000, recipes = 1762900000, trainers = 1762800000,
+                  legacyChallenges = 1762905000 },
       bags = {
         [0] = { name = "Backpack", size = 16, items = {
           [1] = { id = 2589, count = 14, name = "Linen Cloth", quality = 1, icon = 132889, classID = 7, subClassID = 5, type = "Tradeskill", subType = "Cloth" },

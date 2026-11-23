@@ -1130,6 +1130,114 @@ local function ScanQuestLog()
 end
 
 ---------------------------------------------------------------------------
+-- Legacy challenges (1.23.0): for this character, each Legacy challenge achievement as the client reports it (completed,
+-- by this character or another of the account, when, and each criterion's progress). Read once after login, after an
+-- achievement or criterion changes (one read per 30 s at most, never in combat), on /kinv scan and at a checkpoint when a
+-- read is waiting. Saved only when something differs from the saved reading.
+--   me.legacyChallenges = { at = <time() of the last read that changed it>, list = { {
+--       id, set = 60 | 61, completed, wasEarnedByMe?, earnedBy? (another of the owner's characters: private),
+--       date? = "YYYY-MM-DD", criteria = { { id, completed, quantity?, reqQuantity? }, ... } }, ... } }
+---------------------------------------------------------------------------
+local legacy = {
+    -- set 60: the 65 Legacy challenges of the platform dataset legacy-challenges (build 1.60.1.70938); only the ids
+    SET60 = { 684, 61499, 61500, 61501, 61502, 61503, 61504, 61989, 61992, 61993, 61994, 61995, 61996, 61997, 61998,
+              61999, 62000, 62001, 62002, 62003, 62004, 62005, 62006, 62007, 62008, 62009, 62010, 62011, 62012, 62013,
+              62014, 62015, 62016, 62017, 62018, 62019, 62020, 62021, 62022, 62023, 62024, 62025, 62026, 62028, 62029,
+              62030, 62031, 62032, 62033, 62034, 62035, 62041, 62042, 62043, 62044, 62045, 62046, 62047, 62048, 62049,
+              62054, 62382, 63340, 63341, 63342 },
+    SET61_FIRST = 63969, SET61_LAST = 64033,   -- set 61: kept only once completed or started
+    MAX_CRITERIA = 40, GAP = 30, lastAt = -1e9, waiting = false,
+}
+
+function legacy.Count(v)
+    v = Plain(v)
+    if type(v) == "number" and v >= 0 and v <= 2147483647 and v == math.floor(v) then return v end
+end
+
+function legacy.Date(month, day, year)        -- returns 5-7: month, day, years since 2000; nil unless a real date
+    month, day, year = legacy.Count(month), legacy.Count(day), legacy.Count(year)
+    if not (month and day and year) or month < 1 or month > 12 or day < 1 or year > 99 then return nil end
+    year = 2000 + year
+    local days = ({ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 })[month]
+    if month == 2 and year % 4 == 0 then days = 29 end          -- 2000-2099: every fourth year
+    if day > days then return nil end
+    return string.format("%04d-%02d-%02d", year, month, day)
+end
+
+function legacy.Criteria(id)
+    local list = {}
+    if type(GetAchievementCriteriaInfo) ~= "function" then return list end
+    local n = math.min(legacy.Count(Try(GetAchievementNumCriteria, id)) or 0, legacy.MAX_CRITERIA)
+    for i = 1, n do
+        local _, _, done, have, need, _, _, _, _, cid = Try(GetAchievementCriteriaInfo, id, i)
+        cid, done = legacy.Count(cid), Plain(done)
+        if cid and cid >= 1 and type(done) == "boolean" then
+            list[#list + 1] = { id = cid, completed = done, quantity = legacy.Count(have), reqQuantity = legacy.Count(need) }
+        end
+    end
+    return list
+end
+
+function legacy.One(id, set)                  -- nil: the client does not know it (or did not answer)
+    if type(GetAchievementInfo) ~= "function" then return nil end
+    local ok, aid, _, _, completed, month, day, year, _, _, _, _, _, mine, by = pcall(GetAchievementInfo, id)
+    if not ok or Plain(aid) ~= id then return nil end
+    completed = Plain(completed)
+    if type(completed) ~= "boolean" then return nil end
+    mine, by = Plain(mine), Plain(by)
+    local e = { id = id, set = set, completed = completed, criteria = legacy.Criteria(id),
+                earnedBy = type(by) == "string" and by ~= "" and #by <= 64 and by or nil,
+                date = completed and legacy.Date(month, day, year) or nil }
+    if type(mine) == "boolean" then e.wasEarnedByMe = mine end
+    return e
+end
+
+function legacy.Key(list)                     -- the saved reading as one string, to compare two readings
+    local out = {}
+    for _, e in ipairs(type(list) == "table" and list or {}) do
+        out[#out + 1] = table.concat({ tostring(e.id), tostring(e.set), tostring(e.completed), tostring(e.wasEarnedByMe),
+                                       tostring(e.earnedBy), tostring(e.date) }, ",")
+        for _, c in ipairs(type(e.criteria) == "table" and e.criteria or {}) do
+            out[#out + 1] = table.concat({ tostring(c.id), tostring(c.completed), tostring(c.quantity), tostring(c.reqQuantity) }, ",")
+        end
+        out[#out + 1] = ";"
+    end
+    return table.concat(out, "|")
+end
+
+function legacy.Scan()
+    if not me or loggingOut or worldLeaving then return end
+    if type(GetAchievementInfo) ~= "function" then return end
+    if Plain(Try(InCombatLockdown)) == true then legacy.waiting = true; return end
+    legacy.waiting, legacy.lastAt = false, GetTime()
+    local list, answered = {}, 0
+    for _, id in ipairs(legacy.SET60) do
+        local e = legacy.One(id, 60)
+        if e then answered = answered + 1; list[#list + 1] = e end
+    end
+    for id = legacy.SET61_FIRST, legacy.SET61_LAST do
+        local e = legacy.One(id, 61)
+        if e then
+            answered = answered + 1
+            local started = e.completed
+            for _, c in ipairs(e.criteria) do if (c.quantity or 0) > 0 then started = true end end
+            if started then list[#list + 1] = e end
+        end
+    end
+    if answered == 0 or #list == 0 then return end           -- nothing answered: the saved reading stays
+    table.sort(list, function(a, b) return a.id < b.id end)
+    local saved = me.legacyChallenges
+    if type(saved) == "table" and legacy.Key(saved.list) == legacy.Key(list) then return end
+    me.legacyChallenges = { at = time(), list = list }
+    me.updated.legacyChallenges = me.legacyChallenges.at
+end
+
+function legacy.Want(delay)                   -- an event: one read, no sooner than 30 s after the last
+    if pendingRun.legacy then return end
+    Soon("legacy", legacy.Scan, math.max(delay or 2, legacy.lastAt + legacy.GAP - GetTime()))
+end
+
+---------------------------------------------------------------------------
 -- talents: the modern trees (class / spec / hero) when the client has them, else the old talent tabs.
 -- Only the talents you have taken are stored (with rank), plus unspent points and the loadout name.
 ---------------------------------------------------------------------------
@@ -1440,6 +1548,7 @@ function handlers.PLAYER_LOGIN()
     Soon("pvp", ScanPvP, 8)
     Soon("quests", ScanQuestLog, 8)
     Soon("statistics", function() ScanStatistics(true) end, 15)
+    legacy.Want(16)
     WantStats()
     for _, e in ipairs({ "BAG_UPDATE", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_MONEY", "PLAYER_XP_UPDATE",
                          "CURRENCY_DISPLAY_UPDATE", "SKILL_LINES_CHANGED", "PLAYER_LEVEL_UP", "PLAYER_REGEN_ENABLED",
@@ -1456,7 +1565,8 @@ function handlers.PLAYER_LOGIN()
                          "UPDATE_FACTION", "PLAYER_PVP_KILLS_CHANGED", "HONOR_XP_UPDATE", "PVP_RATED_STATS_UPDATE",
                          "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN",
                          "TRAINER_SHOW", "TRAINER_UPDATE", "UNIT_STATS", "UNIT_RESISTANCES", "UNIT_ATTACK_POWER",
-                         "UNIT_RANGED_ATTACK_POWER", "COMBAT_RATING_UPDATE" }) do
+                         "UNIT_RANGED_ATTACK_POWER", "COMBAT_RATING_UPDATE",
+                         "RECEIVED_ACHIEVEMENT_LIST", "ACHIEVEMENT_EARNED", "CRITERIA_EARNED", "CRITERIA_UPDATE" }) do
         pcall(ev.RegisterEvent, ev, e)            -- an event this client lacks is simply skipped
     end
     for _, name in ipairs({ "Logout", "Quit", "ReloadUI" }) do
@@ -1521,7 +1631,13 @@ function handlers.PLAYER_REGEN_ENABLED()
     if statsWaiting then WantStats() end
     if questsWaiting then Soon("quests", ScanQuestLog, 1) end
     Soon("statistics", ScanStatistics, 5)               -- does nothing if read less than 10 minutes ago
+    if legacy.waiting then legacy.Want(5) end
 end
+-- Legacy challenges: these fire often (CRITERIA_UPDATE on any progress); each only asks for one read, see legacy.Want
+function handlers.ACHIEVEMENT_EARNED() legacy.Want(2) end
+handlers.CRITERIA_EARNED = handlers.ACHIEVEMENT_EARNED
+handlers.CRITERIA_UPDATE = handlers.ACHIEVEMENT_EARNED
+handlers.RECEIVED_ACHIEVEMENT_LIST = handlers.ACHIEVEMENT_EARNED
 function handlers.TRAINER_SHOW() if not readingTrainer then Soon("trainer", ScanTrainer, 0.5) end end
 handlers.TRAINER_UPDATE = handlers.TRAINER_SHOW          -- also fires when we flip the filters: ignored while reading
 function handlers.UNIT_STATS(unit) if unit == "player" then WantStats() end end   -- buffs, gear: one read per 2 s burst
@@ -1623,7 +1739,7 @@ SlashCmdList.KUTZINVENTORY = function(msg)
     if ns.Facts and ns.Facts.Command and ns.Facts.Command(msg) then return end
     if msg == "scan" then
         ScanIdentity(); ScanWallet(); ScanBags(true); ScanGear(); ScanProfessions(); ScanCurrencies(); ScanTalents(); ScanSkills(); ScanSpells(); ScanStats(); ScanGuildBankTab(); ScanRecipes(true)
-        ScanReputation(); ScanPvP(); ScanStatistics(true); ScanQuestLog()
+        ScanReputation(); ScanPvP(); ScanStatistics(true); ScanQuestLog(); legacy.Scan()
         print("|cffd8b84aKutzInventory|r: everything rescanned. It reaches the file on /reload or logout.")
         return
     end

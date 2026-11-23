@@ -86,7 +86,8 @@
     "skills": "2025-11-11T23:50:00.000Z",
     "spells": "2025-11-11T23:50:00.000Z",
     "recipes": "2025-11-11T22:26:40.000Z",
-    "trainers": "2025-11-10T18:40:00.000Z"
+    "trainers": "2025-11-10T18:40:00.000Z",
+    "legacyChallenges": "2025-11-11T23:50:00.000Z"
    },
    "containers": [
     {
@@ -398,6 +399,55 @@
       "header": "Wetlands",
       "done": true,
       "obj": []
+     }
+    ]
+   },
+   "legacyChallenges": {
+    "at": 1762905000,
+    "list": [
+     {
+      "id": 61499,
+      "set": 60,
+      "completed": true,
+      "wasEarnedByMe": false,
+      "earnedBy": "Examplewarrior",
+      "date": "2025-10-04",
+      "criteria": [
+       {
+        "id": 101,
+        "completed": true,
+        "quantity": 25,
+        "reqQuantity": 25
+       }
+      ]
+     },
+     {
+      "id": 61989,
+      "set": 60,
+      "completed": false,
+      "wasEarnedByMe": false,
+      "criteria": [
+       {
+        "id": 202,
+        "completed": false,
+        "quantity": 24,
+        "reqQuantity": 40
+       }
+      ]
+     },
+     {
+      "id": 63969,
+      "set": 61,
+      "completed": false,
+      "wasEarnedByMe": false,
+      "criteria": [
+       {
+        "id": 303,
+        "completed": false,
+        "quantity": 3,
+        "reqQuantity": 10
+       }
+      ]
      }
     ]
    }

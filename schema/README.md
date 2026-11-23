@@ -33,7 +33,7 @@ Common character fields include identity (`key`, `name`, optional `surname`, rea
 
 Format 3 removes `stats`, `sheet`, ordinary `talents`, `spec`, `role`, `reputation`, `pvp`, `achievementPoints`, and their associated update stamps (`stats`, `sheet`, `talents`, `reputation`, `pvp`). 3.0.0 to 3.13.0 also removed `statistics` and its stamp; 3.14.0 exports them again, because the receiving site has no other source for them, so a reader must treat a 3.x character without `statistics` as not exported rather than as having none. Equipped items reduce to `{ slotId, id, link }`; links can still contain enchant/suffix IDs. This reduces duplicate profile data for a receiving site that obtains it elsewhere; **the exporter itself never fetches a profile API**. The addon still records these fields locally; format 2 retains them.
 
-Format 3 additionally exports `raids` (an empty array if none recorded), `observations` when valid retained events exist, and optional character `crafted`, `hearth` and `questLog`. Turning off observation recording does not remove existing observations from export. Format 2 never includes these five additions. Both current formats support `legacyTree`.
+Format 3 additionally exports `raids` (an empty array if none recorded), `observations` when valid retained events exist, and optional character `crafted`, `hearth`, `questLog` and (3.16.0) `legacyChallenges`. Turning off observation recording does not remove existing observations from export. Format 2 never includes these six additions. Both current formats support `legacyTree`.
 
 Inventory 2.0 removed per-character computed `crafting`, plus AH/buy-price fields from inventory `prices`. Profit/levelling estimates remain a local report from `buildAll`, not an uploaded inventory section. Auction data are separate documents.
 
@@ -89,6 +89,33 @@ Optional `characters[].questLog` (KutzInventory 1.21.0, format 3.x only):
 ```
 
 Absent `questLog` means not recorded (older addon or unavailable API); `quests: []` means recorded and the quest log is empty. The addon reads the log after login, on `QUEST_LOG_UPDATE`, `QUEST_ACCEPTED`, `QUEST_REMOVED` and `QUEST_TURNED_IN` (debounced), on `/kinv scan`, and at safe pre-logout checkpoints. Collapsed headers are expanded for the read and collapsed back afterwards when out of combat; in combat, a log with collapsed headers waits for combat to end. The exporter drops duplicate quest IDs and invalid entries, enforces the 35-quest and 12-objective caps, and omits `questLog` from format 2.
+
+### Legacy challenges (3.16.0)
+
+Optional `characters[].legacyChallenges` (KutzInventory 1.23.0, format 3.x only): this character's view of the Legacy challenge achievements.
+
+```text
+{
+  at: integer 1-100000000000       Unix seconds (time()) of the last read that changed the content (also updated.legacyChallenges)
+  list: [ 1-130 of {               sorted by id, ids unique
+    id:             integer >= 1   achievement ID
+    set:            60 | 61        60: the Legacy challenges (the 65 ids of the platform's legacy-challenges dataset, build
+                                   1.60.1.70938); 61: ids 63969-64033, present only when completed or started
+    completed:      boolean        GetAchievementInfo return 4
+    wasEarnedByMe?: boolean        return 13, when a plain boolean
+    earnedBy?:      string 1-64    return 14, when a non-empty string: the owner's character that earned it (private)
+    date?:          "YYYY-MM-DD"   from returns 5-7 (month, day, years since 2000), only when completed and a real date
+    criteria: [ 0-40 of {          GetAchievementCriteriaInfo for each of GetAchievementNumCriteria's criteria, client order
+      id:           integer >= 1   return 10 (a criterion without one is left out)
+      completed:    boolean        return 3
+      quantity?:    integer >= 0   return 4
+      reqQuantity?: integer >= 0   return 5
+    } ]
+  } ]
+}
+```
+
+Absent means not recorded (older addon, a client without the achievement functions, or no achievement answered yet), never "none done". The addon reads the list 16 s after login, after `RECEIVED_ACHIEVEMENT_LIST`, `ACHIEVEMENT_EARNED`, `CRITERIA_EARNED` and `CRITERIA_UPDATE` (one read per 30 s at most, coalesced, never in combat: a read that comes due in combat waits for combat to end), on `/kinv scan`, and at a pre-logout checkpoint when a read is waiting. It saves only when the reading differs from the saved one, so `at` is when something last changed; a read in which no achievement answered keeps the saved reading. Secret, missing or wrongly typed values leave the field out (an achievement without a boolean `completed` is left out whole). The exporter drops duplicate ids, entries whose `set` does not fit the id, invalid criteria and impossible dates, enforces the 130-entry and 40-criteria caps, and omits the field from format 2 (format 2's open `updated` still passes the `legacyChallenges` stamp through, as it does `questLog`'s). The addon holds only ids; names and rewards come from the receiving site's own dataset.
 
 ### Raids (3.1.0)
 
@@ -526,4 +553,4 @@ Consumers should tolerate unknown keys/types for forward compatibility; schema v
 
 ## Privacy for consumers
 
-Inventory is private user data, not a ready-made public profile. Require an explicit sharing policy before exposing GUIDs, location/hearth, money, banks/guild tabs, activity times, diagnostics, monitor messages/stacks, raids (other players and loot) or observations (identity and location history; the NPC summary's last-seen days and the squares stood in; which items the install's characters met and the day each entry last changed; what they killed on which day). Names/guilds and all the other character details also deserve intentional sharing controls. Auction documents omit these character fields, but the authenticated receiver can associate uploads with a key and connection metadata. This repository cannot guarantee server access controls or anonymous aggregation.
+Inventory is private user data, not a ready-made public profile. Require an explicit sharing policy before exposing GUIDs, location/hearth, money, banks/guild tabs, activity times, diagnostics, monitor messages/stacks, raids (other players and loot), `legacyChallenges` (`earnedBy` names the owner's other characters; dates of completion) or observations (identity and location history; the NPC summary's last-seen days and the squares stood in; which items the install's characters met and the day each entry last changed; what they killed on which day). Names/guilds and all the other character details also deserve intentional sharing controls. Auction documents omit these character fields, but the authenticated receiver can associate uploads with a key and connection metadata. This repository cannot guarantee server access controls or anonymous aggregation.
