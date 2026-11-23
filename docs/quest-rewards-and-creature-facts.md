@@ -37,6 +37,7 @@ binary shows the client knows the function or event; what it answers must still 
 | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `FACTION_STANDING_INCREASED`, `C_Reputation.GetFactionDataByID/ByIndex` | yes | kill reputation |
 | `UnitHealthMax`, `UnitPowerMax`, `UnitPowerType` | yes | creature health and power |
 | `GetLootSourceInfo`, `C_Item.GetItemIDByGUID`, `UNIT_SPELLCAST_SUCCEEDED`, spell 13262 Disenchant | yes | disenchanting |
+| `C_Container.PickupContainerItem`, `C_Container.GetContainerItemInfo`, `UNIT_SPELLCAST_START` | not checked in the binary (`GetContainerItemInfo` and the `UseContainerItem` hook are already used) | the bag item a Disenchant was aimed at (a client without them falls back to the source GUID alone) |
 | `GetNumRewardSpells`, `GetQuestLogRewardSpell`, `GetNumRewardCurrencies`, `GetQuestCurrencyInfo` | **no** | not used |
 | Spells 31252 Prospecting, 51005 Milling | **not in this client's spell table** | dropped: the game version has neither |
 | `GetNumQuestLogRewardFactions`, `GetQuestLogRewardFactionInfo` | yes, but see below | not used in 1.23.0 |
@@ -177,6 +178,15 @@ a spell of the same name). `src.item` comes from the window's `Item-` source GUI
 from the bag item the cast was aimed at. **No item id, no event**: such a window is not recorded as `container` or
 `other` either. Prospecting and milling do not exist in this game version.
 
+As built: the cast counts from `UNIT_SPELLCAST_SUCCEEDED` (unit `player`); a cast that never succeeded marks nothing.
+"The bag item the cast was aimed at" is the bag item clicked at most 1 second before the cast began
+(`UNIT_SPELLCAST_START`): `C_Container.PickupContainerItem` (a left click while the spell waits for its target) and
+`C_Container.UseContainerItem` (a right click) are hooked after the game runs them (never called), and the slot's
+`C_Container.GetContainerItemInfo(bag, slot).itemID` is read. A window whose source is a creature or an object, or a
+fishing window, stays what it was. One window per cast: the window closing ends it. A bag item used after the cast (a
+container opened) makes the window that item's `container` window as before. The exported `src` of a disenchant
+window is exactly `{ kind, item }`.
+
 ## Versions and compatibility
 
 - KutzInventory **1.23.0**; inventory export **3.16.0** (new optional fields, one new event type, one new enum value:
@@ -230,6 +240,7 @@ from the bag item the cast was aimed at. **No item id, no event**: such a window
   `UnitHealthMax` the real number for a creature (not 100, a percentage, as some classic clients gave for units
   outside the group)? If it is a percentage, `hp` must not ship.
 - Disenchant an item: `/dump GetLootSourceInfo(1)` with the window open. Is the source an `Item-` GUID, and does
-  `C_Item.GetItemIDByGUID` still answer? Find the event with `kind = "disenchant"` and the right `item`.
+  `C_Item.GetItemIDByGUID` still answer? Find the event with `kind = "disenchant"` and the right `item`, once picking
+  the item with a left click and once with a right click (the aimed-at fallback when the GUID no longer answers).
 - Listed reputation, for a later version: with a quest selected in the log, `/dump GetNumQuestLogRewardFactions(),
   GetQuestLogRewardFactionInfo(1)` and compare with what the turn-in gave.

@@ -832,6 +832,83 @@ do
   print("OK   loot: one event per source, coin-only opens, no coins or currencies, reopen once, skin / herb / mine / chest / fishing / container / boss")
 end
 
+-- 4c) disenchanting (1.23.0): a loot window within 5 s of the player's own Disenchant that succeeded is "disenchant",
+--     with the destroyed item from the window's Item- GUID, else the bag item clicked just before the cast began; no
+--     item id, no event; one window per cast; a bag item used after the cast, a creature or a fish win as before
+do
+  local function chanter(opts)
+    opts = opts or {}
+    local bags = { ["0:3"] = 4567, ["0:4"] = 20708 }
+    opts.globals = opts.globals or {}
+    opts.globals.C_Container = { UseContainerItem = function() end, PickupContainerItem = function() end,
+                                 GetContainerItemInfo = function(bag, slot) local id = bags[bag .. ":" .. slot]; if id then return { itemID = id } end end }
+    local h = fresh(opts); h.on()
+    local spells = h.G.GetSpellInfo
+    h.G.GetSpellInfo = function(id) if id == 13262 or id == 99999 then return "Disenchant" end; return spells(id) end
+    return h
+  end
+  local function cast(h, spell, unit)
+    h.event("UNIT_SPELLCAST_START", unit or "player", "c", spell or 13262)
+    h.s.clock = h.s.clock + 3
+    h.event("UNIT_SPELLCAST_SUCCEEDED", unit or "player", "c", spell or 13262)
+  end
+  local DUST = function() return item(10940, 2, { BAG, 2 }) end
+  local function last(h) local ev = h.events(); return ev[#ev] end
+
+  -- the window names an Item- source the client still knows
+  local h = chanter()
+  h.G.C_Item = { GetItemIDByGUID = function(g) if g == BAG then return 20708 end end }
+  cast(h); h.s.clock = h.s.clock + 0.5; h.loot({ DUST() })
+  assert(#h.events() == 1 and dump(last(h).src) == "{item=20708,kind=disenchant}" and last(h).items[1].id == 10940, dump(h.events()))
+  -- one window per cast: the next one is a container again
+  h.s.clock = h.s.clock + 1; h.loot({ DUST() })
+  assert(#h.events() == 2 and last(h).src.kind == "container", dump(last(h).src))
+
+  -- the client no longer knows the destroyed item: the bag item clicked (left or right) at most 1 s before the cast
+  local a = chanter()
+  a.hooks.PickupContainerItem(0, 3); a.s.clock = a.s.clock + 0.2; cast(a); a.s.clock = a.s.clock + 0.5; a.loot({ DUST() })
+  assert(dump(last(a).src) == "{item=4567,kind=disenchant}", dump(a.events()))
+  a.s.clock = a.s.clock + 30
+  a.hooks.UseContainerItem(0, 3); cast(a); a.loot({ item(10940, 1) })   -- no source named at all
+  assert(#a.events() == 2 and dump(last(a).src) == "{item=4567,kind=disenchant}", dump(a.events()))
+
+  -- no item id: nothing at all (not container, not other)
+  local function nothing(why, setup)
+    local x = chanter()
+    setup(x)
+    assert(#x.events() == 0 and not x.db().lastError, why .. ": " .. dump(x.events()) .. tostring(x.db().lastError))
+  end
+  nothing("no item id", function(x) cast(x); x.loot({ DUST() }) end)
+  nothing("no source and no item", function(x) cast(x); x.loot({ item(10940, 1) }) end)
+  nothing("clicked 2 s before the cast", function(x) x.hooks.PickupContainerItem(0, 3); x.s.clock = x.s.clock + 2; cast(x); x.loot({ DUST() }) end)
+  nothing("an empty bag slot", function(x) x.hooks.PickupContainerItem(0, 9); cast(x); x.loot({ DUST() }) end)
+  nothing("a spell of the same name", function(x) cast(x, 99999); x.loot({ DUST() }) end)   -- recognised: nothing without an item
+
+  -- not a disenchant window: too late, another player's cast, a cast that never finished, a bag item used after the
+  -- cast, a creature's corpse, a fish
+  local function kind(why, want, setup)
+    local x = chanter()
+    x.G.C_Item = { GetItemIDByGUID = function(g) if g == BAG then return 20708 end end }
+    x.hooks.PickupContainerItem(0, 3)
+    setup(x)
+    assert(#x.events() == 1 and last(x).src.kind == want, why .. ": " .. dump(x.events()))
+  end
+  kind("6 s after", "container", function(x) cast(x); x.s.clock = x.s.clock + 6; x.loot({ DUST() }) end)
+  kind("a party member's", "container", function(x) cast(x, 13262, "party1"); x.loot({ DUST() }) end)
+  kind("interrupted", "container", function(x) x.event("UNIT_SPELLCAST_START", "player", "c", 13262); x.s.clock = x.s.clock + 1; x.loot({ DUST() }) end)
+  kind("another spell", "container", function(x) cast(x, 2366); x.loot({ DUST() }) end)
+  kind("a bag item opened after", "container", function(x) cast(x); x.s.clock = x.s.clock + 0.5; x.hooks.UseContainerItem(0, 4); x.loot({ DUST() }) end)
+  kind("a corpse", "mob", function(x) cast(x); x.loot({ item(2589, 1, { MOB, 1 }) }) end)
+  kind("fishing", "fishing", function(x) cast(x); x.s.fishing = true; x.loot({ item(6303, 1, { "GameObject-0-4170-0-1234-35591-0000AAAA04", 1 }) }) end)
+  kind("tracking switched off and on", "container", function(x) cast(x); x.cmd("track drops off"); x.cmd("track drops on"); x.loot({ DUST() }) end)
+  -- a client without the bag hooks or C_Item: the cast alone names nothing
+  local bare = fresh(); bare.on()
+  bare.G.GetSpellInfo = function(id) if id == 13262 then return "Disenchant" end end
+  cast(bare); bare.loot({ DUST() })
+  assert(#bare.events() == 0 and not bare.db().lastError, dump(bare.events()))
+  print("OK   disenchanting: the destroyed item from the window's Item- GUID or the bag item aimed at; no item, no event; one window per cast")
+end
+
 -- 4b) read at LOOT_READY: auto-loot or a fast-loot addon takes the slots from there, so LOOT_OPENED sees an emptied
 -- window or never comes, and LOOT_CLOSED may not come either
 do
