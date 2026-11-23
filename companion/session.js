@@ -5,6 +5,7 @@ const { exportAll } = require("../tools/inventory_export");
 const { createOutbox } = require("../tools/upload_outbox");
 const { ackContext, parseAck, mergeMarks, trimExport, readAckState, writeAckState } = require("../tools/upload_ack");
 const { createAuctionSender } = require("../tools/auction_sender");
+const { createQuestCacheSender, questCacheContext } = require("../tools/quest_cache_sender");
 const { createExportQueue } = require("../tools/export_queue");
 const { acquireOutputLock } = require("../tools/output_lock");
 const transport = require("./transport");
@@ -16,7 +17,7 @@ function savedFiles(game) {
 // Linking Battle.net on cr0m does not touch the game file, so after a link refusal the session tries again on its own.
 const RESUME_AFTER_MS = 5 * 60 * 1000;
 const { COMPANION_VERSION } = require("./version");
-async function createSession({ game, output, base, key, username = "", companionVersion = COMPANION_VERSION, report, upload = transport.upload, uploadAuctions = transport.uploadAuctions, interval = 1000, resumeAfterMs = RESUME_AFTER_MS, auctionGapMs = 10500, sendInventory = true, sendAuctions = true }) {
+async function createSession({ game, output, base, key, username = "", companionVersion = COMPANION_VERSION, report, upload = transport.upload, uploadAuctions = transport.uploadAuctions, uploadQuestCache = transport.uploadQuestCache, interval = 1000, resumeAfterMs = RESUME_AFTER_MS, auctionGapMs = 10500, sendInventory = true, sendAuctions = true, sendQuestCache = true }) {
   // What this PC shares: its characters (/api/wow/import), auction house prices (/api/wow/auctions), or both.
   // A price-gathering "service" character turns off the first; a player who doesn't share prices, the second.
   if (!sendInventory && !sendAuctions) throw new Error("Choose at least one thing to upload: your characters or auction house prices.");
@@ -44,6 +45,14 @@ async function createSession({ game, output, base, key, username = "", companion
     minGapMs: auctionGapMs, sleep,
     log: message => { if (/rejected/.test(message)) notify({ state: "watching", message }); },
   });
+  // The game's quest cache (Cache/WDB/<locale>/questcache.wdb): quest facts the server sent the client, new or changed
+  // quests only, after the inventory and auction prices of the same run. It never fails or delays those: a site without
+  // the endpoint (404/405) is asked again only after the next start; other failures wait for the next run. Silent in the
+  // tray (nothing there for the person to do). State beside the export, no key in it.
+  const questCache = createQuestCacheSender(output + ".quest-cache-sent.json", doc => uploadQuestCache(base, key, doc, undefined, abort.signal), {
+    context: questCacheContext({ origin: base, username }), companion: companionVersion, minGapMs: auctionGapMs, sleep,
+  });
+  let questCacheTaken = sendQuestCache;
   let replay = true, deliveredFor = "";
   const fileSignature = files => files.map(f => { const s = fs.statSync(f); return `${f}:${s.mtimeMs}:${s.size}`; }).join("|");
   async function run() {
@@ -79,6 +88,10 @@ async function createSession({ game, output, base, key, username = "", companion
       deliveredFor = sig; refusedSig = "";
     }
     if (sendAuctions) await auctions.send(all.auctions);
+    if (questCacheTaken && !stopped) {
+      const sent = await questCache.send(game);
+      if (sent.unsupported) questCacheTaken = false;
+    }
   }
   const clearResume = () => { if (resumeTimer) clearTimeout(resumeTimer); resumeTimer = null; };
   const queue = createExportQueue(() => (active = run().then(() => {

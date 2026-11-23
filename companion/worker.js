@@ -16,7 +16,7 @@ async function command(cmd) {
   emit({ state: "connected", username: account.username, legacy: !!account.legacy, starting: cmd.action === "start" });
   if (cmd.action === "start") session = await createSession({
     game: cmd.game, output: path.join(cmd.dataDirectory, "inventory.json"), base: cmd.base, key: cmd.key, username: account.username, report: emit,
-    sendInventory: cmd.sendInventory !== false, sendAuctions: cmd.sendAuctions !== false,
+    sendInventory: cmd.sendInventory !== false, sendAuctions: cmd.sendAuctions !== false, sendQuestCache: cmd.sendQuestCache !== false,
   });
 }
 const input = readline.createInterface({ input: process.stdin });

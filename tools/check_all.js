@@ -55,11 +55,11 @@ r = node(["--test", tool("tooltip_clean.test.js")]);
 report("tooltip cleaner: what is the item's stays, what is the reading character's goes; the copy inside convert.js is the module's", r.ok, r.out);
 r = node(["--test", tool("questcache.test.js")]);
 report("quest cache reader: the verified layout of builds 70938 and 71037, unknown files refused with no rows, documents of facts only (no quest text) matching their schema", r.ok, r.out);
-r = node(["--test", tool("export_queue.test.js"), tool("upload_outbox.test.js"), tool("upload_ack.test.js"), tool("auction_sender.test.js")]);
-report("export watch queue, retries, upload acknowledgements, and auction scans sent once per scan", r.ok, r.out);
+r = node(["--test", tool("export_queue.test.js"), tool("upload_outbox.test.js"), tool("upload_ack.test.js"), tool("auction_sender.test.js"), tool("quest_cache_sender.test.js")]);
+report("export watch queue, retries, upload acknowledgements, auction scans sent once per scan, and the quest cache sent once per changed quest (quiet on 404)", r.ok, r.out);
 if (Number(process.versions.node.split(".")[0]) >= 22) {
     r = node(["--test", path.join(root, "companion", "companion.test.js"), tool("package_release.test.js")]);
-    report("companion HTTP, watch lifecycle, locks and distribution", r.ok, r.out);
+    report("companion HTTP, watch lifecycle, locks, the quest cache after the inventory, and distribution", r.ok, r.out);
 } else {
     console.log("SKIP  companion checks: Node 22+ required");
 }

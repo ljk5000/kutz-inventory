@@ -72,4 +72,6 @@ module.exports = {
   upload: (base, key, data, fetcher, signal) => request(base, key, "/api/wow/import", data, fetcher, signal),
   // one auction-scan document; 200 { ok, accepted, stale, house } is an acknowledgement even when accepted is 0
   uploadAuctions: (base, key, doc, fetcher, signal) => request(base, key, "/api/wow/auctions", doc, fetcher, signal),
+  // one quest-cache document (schema/quest-cache.schema.json); a 2xx { ok: true } is the acknowledgement
+  uploadQuestCache: (base, key, doc, fetcher, signal) => request(base, key, "/api/wow/quest-cache", doc, fetcher, signal),
 };
