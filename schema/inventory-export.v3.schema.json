@@ -1670,9 +1670,10 @@
                     "container",
                     "quest",
                     "vendor",
-                    "other"
+                    "other",
+                    "disenchant"
                   ],
-                  "description": "chest = any game object that isn't a herb or ore node; container = an item opened from the bags (src.item); quest = a quest reward container."
+                  "description": "chest = any game object that isn't a herb or ore node; container = an item opened from the bags (src.item); quest = a quest reward container. disenchant (since 3.16.0): the window of the character's own Disenchant (within 5 s of the cast succeeding, one window per cast); src.item is the destroyed item and is always present (a window without it is not recorded), and nothing else is."
                 },
                 "npc": {
                   "type": "integer",
@@ -1690,7 +1691,7 @@
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 2147483647,
-                  "description": "kind container: the opened item's ID."
+                  "description": "kind container: the opened item's ID. kind disenchant (since 3.16.0): the destroyed item's ID, from the window's item source GUID or else the bag item the cast was aimed at."
                 },
                 "guid": {
                   "type": "string",
@@ -1723,7 +1724,38 @@
                   "maximum": 7,
                   "description": "Since 3.7.0, via roll only: the group's loot threshold quality (0 poor ... 4 epic) when the list was rolled; the list is every item of that quality or better."
                 }
-              }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "const": "disenchant"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "then": {
+                    "type": "object",
+                    "required": [
+                      "item"
+                    ],
+                    "properties": {
+                      "item": true,
+                      "npc": false,
+                      "object": false,
+                      "guid": false,
+                      "level": false,
+                      "via": false,
+                      "encounter": false,
+                      "threshold": false
+                    }
+                  }
+                }
+              ]
             },
             "items": {
               "type": "array",

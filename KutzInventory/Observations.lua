@@ -30,6 +30,8 @@
 --           1.22.0: a roll list no window named gets its corpse from the game's loot flags (UNIT_LOOT), src.by =
 --           "end"|"flip"|"sole" saying how (see "Which corpse a roll list came from" below), and its boss from the
 --           game's loot history. src.by stays in the saved table; the export does not carry it yet.
+--           1.23.0: src = { kind = "disenchant", item } for the window of the player's own Disenchant (see de below):
+--           item is the destroyed item; a window without its id is not recorded at all.
 --   quest   act = "accept"|"turnin", quest, npc|object (the giver / ender), rewards = { items, choices, chose } on turnin,
 --           text = { title, details, objectives } on accept and { title, progress, completion } on turnin: the quest's
 --           words as the game showed them, with this character's own name put back to "$N". Once per quest and act
@@ -373,6 +375,46 @@ end
 
 local function Now() return Num(Try(GetTime)) or 0 end
 
+-- Disenchanting (1.23.0): the player's own Disenchant (spell 13262, or a spell of that name in this client) that
+-- succeeded makes the next loot window (within 5 s, until it closes) a "disenchant" one, unless a bag item was used after
+-- the cast (then it is that item's container window). The destroyed item: the window's Item- source GUID
+-- (C_Item.GetItemIDByGUID), else the bag item clicked (UseContainerItem / PickupContainerItem, hooked) at most 1 s
+-- before the cast began. No item id, no event: such a window is recorded as nothing else either.
+local de = { SPELL = 13262, AIM = 1, at = -1000, item = nil, pending = nil, startAt = -1000, aimed = nil, aimedAt = -1000,
+             name = nil, hooked = false }
+
+function de.Is(spellId)
+    spellId = Int(Plain(spellId), 1)
+    if not spellId then return false end
+    if spellId == de.SPELL then return true end
+    if de.name == nil then
+        local name = SpellName(de.SPELL)
+        de.name = type(name) == "string" and name ~= "" and name or false
+    end
+    return de.name ~= false and SpellName(spellId) == de.name
+end
+
+function de.Aim(id) de.aimed, de.aimedAt = id, Now() end   -- a bag item was clicked or used (id or nil)
+
+function de.Start(unit, spellId)                -- UNIT_SPELLCAST_START: the item clicked just before is the target
+    if unit ~= "player" or not de.Is(spellId) then return end
+    local now = Now()
+    de.pending, de.startAt = now - de.aimedAt <= de.AIM and de.aimed or nil, now
+end
+
+function de.Done(unit, spellId)                 -- UNIT_SPELLCAST_SUCCEEDED
+    if unit ~= "player" or not de.Is(spellId) then return end
+    local now = Now()
+    de.at, de.item = now, now - de.startAt <= CAST_WINDOW and de.pending or nil
+    de.pending = nil
+end
+
+function de.Window()                            -- this loot window follows a Disenchant
+    return Now() - de.at <= CAST_WINDOW and not (lastUsedItem.at > de.at)
+end
+
+function de.Closed() if Now() - de.at <= CAST_WINDOW then de.at, de.item = -1000, nil end end   -- one window per cast
+
 local function UnitOf(guid)                     -- a unit token that is this GUID right now (to read its level), or nil
     for _, unit in ipairs({ "target", "mouseover", "focus" }) do
         if Plain(Try(UnitGUID, unit)) == guid then return unit end
@@ -385,11 +427,19 @@ local function IsBoss(unit, npc)
 end
 
 -- src: kind, npc|object|item, guid (creatures and objects only), level (the creature's, when a unit shows it),
--- via = "slot" (GetLootSourceInfo named it) or "target" (the dead target when the window opened)
+-- via = "slot" (GetLootSourceInfo named it) or "target" (the dead target when the window opened). nil: record nothing
+-- (a disenchant window without the destroyed item's id).
 local function Source(guid, via, fishing)
     local what, id = FromGuid(guid)
     local cast = Now() - lastCast.at <= CAST_WINDOW and lastCast.kind or nil
     local src = {}
+    if not fishing and not what and de.Window() then
+        local item = type(guid) == "string" and guid:match("^Item%-") and C_Item and C_Item.GetItemIDByGUID
+                     and Int(Try(C_Item.GetItemIDByGUID, guid), 1)
+        item = item or de.item
+        if not item then return nil end
+        return { kind = "disenchant", item = item }
+    end
     if fishing then src.kind = "fishing"
     elseif what == "npc" then
         local unit = UnitOf(guid)
@@ -703,8 +753,8 @@ local function RecordLoot(ready)
     for _, key in ipairs(order) do
         local s = sources[key]
         local src = Source(s.guid, s.via, fishing)
-        if src.guid then src.encounter = bossEncounter[src.guid] end
-        local skip = again and not (src.guid and s.via == "slot")
+        if src and src.guid then src.encounter = bossEncounter[src.guid] end
+        local skip = not src or (again and not (src.guid and s.via == "slot"))
         if not skip then
             -- the event (and its id) is made only for an open that is kept
             if not (src.guid and Opened(src.guid .. "|" .. src.kind)) then
@@ -3084,7 +3134,7 @@ end
 
 function handlers.LOOT_READY() flag.Window(true); qx.Spoil(); RecordLoot(true) end
 function handlers.LOOT_OPENED() flag.Window(true); qx.Spoil(); RecordLoot(false) end
-function handlers.LOOT_CLOSED() flag.Window(false); lootDone = false end
+function handlers.LOOT_CLOSED() flag.Window(false); lootDone = false; de.Closed() end
 function handlers.UNIT_LOOT(guid, has) flag.Changed(guid, has) end
 function handlers.LOOT_ROLLS_COMPLETE(handle) flag.Done(handle) end
 local function Cast(unit, _, spellId)
@@ -3096,9 +3146,9 @@ local function Began(unit, castGUID, spellId)
     Cast(unit, castGUID, spellId)
     if unit == "player" then pet.Start(spellId) end
 end
-handlers.UNIT_SPELLCAST_START = Began
+handlers.UNIT_SPELLCAST_START = function(unit, castGUID, spellId) Began(unit, castGUID, spellId); de.Start(unit, spellId) end
 handlers.UNIT_SPELLCAST_CHANNEL_START = Began   -- Tame Beast is channelled
-handlers.UNIT_SPELLCAST_SUCCEEDED = Cast
+function handlers.UNIT_SPELLCAST_SUCCEEDED(unit, castGUID, spellId) Cast(unit, castGUID, spellId); de.Done(unit, spellId) end
 function handlers.UNIT_SPELLCAST_INTERRUPTED(unit, _, spellId) if unit == "player" then pet.Stop(spellId) end end
 function handlers.UNIT_SPELLCAST_CHANNEL_STOP(unit, _, spellId) if unit == "player" then pet.Ended(spellId) end end
 handlers.UNIT_SPELLCAST_SENT = pet.Sent
@@ -3335,7 +3385,17 @@ local function Enable()
             local info = type(bag) == "number" and slot and Plain(Try(C_Container.GetContainerItemInfo, bag, slot))
             local id = type(info) == "table" and gameText.Id(info.itemID)
             if id then lastUsedItem.id, lastUsedItem.at = id, Now() end
+            de.Aim(id)
             pcall(gameText.BookUse, id, info)
+        end)
+    end
+    -- a left click on a bag item while a spell waits for its target (Disenchant): the item it was aimed at
+    if not de.hooked and type(hooksecurefunc) == "function" and C_Container and type(C_Container.PickupContainerItem) == "function"
+        and type(C_Container.GetContainerItemInfo) == "function" then
+        de.hooked = pcall(hooksecurefunc, C_Container, "PickupContainerItem", function(bag, slot)
+            bag, slot = Plain(bag), Int(slot, 1)
+            local info = type(bag) == "number" and slot and Plain(Try(C_Container.GetContainerItemInfo, bag, slot))
+            de.Aim(type(info) == "table" and gameText.Id(info.itemID) or nil)
         end)
     end
     if not taxi.hooked and type(hooksecurefunc) == "function" and type(TakeTaxiNode) == "function" then
@@ -3356,6 +3416,7 @@ local function Disable()
     qx.waiting, qx.window = {}, nil
     qx.rep = nil                                         -- a turn-in's rep still settling is dropped
     pet.arm, pet.read, pet.sent, pet.token = nil, nil, nil, pet.token + 1   -- a tame still being read is dropped
+    de.at, de.item, de.pending, de.aimed = -1000, nil, nil, nil
     credit.Reset()
     kr.Reset()
 end

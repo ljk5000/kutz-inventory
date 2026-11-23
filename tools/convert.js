@@ -511,7 +511,7 @@ const OBSERVATIONS_VERSION = 1;
 const OBS_MAX_EVENTS = 5000;
 const OBS_MAX_CHARS = 2000000;
 const OBS_ID = /^[0-9a-z]{4,16}-[0-9]{1,12}$/;
-const OBS_SRC_KINDS = ["mob", "boss", "chest", "fishing", "herb", "mine", "skin", "container", "quest", "vendor", "other"];
+const OBS_SRC_KINDS = ["mob", "boss", "chest", "fishing", "herb", "mine", "skin", "container", "quest", "vendor", "other", "disenchant"];
 const OBS_GUID = /^(Creature|Vehicle|GameObject)-[0-9]+-[0-9]+-[0-9]+-[0-9]+-([0-9]+)-[0-9A-Fa-f]+$/;
 const obsInt = (v, min = 0) => (Number.isInteger(v) && v >= min && v <= 2147483647 ? v : undefined);
 const obsText = (v, re) => (typeof v === "string" && v.length >= 1 && v.length <= 64 && (!re || re.test(v)) ? v : undefined);
@@ -552,8 +552,10 @@ const obsItems = (list, loot) => asList(list).map((it) => (it && typeof it === "
   : {}))
   .filter((it) => it.id !== undefined && it.n !== undefined).slice(0, 2000);
 // src: the GUID is kept only when it is a creature's or object's and agrees with the id; never a player's, pet's or item's
+// disenchant (3.16.0): { kind, item } only, the destroyed item; without its id there is no event
 function obsSrc(s) {
   if (!s || typeof s !== "object" || !OBS_SRC_KINDS.includes(s.kind)) return null;
+  if (s.kind === "disenchant") { const item = obsInt(s.item, 1); return item === undefined ? null : { kind: s.kind, item }; }
   const m = typeof s.guid === "string" ? OBS_GUID.exec(s.guid) : null;
   const what = m ? (m[1] === "GameObject" ? "object" : "npc") : null;
   const guidOk = m && s[what] === Number(m[2]);

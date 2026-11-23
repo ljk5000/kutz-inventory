@@ -666,6 +666,29 @@ test("observations 3.16.0: quest rewards as the window listed them, on both acts
   assert.ok(validateExport(noChoices).length, "the schema still wants choices on a turn-in");
 });
 
+test("observations 3.16.0: a disenchant loot event keeps only kind and the destroyed item; without the item, no event", () => {
+  const { validateExport } = require("./validate_export");
+  const doc = convert.convertSavedVariables([LUA]).inventory;
+  const where = { map: 0, uiMap: 1429, x: 0.4123, y: 0.6543 };
+  const who = { level: 30, class: 8, faction: "Alliance", name: "Exampleobserver" };
+  const event = { id: "dsen-1", t: 100, type: "loot", src: { kind: "disenchant", item: 20708 },
+    items: [{ id: 10940, n: 2, link: "|cffffffff|Hitem:10940|h[Strange Dust]|h|r" }], where, who };
+  const obs = (src) => convert.exportObservations([{ events: [{ ...event, src }] }]);
+  const good = obs(event.src).events[0];
+  assert.deepEqual(good.src, { kind: "disenchant", item: 20708 });
+  assert.deepEqual(obs({ kind: "disenchant", item: 20708, guid: "Creature-0-4170-0-1234-1-000012ABCD", npc: 1, via: "slot", level: 3 }).events[0].src,
+    { kind: "disenchant", item: 20708 }, "nothing else rides along");
+  for (const item of [undefined, 0, "20708", 1.5]) assert.equal(obs({ kind: "disenchant", item }), null, "item " + item);
+  assert.deepEqual(obs({ kind: "container", item: 20708 }).events[0].src, { kind: "container", item: 20708 }, "container unchanged");
+  const withEvent = (e) => ({ ...doc, observations: { v: 1, addon: "1.23.0", events: [e] } });
+  assert.deepEqual(validateExport(withEvent(good)), []);
+  for (const src of [{ kind: "disenchant" }, { kind: "disenchant", item: 1, npc: 2 }, { kind: "disenchant", item: 1, via: "slot" },
+                     { kind: "disenchant", item: 1, guid: "Creature-0-4170-0-1234-1-000012ABCD" }, { kind: "enchant", item: 1 }]) {
+    assert.ok(validateExport(withEvent({ ...good, src })).length, "schema rejected " + JSON.stringify(src));
+  }
+  assert.deepEqual(validateExport(withEvent({ ...good, src: { kind: "container" } })), [], "a container may still lack its item");
+});
+
 test("observations 3.16.0: killrep keeps npc, lv, faction and the signed change; never a standing or a GUID", () => {
   const { validateExport } = require("./validate_export");
   const doc = convert.convertSavedVariables([LUA]).inventory;
