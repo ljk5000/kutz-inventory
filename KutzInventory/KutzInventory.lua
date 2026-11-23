@@ -1146,7 +1146,7 @@ local legacy = {
               62030, 62031, 62032, 62033, 62034, 62035, 62041, 62042, 62043, 62044, 62045, 62046, 62047, 62048, 62049,
               62054, 62382, 63340, 63341, 63342 },
     SET61_FIRST = 63969, SET61_LAST = 64033,   -- set 61: kept only once completed or started
-    MAX_CRITERIA = 40, GAP = 30, lastAt = -1e9, waiting = false,
+    MAX_CRITERIA = 40, GAP = 30, SLOW = 600, lastAt = -1e9, waiting = false,
 }
 
 function legacy.Count(v)
@@ -1228,13 +1228,25 @@ function legacy.Scan()
     table.sort(list, function(a, b) return a.id < b.id end)
     local saved = me.legacyChallenges
     if type(saved) == "table" and legacy.Key(saved.list) == legacy.Key(list) then return end
+    -- A completed challenge never becomes incomplete: a reading with fewer completed than the saved one was taken before
+    -- the client had its achievement data (just after login), and the saved one stays.
+    local function Done(l) local n = 0; for _, e in ipairs(type(l) == "table" and l or {}) do if type(e) == "table" and e.completed == true then n = n + 1 end end return n end
+    if type(saved) == "table" and Done(list) < Done(saved.list) then return end
     me.legacyChallenges = { at = time(), list = list }
     me.updated.legacyChallenges = me.legacyChallenges.at
 end
 
-function legacy.Want(delay)                   -- an event: one read, no sooner than 30 s after the last
-    if pendingRun.legacy then return end
-    Soon("legacy", legacy.Scan, math.max(delay or 2, legacy.lastAt + legacy.GAP - GetTime()))
+-- An event: one read, no sooner than gap seconds after the last (30 s; 10 minutes for CRITERIA_UPDATE, which fires on
+-- any progress of any achievement). A read already waiting stays, unless this one is due sooner.
+function legacy.Want(delay, gap)
+    local now = GetTime()
+    local due = now + math.max(delay or 2, legacy.lastAt + (gap or legacy.GAP) - now)
+    if pendingRun.legacy then
+        if due >= (legacy.dueAt or 0) - 1 then return end
+        pendingRun.legacy = nil                   -- its timer finds another token and does nothing
+    end
+    legacy.dueAt = due
+    Soon("legacy", legacy.Scan, due - now)
 end
 
 ---------------------------------------------------------------------------
@@ -1636,7 +1648,7 @@ end
 -- Legacy challenges: these fire often (CRITERIA_UPDATE on any progress); each only asks for one read, see legacy.Want
 function handlers.ACHIEVEMENT_EARNED() legacy.Want(2) end
 handlers.CRITERIA_EARNED = handlers.ACHIEVEMENT_EARNED
-handlers.CRITERIA_UPDATE = handlers.ACHIEVEMENT_EARNED
+function handlers.CRITERIA_UPDATE() legacy.Want(2, legacy.SLOW) end
 handlers.RECEIVED_ACHIEVEMENT_LIST = handlers.ACHIEVEMENT_EARNED
 function handlers.TRAINER_SHOW() if not readingTrainer then Soon("trainer", ScanTrainer, 0.5) end end
 handlers.TRAINER_UPDATE = handlers.TRAINER_SHOW          -- also fires when we flip the filters: ignored while reading

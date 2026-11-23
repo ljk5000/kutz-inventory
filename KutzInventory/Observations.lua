@@ -738,7 +738,8 @@ local function RecordLoot(ready)
         if type(Plain(from[1])) ~= "string" then
             -- coins (or a currency) the client names no source for are not a source of their own: without this, every
             -- corpse with coins also left an empty "other" open. A window with only those is still an open (below).
-            if id then from, via = { Target() or false, quantity }, "target" else from = {} end
+            -- After a Disenchant the window is the destroyed item's: a corpse still targeted is not its source.
+            if id then from, via = { (not de.Window() and Target()) or false, quantity }, "target" else from = {} end
         end
         for i = 1, #from, 2 do
             local guid = Plain(from[i])
@@ -750,7 +751,7 @@ local function RecordLoot(ready)
             end
         end
     end
-    if #order == 0 and not again then Of(Target(), "target") end   -- a loot window with nothing in it
+    if #order == 0 and not again then Of(not de.Window() and Target() or nil, "target") end   -- a loot window with nothing in it
     for _, key in ipairs(order) do
         local s = sources[key]
         local src = Source(s.guid, s.via, fishing)
@@ -1944,7 +1945,8 @@ function NPC.Vitals(n, unit, level, w, inside)
     if not (level and level >= 1 and level <= 255 and level == math.floor(level) and False(UnitIsDead, unit)) then return end
     local diff = inside and (Int(w.difficulty) or 0) or nil
     local hp = Int(Try(UnitHealthMax, unit), 1)
-    if hp then
+    -- Exactly 100 may be a percentage (a client that hides hostile health answers 100 for every creature): not kept.
+    if hp and hp ~= 100 then
         local x = NPC.Reading(n, "hp", level, diff)
         x.v = NPC.Tally(x.c, hp, Int(x.v, 1))
     end
@@ -3027,8 +3029,8 @@ end
 -- name-to-id table read from the reputation list (qx.Standings) out of combat and reused; it is read again, out of combat
 -- and at most once a minute, after a name it did not know. A name it still does not know, or that two factions share,
 -- records nothing. Never a standing, never a GUID (the corpses' GUIDs are in memory only, to count each once).
-local kr = { BEFORE = 2, AFTER = 1, QUEST = 5, SESSION = 100, DEAD = 500, KEEP = 40, D = 100000, REBUILD = 60,
-             deaths = {}, dead = {}, ndead = 0, n = 0, names = nil, stale = true, builtAt = nil, patterns = nil, token = 0 }
+local kr = { BEFORE = 2, AFTER = 1, QUEST = 5, SESSION = 100, DEAD = 500, KEEP = 40, D = 100000, REBUILD = 60, MISSED = 50,
+             missed = {}, nmissed = 0, deaths = {}, dead = {}, ndead = 0, n = 0, names = nil, stale = true, builtAt = nil, patterns = nil, token = 0 }
 kr.FORMATS = { { "FACTION_STANDING_INCREASED", "Reputation with %s increased by %d.", 1 },
                { "FACTION_STANDING_DECREASED", "Reputation with %s decreased by %d.", -1 } }
 
@@ -3036,6 +3038,7 @@ function kr.Died(unit)                          -- as credit.Died, whether or no
     local guid = Plain(Try(UnitGUID, unit))
     local what, id = FromGuid(guid)
     if what ~= "npc" or kr.dead[guid] then return end
+    if pet.Guid() then credit.petAt = Now() end
     if not (False(UnitIsPlayer, unit) and False(UnitPlayerControlled, unit) and False(UnitIsTapDenied, unit)) then return end
     if kr.ndead >= kr.DEAD then kr.dead, kr.ndead = {}, 0 end
     kr.dead[guid], kr.ndead = true, kr.ndead + 1
@@ -3054,10 +3057,15 @@ end
 
 function kr.Faction(name)
     local f = kr.names and kr.names[name]
-    if f == nil then
+    if f == nil and not kr.missed[name] then
         kr.stale = true
         kr.Build()
         f = kr.names and kr.names[name]
+        -- Read again and still not there (the guild's faction, a renown faction): this name asks for no more reads.
+        if f == nil and not kr.stale then
+            if kr.nmissed >= kr.MISSED then kr.missed, kr.nmissed = {}, 0 end
+            kr.missed[name], kr.nmissed = true, kr.nmissed + 1
+        end
     end
     return f or nil                             -- false: two factions share the name
 end
@@ -3102,6 +3110,10 @@ end
 
 function kr.Decide(at, f, d)
     if kr.n >= kr.SESSION or kr.Quest(at) then return end
+    -- As objective credit: never while grouped or while a pet was out. A member's or the pet's kill out of sight gives
+    -- the reputation too, and the one death seen here would be another creature's.
+    if pet.Guid() then credit.petAt = Now() end
+    if not (False(IsInGroup) and at - credit.petAt > credit.WINDOW) then return end
     local npc, lv, first = nil, nil, true
     for _, x in ipairs(kr.deaths) do
         if x.at >= at - kr.BEFORE and x.at <= at + kr.AFTER then

@@ -102,7 +102,7 @@ check(dump(lc.list) == '{' ..
   'login reading: ' .. dump(lc.list))
 
 -- an event with nothing changed: one read, nothing rewritten
-advance(30); emit('CRITERIA_UPDATE'); emit('CRITERIA_UPDATE'); advance(2)
+advance(30); emit('RECEIVED_ACHIEVEMENT_LIST'); emit('RECEIVED_ACHIEVEMENT_LIST'); advance(2)
 check(reads == 2 and c.legacyChallenges == lc and c.updated.legacyChallenges == 1700000016, 'unchanged: not rewritten')
 
 -- a change, seen on ACHIEVEMENT_EARNED: no sooner than 30 s after the last read, then saved
@@ -121,7 +121,7 @@ check(e.id == 62054 and e.completed == true and e.date == '2026-11-23' and e.cri
 
 -- combat: the read waits for combat to end
 advance(40); ach[63971][7][1][3] = 1                                     -- set 61: now started
-inCombat = true; emit('CRITERIA_UPDATE'); advance(10)
+inCombat = true; emit('CRITERIA_EARNED'); advance(10)
 check(reads == 3 and c.legacyChallenges == lc, 'no read in combat')
 advance(60)
 check(reads == 3, 'no read later while still in combat')
@@ -154,13 +154,29 @@ check(by[63970] == nil, 'set 61 with criteria that fail to read is not started')
 GetAchievementCriteriaInfo = crit
 lc = c.legacyChallenges
 
+-- CRITERIA_UPDATE (any progress of any achievement): no sooner than 10 minutes after the last read; an earned event
+-- brings that waiting read forward; a reading with fewer completed than the saved one is not kept
+advance(40); emit('CRITERIA_UPDATE'); emit('CRITERIA_UPDATE'); advance(500)
+check(reads == 6, 'CRITERIA_UPDATE within 10 minutes of the last read: waits')
+advance(62)
+check(reads == 7, 'CRITERIA_UPDATE: read 10 minutes after the last')
+lc = c.legacyChallenges
+emit('CRITERIA_UPDATE'); advance(100)
+check(reads == 7, 'waits again')
+ach[62054][1] = false
+emit('ACHIEVEMENT_EARNED'); advance(2)
+check(reads == 8 and c.legacyChallenges == lc, 'an earned event brings the read forward; fewer completed keeps the saved reading')
+ach[62054][1] = true
+advance(600)
+check(reads == 8, 'the replaced timer reads nothing')
+
 -- /kinv scan reads at once; a read waiting at the logout checkpoint runs there
 ach[684][6] = 'Tester'; SlashCmdList.KUTZINVENTORY('scan')
-check(reads == 7 and c.legacyChallenges ~= lc and c.legacyChallenges.list[1].earnedBy == 'Tester', '/kinv scan reads')
+check(reads == 9 and c.legacyChallenges ~= lc and c.legacyChallenges.list[1].earnedBy == 'Tester', '/kinv scan reads')
 ach[61502][6] = 'Altchar'; emit('CRITERIA_UPDATE'); advance(2)
-check(reads == 7, 'waiting after /kinv scan')
+check(reads == 9, 'waiting after /kinv scan')
 hooks.Logout()
-check(reads == 8 and c.legacyChallenges.list[2].earnedBy == 'Altchar', 'the logout checkpoint runs the waiting read')
+check(reads == 10 and c.legacyChallenges.list[2].earnedBy == 'Altchar', 'the logout checkpoint runs the waiting read')
 print('OK legacy challenges: login read, change-only saves, 30 s limit, combat deferral, set 61 once started, guarded answers, /kinv scan and checkpoint')
 `;
 

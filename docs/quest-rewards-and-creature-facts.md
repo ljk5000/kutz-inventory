@@ -134,7 +134,11 @@ player saw die untapped by others (the existing death evidence: `UnitIsDead`, an
 `UnitPlayerControlled` and `UnitIsTapDenied` plainly false), **from 2 seconds before the message to 1 second after
 it**, had the same NPC id; none or two different ids record nothing. `lv` is kept only when all of those deaths
 showed the same plain level. Nothing within 5 seconds of a quest turn-in or of a reward window opening, nor while a
-reward window is open. `who.level` tells a reduced amount from a full one. Never a standing.
+reward window is open. Nothing while the player is grouped or has had a pet out in the last 6 seconds (the rule
+objective credit already has): a party member's or the pet's kill out of sight gives the reputation too, and the one
+death seen here would be another creature's. A hunter or warlock with a pet out, and anyone in a group, records no
+`killrep`. A name the list still does not have after a fresh read (the guild's faction) asks for no more reads this
+session. `who.level` tells a reduced amount from a full one. Never a standing.
 
 Correction to the first draft, which looked only at the 2 seconds before the message: the server likely sends the
 reputation change as soon as the kill is credited, while the creature's death reaches the client with the next batch
@@ -209,7 +213,9 @@ criteria has a quantity above 0.
 
 **When.** Once 16 s after login (beside `statistics`), and after `RECEIVED_ACHIEVEMENT_LIST`, `ACHIEVEMENT_EARNED`,
 `CRITERIA_EARNED` and `CRITERIA_UPDATE`. Each event only asks for one read through the existing coalescing (`Soon`),
-no sooner than 30 s after the last read; a read that comes due in combat waits for `PLAYER_REGEN_ENABLED`. `/kinv
+no sooner than 30 s after the last read (10 minutes for `CRITERIA_UPDATE`, which fires on any progress of any
+achievement; an earned event brings a waiting read forward); a reading with fewer completed challenges than the saved
+one is not kept (taken before the client had its data); a read that comes due in combat waits for `PLAYER_REGEN_ENABLED`. `/kinv
 scan` reads at once (the 30 s do not apply to that command). A read still waiting when the pre-logout checkpoint
 runs is done there. No timer of its own, nothing per frame. One read is about 130 achievement calls plus their
 criteria.
@@ -291,10 +297,13 @@ its id (61 only for 63969-64033). Format 2 keeps passing `updated` through whole
 - Target a creature at full health, in and out of a dungeon: `/dump UnitHealthMax("target"), UnitPowerType("target"),
   UnitPowerMax("target")`, then `/dump KutzInventoryObsDB.npcs[<id>]`. Are the values plain in combat? Is
   `UnitHealthMax` the real number for a creature (not 100, a percentage, as some classic clients gave for units
-  outside the group)? If it is a percentage, `hp` must not ship.
+  outside the group)? If it is a percentage, `hp` must not ship. (The addon never keeps a reading of exactly 100.)
 - Disenchant an item: `/dump GetLootSourceInfo(1)` with the window open. Is the source an `Item-` GUID, and does
   `C_Item.GetItemIDByGUID` still answer? Find the event with `kind = "disenchant"` and the right `item`, once picking
   the item with a left click and once with a right click (the aimed-at fallback when the GUID no longer answers).
+  Disenchant once with a looted corpse still targeted: still `disenchant`, never that creature's loot. With auto-loot
+  on, does `LOOT_READY` come before or after `UNIT_SPELLCAST_SUCCEEDED` (`/etrace`)? If before, the window is missed
+  and the next sourceless window within 5 s would be labelled `disenchant`.
 - Legacy challenges: on the character that earned a challenge, `/dump GetAchievementInfo(<a completed challenge id>)`,
   then the same on another character of the account; note returns 4-7 (completed, month, day, year) and 13-14
   (`wasEarnedByMe`, `earnedBy`) on each. Is the year years since 2000? `/dump GetAchievementCriteriaInfo(<id>, 1)`:
