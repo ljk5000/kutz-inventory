@@ -878,6 +878,16 @@ do
   a.hooks.UseContainerItem(0, 3); cast(a); a.loot({ item(10940, 1) })   -- no source named at all
   assert(#a.events() == 2 and dump(last(a).src) == "{item=4567,kind=disenchant}", dump(a.events()))
 
+  -- a corpse still targeted is not the source of a disenchant window that names none
+  local corpse = chanter()
+  corpse.s.units.target = { guid = "Creature-0-4170-0-1234-525-0000000001", dead = true, level = 12 }
+  corpse.hooks.PickupContainerItem(0, 3); cast(corpse); corpse.loot({ item(10940, 1) })
+  assert(#corpse.events() == 1 and dump(last(corpse).src) == "{item=4567,kind=disenchant}", dump(corpse.events()))
+  local corpse2 = chanter()                       -- and without the item's id: nothing, never the corpse's loot
+  corpse2.s.units.target = { guid = "Creature-0-4170-0-1234-525-0000000001", dead = true, level = 12 }
+  cast(corpse2); corpse2.loot({ item(10940, 1) })
+  assert(#corpse2.events() == 0, dump(corpse2.events()))
+
   -- no item id: nothing at all (not container, not other)
   local function nothing(why, setup)
     local x = chanter()
@@ -1655,6 +1665,25 @@ do
     x.s.clock = x.s.clock + 61; msg(x, "Reputation with Nowhere increased by 25.")   -- unknown: read again, now with the twin
     die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.")
   end)
+  -- a party member's or a pet's kill out of sight gives the reputation too: never while grouped or with a pet out
+  none("grouped", function(x) x.G.IsInGroup = function() return true end; die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("no group API", function(x) x.G.IsInGroup = nil; die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("a pet out", function(x) x.s.units.pet = { guid = "Pet-0-4170-0-1234-999-0000000009" }; die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.") end)
+  none("a pet dismissed just before", function(x)
+    x.s.units.pet = { guid = "Pet-0-4170-0-1234-999-0000000009" }; die(x, 5678); x.s.units.pet = nil
+    x.s.clock = x.s.clock + 4; die(x, 1234); msg(x, "Reputation with Stormwind increased by 25.")
+  end)
+  -- a name the list never has (the guild's faction): one more read of the list, then none for that name
+  do
+    local m = kr()
+    local w = m.s.walks
+    m.s.clock = m.s.clock + 61; msg(m, "Reputation with My Guild increased by 5.")
+    local w2 = m.s.walks
+    assert(w2 > w, "an unknown name reads the list again")
+    m.s.clock = m.s.clock + 61; msg(m, "Reputation with My Guild increased by 5.")
+    m.s.clock = m.s.clock + 61; m.event("PLAYER_REGEN_ENABLED"); m.event("PLAYER_ENTERING_WORLD")
+    assert(m.s.walks == w2, "a name already missed reads nothing: " .. (m.s.walks - w2))
+  end
   none("tracking switched off while it waits", function(x) die(x, 1234); msg(x, "Reputation with Stormwind increased by 25."); x.cmd("track drops off") end)
   local lv = kr()
   die(lv, 1234, { level = 12 }); die(lv, 1234, { level = 13 }); msg(lv, "Reputation with Stormwind increased by 25."); settle(lv)
@@ -2705,6 +2734,10 @@ do
     local lvs = {}
     for i, e in ipairs(v.db().npcs[525].hp) do lvs[i] = e.lv end
     assert(table.concat(lvs, ",") == "14,15,16,17,12,18", table.concat(lvs, ","))
+    -- exactly 100 may be a percentage (a client that hides hostile health): never kept
+    local pct = vit()
+    look(pct, { hp = 100, pt = 0, pmax = 345 })
+    assert(pct.db().npcs[525].hp == nil and pct.db().npcs[525].pw, "100 is not kept: " .. dump(pct.db().npcs[525]))
     -- power: type and maximum together; none without power, past type 30 or when not plain
     local p = vit()
     look(p, { hp = 300, pt = 0, pmax = 345 })
