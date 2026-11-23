@@ -5,7 +5,7 @@
 //
 // Picks the schema from the document: an inventory (1.x -> inventory-export.v1.schema.json,
 // 2.x -> inventory-export.schema.json, 3.x -> inventory-export.v3.schema.json), an auction scan (auction-scan.schema.json), or an array of auction scans
-// (auction-scans.json). Exit code 0 = every file is valid. Prints at most 20 problems per file.
+// (auction-scans.json), or a quest-cache document (quest-cache.schema.json). Exit code 0 = every file is valid. Prints at most 20 problems per file.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -18,6 +18,7 @@ const FILES = {
   inventory2: "inventory-export.schema.json",
   inventory3: "inventory-export.v3.schema.json",
   auction1: "auction-scan.schema.json",
+  questCache1: "quest-cache.schema.json",
 };
 
 const compiled = {};
@@ -49,8 +50,14 @@ function validateAuctionScan(doc) {
   if (major(doc && doc.schemaVersion) !== 1) return [`/schemaVersion: no schema for auction-scan version ${JSON.stringify(doc && doc.schemaVersion)}`];
   return check("auction1", doc);
 }
+// a quest-cache document (POST /api/wow/quest-cache)
+function validateQuestCache(doc) {
+  if (major(doc && doc.schemaVersion) !== 1) return [`/schemaVersion: no schema for quest-cache version ${JSON.stringify(doc && doc.schemaVersion)}`];
+  return check("questCache1", doc);
+}
 function validateAny(data) {
   if (Array.isArray(data)) return data.flatMap((d, i) => validateAuctionScan(d).map((p) => `[${i}]${p}`));
+  if (data && typeof data === "object" && data.kind === "quest-cache") return validateQuestCache(data);
   if (data && typeof data === "object" && "house" in data && "items" in data) return validateAuctionScan(data);
   return validateExport(data);
 }
@@ -73,4 +80,4 @@ if (require.main === module) {
   }
   process.exit(bad ? 1 : 0);
 }
-module.exports = { validateExport, validateAuctionScan, validateAny, SCHEMA_DIR };
+module.exports = { validateExport, validateAuctionScan, validateQuestCache, validateAny, SCHEMA_DIR };

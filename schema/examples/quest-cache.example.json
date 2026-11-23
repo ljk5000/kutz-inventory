@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "quest-cache",
+  "build": 71037,
+  "locale": "enUS",
+  "supportedBuilds": [
+    70938,
+    71037
+  ],
+  "companion": "0.12.8",
+  "total": 8,
+  "quests": [
+    {
+      "id": 257,
+      "level": 16,
+      "minLevel": 11,
+      "sort": 38,
+      "next": 258,
+      "xpDifficulty": 4,
+      "xpMultiplier": 1,
+      "money": 0,
+      "choose": [
+        {
+          "id": 2903,
+          "n": 1
+        },
+        {
+          "id": 2904,
+          "n": 1
+        }
+      ]
+    },
+    {
+      "id": 1003,
+      "level": 16,
+      "minLevel": 7,
+      "sort": 148,
+      "xpDifficulty": 5,
+      "xpMultiplier": 1,
+      "money": 800,
+      "items": [
+        {
+          "id": 2082,
+          "n": 1
+        },
+        {
+          "id": 11846,
+          "n": 5
+        }
+      ],
+      "rep": [
+        {
+          "faction": 54,
+          "tier": 5
+        }
+      ]
+    },
+    {
+      "id": 1097,
+      "level": 15,
+      "minLevel": 9,
+      "sort": 1519,
+      "xpDifficulty": 1,
+      "xpMultiplier": 1,
+      "money": 0
+    },
+    {
+      "id": 2359,
+      "level": 24,
+      "minLevel": 20,
+      "sort": -162,
+      "info": 1,
+      "next": 2607,
+      "xpDifficulty": 5,
+      "xpMultiplier": 1,
+      "money": 0,
+      "spell": 364159,
+      "startItem": 8046,
+      "items": [
+        {
+          "id": 18160,
+          "n": 1
+        }
+      ]
+    },
+    {
+      "id": 8372,
+      "level": 19,
+      "minLevel": 10,
+      "sort": 3277,
+      "info": 41,
+      "xpDifficulty": 5,
+      "xpMultiplier": 1,
+      "money": 1100,
+      "spell": 24960,
+      "rep": [
+        {
+          "faction": 890,
+          "tier": 6
+        }
+      ],
+      "currencies": [
+        {
+          "id": 1792,
+          "n": 10
+        }
+      ]
+    },
+    {
+      "id": 78150,
+      "level": 20,
+      "minLevel": 1,
+      "sort": -284,
+      "xpDifficulty": 1,
+      "xpMultiplier": 1,
+      "money": 125,
+      "choose": [
+        {
+          "id": 277203,
+          "n": 1
+        },
+        {
+          "id": 277204,
+          "n": 1
+        }
+      ]
+    },
+    {
+      "id": 94238,
+      "level": 60,
+      "minLevel": 1,
+      "sort": 16941,
+      "xpDifficulty": 0,
+      "xpMultiplier": 1,
+      "money": 0,
+      "rep": [
+        {
+          "faction": 2586,
+          "tier": 0,
+          "override": 7500
+        },
+        {
+          "faction": 2587,
+          "tier": 0,
+          "override": 7500
+        }
+      ]
+    },
+    {
+      "id": 98372,
+      "level": 60,
+      "minLevel": 1,
+      "sort": 0,
+      "xpDifficulty": 0,
+      "xpMultiplier": 1,
+      "money": 0,
+      "spell": 1322905,
+      "items": [
+        {
+          "id": 280612,
+          "n": 1
+        }
+      ]
+    }
+  ]
+}
