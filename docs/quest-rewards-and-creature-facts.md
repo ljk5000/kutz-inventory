@@ -157,6 +157,15 @@ levels per NPC, the most recently seen. Like the rest of the summary it is cumul
 later export. A buff or debuff on the creature can change the number: a reader should want two installs to agree.
 About 20 bytes per entry, inside the summary's own 500 KB cap.
 
+As built: the reading needs `UnitIsDead` plainly false (a secret or missing answer reads nothing) and is taken in or
+out of combat (a creature's maximum does not change when it is fought). Saved in `KutzInventoryObsDB.npcs[id]` as
+`hp = { { lv, diff, v, c = { [v] = times } } }` and `pw = { { lv, diff, t, v, c = { ["t:v"] = times } } }`, the
+most recently read last; `c` is the addon's own tally (like `spds`) and is never exported. For `pw` the type and the
+maximum are counted as one pair, so `t` and `v` always come from the same reading. `diff` is the instance's
+difficulty id (0 when the client gives none inside an instance). The export sorts each list by `lv`, then `diff` (none
+first). Two installs' entries for the same creature join per `lv` and `diff`, the install seen last winning a level
+both have, at most 6.
+
 ## 4. Disenchanting (`loot` event, new `src.kind`)
 
 ```text
@@ -217,7 +226,9 @@ from the bag item the cast was aimed at. **No item id, no event**: such a window
   Right after login, kill one: is it recorded (the list is first read at `PLAYER_ENTERING_WORLD`; if the client has
   not filled it yet, a kill is missed until the next read out of combat)?
 - Target a creature at full health, in and out of a dungeon: `/dump UnitHealthMax("target"), UnitPowerType("target"),
-  UnitPowerMax("target")`, then `/dump KutzInventoryObsDB.npcs[<id>]`. Are the values plain in combat?
+  UnitPowerMax("target")`, then `/dump KutzInventoryObsDB.npcs[<id>]`. Are the values plain in combat? Is
+  `UnitHealthMax` the real number for a creature (not 100, a percentage, as some classic clients gave for units
+  outside the group)? If it is a percentage, `hp` must not ship.
 - Disenchant an item: `/dump GetLootSourceInfo(1)` with the window open. Is the source an `Item-` GUID, and does
   `C_Item.GetItemIDByGUID` still answer? Find the event with `kind = "disenchant"` and the right `item`.
 - Listed reputation, for a later version: with a quest selected in the log, `/dump GetNumQuestLogRewardFactions(),

@@ -2593,6 +2593,79 @@ do
   assert(skull({ class = "sideways" }).cls == nil, "classification only from the list")
   print("OK   npcs: a skull is a boss for a world boss or at the level cap, else no level")
 
+  -- health and power (1.23.0): UnitHealthMax, UnitPowerType and UnitPowerMax per level (and difficulty inside an
+  -- instance), read alive at a plain level; the value seen most often of at most 4; at most 6 levels, the latest kept
+  do
+    local function vit(opts)
+      local x = fresh(opts); x.on()
+      x.G.UnitHealthMax = function(u) local y = x.s.units[u]; return y and y.hp end
+      x.G.UnitPowerType = function(u) local y = x.s.units[u]; if y and y.pt ~= nil then return y.pt, "MANA" end end
+      x.G.UnitPowerMax = function(u, t) local y = x.s.units[u]; if y and t == y.pt then return y.pmax end; return 0 end
+      return x
+    end
+    local function look(x, patch) x.s.clock = x.s.clock + 31; x.s.units.target = wolf(patch); x.event("PLAYER_TARGET_CHANGED") end
+    local v = vit()
+    look(v, { hp = 198, pt = 1, pmax = 0 })
+    assert(dump(v.db().npcs[525].hp) == "{1={c={198=1},lv=12,v=198}}" and v.db().npcs[525].pw == nil, dump(v.db().npcs[525]))
+    v.s.units.target = wolf({ hp = 250 }); v.event("PLAYER_TARGET_CHANGED")      -- within 30 s: not read
+    assert(dump(v.db().npcs[525].hp) == "{1={c={198=1},lv=12,v=198}}", "30 s throttle")
+    look(v, { hp = 250 }); assert(v.db().npcs[525].hp[1].v == 198, "a tie keeps the first")
+    look(v, { hp = 250 }); assert(v.db().npcs[525].hp[1].v == 250, "the one seen most often")
+    for _, hp in ipairs({ 1, 2, 3, 4 }) do look(v, { hp = hp }) end
+    local c, k = v.db().npcs[525].hp[1].c, 0
+    for _ in pairs(c) do k = k + 1 end
+    assert(k == 4 and c[250] == 2 and v.db().npcs[525].hp[1].v == 250, "at most 4 counted, the mode kept: " .. dump(c))
+    -- a level of its own each; at most 6, the one read longest ago goes; reading one again makes it the latest
+    for lv = 13, 17 do look(v, { level = lv, hp = 100 + lv }) end
+    look(v, { level = 12, hp = 250 })
+    look(v, { level = 18, hp = 118 })
+    local lvs = {}
+    for i, e in ipairs(v.db().npcs[525].hp) do lvs[i] = e.lv end
+    assert(table.concat(lvs, ",") == "14,15,16,17,12,18", table.concat(lvs, ","))
+    -- power: type and maximum together; none without power, past type 30 or when not plain
+    local p = vit()
+    look(p, { hp = 300, pt = 0, pmax = 345 })
+    assert(dump(p.db().npcs[525].pw) == "{1={c={0:345=1},lv=12,t=0,v=345}}", dump(p.db().npcs[525]))
+    look(p, { hp = 300, pt = 1, pmax = 100 }); look(p, { hp = 300, pt = 1, pmax = 100 })
+    assert(p.db().npcs[525].pw[1].t == 1 and p.db().npcs[525].pw[1].v == 100, dump(p.db().npcs[525].pw))
+    local none = vit()
+    look(none, { hp = 300, pt = 31, pmax = 10 })
+    assert(none.db().npcs[525].pw == nil and none.db().npcs[525].hp, "type 31: no power")
+    -- inside an instance: diff, apart from the same level outside
+    local g = vit()
+    look(g, { hp = 300 })
+    g.s.itype, g.s.iid, g.s.difficulty = "party", 36, 1
+    look(g, { hp = 900 })
+    assert(dump(g.db().npcs[525].hp) == "{1={c={300=1},lv=12,v=300},2={c={900=1},diff=1,lv=12,v=900}}", dump(g.db().npcs[525].hp))
+    -- refusals: dead, a skull, no level, 0, secret values; an old client
+    local SECRET = {}
+    local function nothing(patch, why, opts)
+      local x = vit(opts)
+      look(x, patch)
+      local n = x.db().npcs[525]
+      assert(n and n.hp == nil and n.pw == nil and not x.db().lastError, why .. ": " .. dump(n) .. tostring(x.db().lastError))
+    end
+    nothing({ hp = 300, pt = 0, pmax = 50, dead = true }, "dead")
+    nothing({ hp = 300, pt = 0, pmax = 50, level = -1 }, "a skull")
+    nothing({ hp = 300, pt = 0, pmax = 50, level = 0 }, "level 0")
+    nothing({ hp = 300, pt = 0, pmax = 50, level = 12.5 }, "level not whole")
+    nothing({ hp = 0, pt = 0, pmax = 0 }, "zero")
+    nothing({ hp = 300, pt = 0, pmax = 50, level = SECRET }, "secret level", { globals = { issecretvalue = function(x) return x == SECRET end } })
+    nothing({ hp = SECRET, pt = SECRET, pmax = 50 }, "secret values", { globals = { issecretvalue = function(x) return x == SECRET end } })
+    local sd = vit({ globals = { issecretvalue = function(x) return x == SECRET end } })
+    sd.G.UnitIsDead = function() return SECRET end
+    look(sd, { hp = 300 })
+    assert(sd.db().npcs[525].hp == nil, "a secret UnitIsDead: no reading")
+    local old = fresh(); old.on(); old.s.units.target = wolf({ hp = 300 }); old.event("PLAYER_TARGET_CHANGED")
+    assert(old.db().npcs[525] and old.db().npcs[525].hp == nil and not old.db().lastError, "a client without the calls")
+    -- junk in a saved entry is mended, not an error
+    local j = vit({ db = { v = 1, on = true, agreed = true, events = {}, npcs = { [525] = { day = DAY, hp = { "x", { lv = 12, v = "y", c = 5 } }, pw = 7 } } } })
+    look(j, { hp = 300, pt = 0, pmax = 40 })
+    assert(dump(j.db().npcs[525].hp) == "{1={c={300=1},lv=12,v=300}}" and j.db().npcs[525].pw[1].v == 40 and not j.db().lastError,
+           dump(j.db().npcs[525]) .. tostring(j.db().lastError))
+  end
+  print("OK   npcs: health and power per level (and difficulty inside), alive at a plain level; the value seen most often; 6 levels")
+
   -- interaction windows count as near (the player stands there), loot corpses only when near; the throttle holds
   local v = fresh(); v.on()
   v.s.units.npc = { guid = TAILOR, level = 30, ct = 7, name = "Example Tailor" }
