@@ -1,0 +1,178 @@
+# Quest rewards, kill reputation, creature health and disenchanting (KutzInventory 1.23.0, export 3.16.0)
+
+Status: spec for the `feat/record-quest-money-and-facts` branch. Hand-off to the receiving site: this file plus
+`schema/examples/inventory-export.v3.example.json`. `observations.v` stays `1`; every field here is optional.
+
+## What is recorded today (so it is not added twice)
+
+| Fact | Today (1.22.1 / 3.15.0) |
+| --- | --- |
+| Turn-in reward items | `rewards.items` (`id`, `n`, `link`), `rewards.choices` (item ids only, no counts), `rewards.chose` |
+| Turn-in XP | top-level `xp` (`GetRewardXP` at `QUEST_COMPLETE`), absent at the level cap or with XP off |
+| Turn-in reputation | top-level `rep` (`f`, `d`): what the standings actually moved by, never a standing |
+| The recording character's level | `who.level` on every event |
+| Rewards when the quest is offered | nothing |
+| Quest money | nothing, on purpose until now (`GetRewardMoney` never called) |
+| Reward spell or title | nothing |
+| Reputation from a kill | nothing |
+| A creature's health or power | nothing (`npcs[]` has level, type, reaction, attack speed) |
+| Disenchanting | a loot window with an `Item-` source is recorded as `src.kind: "container"`; a destroyed item often resolves to no item id, so the result is mislabelled or has no source item |
+
+## How the calls were checked
+
+`C:\projects\WoWEnvironment` and `C:\projects\wowforeverbetaaddons` are empty on this machine, so there is no client
+interface extract. Each name below was found as a string in the installed client (`_forever_\Wow.exe`, build
+1.60.1.71037); spell ids were checked in the decoded client tables (`wow-sources/data/client/70938`). A name in the
+binary shows the client knows the function or event; what it answers must still be seen in the game (checklist below).
+
+| Name | In the client | Used for |
+| --- | --- | --- |
+| `GetRewardMoney`, `GetRewardXP`, `GetNumQuestRewards`, `GetNumQuestChoices`, `GetQuestItemInfo`, `GetQuestItemLink` | yes | the offer and reward windows |
+| `C_QuestInfoSystem.GetQuestRewardSpells`, `GetQuestRewardSpellInfo` | yes | reward spells |
+| `GetRewardTitle` | yes | reward title |
+| `GetMaxPlayerLevel`, `UnitLevel`, `IsXPUserDisabled` | yes (already used) | level and cap |
+| `CHAT_MSG_COMBAT_FACTION_CHANGE`, `FACTION_STANDING_INCREASED`, `C_Reputation.GetFactionDataByID/ByIndex` | yes | kill reputation |
+| `UnitHealthMax`, `UnitPowerMax`, `UnitPowerType` | yes | creature health and power |
+| `GetLootSourceInfo`, `C_Item.GetItemIDByGUID`, `UNIT_SPELLCAST_SUCCEEDED`, spell 13262 Disenchant | yes | disenchanting |
+| `GetNumRewardSpells`, `GetQuestLogRewardSpell`, `GetNumRewardCurrencies`, `GetQuestCurrencyInfo` | **no** | not used |
+| Spells 31252 Prospecting, 51005 Milling | **not in this client's spell table** | dropped: the game version has neither |
+| `GetNumQuestLogRewardFactions`, `GetQuestLogRewardFactionInfo` | yes, but see below | not used in 1.23.0 |
+
+**Dropped: reputation as the quest window lists it.** The two quest-log calls exist, but they read the selected
+quest-log entry (the addon would have to change the selection), and their amounts are raw values whose scale differs
+between client versions. Nothing here could confirm either. The reputation a turn-in really gave is already recorded
+(`rep`), and `who.level` and `rewards.cap` now sit beside it. Listed reputation stays out until the checklist's
+print-out shows what the calls answer.
+
+## 1. Quest rewards as the window shows them (`quest` events, both acts)
+
+`rewards` is now written on `act: "accept"` too, and gains keys on both acts. It describes the quest's reward as the
+quest window showed it to this character. Existing keys keep their meaning.
+
+When: on accept, read at `QUEST_DETAIL` (the offer window) and written to the accept event only when that window
+showed this very quest (`GetQuestID()` equals the accepted quest; the same rule as `startItem`). On turn-in, read at
+`QUEST_COMPLETE` (the reward window). A quest accepted without an offer window (shared, auto-accepted) has no
+`rewards`. One read per window; nothing per frame.
+
+```text
+rewards?: {
+  items:    [ 0-10 of { id, n, link?, suffix?, bonus? } ]   always given (GetNumQuestRewards, GetQuestItemInfo/Link "reward")
+  choose?:  [ 1-10 of { id, n, link?, suffix?, bonus? } ]   choose one (GetNumQuestChoices, GetQuestItemInfo/Link "choice"); new
+  choices?: [ item ids ]        turn-in only, unchanged (kept for older readers; the same items as choose)
+  chose?:   item id             turn-in only, unchanged
+  money?:   integer 1-2147483647   copper. GetRewardMoney() in that window: the QUEST'S reward, the same for every
+                                character of that level. Never the player's money; absent when 0 or unreadable
+  xp?:      integer >= 1        GetRewardXP() in that window, under the same guards as the turn-in's xp (below the level
+                                cap, XP not turned off). On a turn-in the top-level xp stays too
+  spells?:  [ 1-8 of integer >= 1 ]   reward spell ids, ascending, each once (C_QuestInfoSystem.GetQuestRewardSpells(quest))
+  title?:   label 1-80          GetRewardTitle(): a title the quest grants
+  cap?:     true                the character was at the level cap at the read (UnitLevel("player") >= GetMaxPlayerLevel(),
+                                both known). A capped character's money can include converted XP, and xp is absent
+}
+```
+
+**The exact key for quest money is `rewards.money`** (in `observations.events[]`, `type: "quest"`). It is named for what
+it is. It matches the receiving site's money-key filter by design, so the site must allow this one path on purpose.
+`QUEST_TURNED_IN`'s money argument stays unread, and `GetMoney` is never called for this.
+
+Level scaling: `who.level` (already on every event) is the character's level at the read; with the accept's `lv` (the
+quest's level) and `rewards.cap` a reader can tell a full reward from a reduced or converted one.
+
+Size: about 60 bytes for money, XP and the cap flag; about 55 bytes per item with a link. A quest with two choices,
+money and XP adds about 190 bytes to an accept and about 130 to a turn-in. No new dedup index: one accept and one
+turn-in event per quest already exist.
+
+## 2. Reputation from a kill (`killrep` event, new type)
+
+```text
+{ id, t, b?, type: "killrep", where, who,
+  npc: integer >= 1            the creature, from the dead creature's GUID (the GUID is never kept)
+  lv?: integer 1-255           its level, when a unit token showed it
+  f:   integer >= 1            faction id
+  d:   integer -100000..100000, never 0   the change this character received (bonuses included, like a turn-in's rep.d)
+}
+```
+
+When: `CHAT_MSG_COMBAT_FACTION_CHANGE` (matched against the client's own `FACTION_STANDING_INCREASED` /
+`FACTION_STANDING_DECREASED` formats, English forms as fallback; other formats, such as the generic and bonus ones,
+record nothing). The faction name is turned into an id from the reputation list (a name-to-id table built out of
+combat and reused; a name not found is dropped). The message is tied to a creature only when, in the 2 seconds before
+it, every creature this player saw die untapped by others (the existing death evidence) had the same NPC id; none or
+two different ids record nothing. Nothing within 5 seconds of a quest turn-in or an open reward window. `who.level`
+tells a reduced amount from a full one. Never a standing.
+
+Dedup: once per `npc`, `lv`, `f` and `d` per install (a saved FIFO index of 2,000 keys, like `credit`), at most 100 a
+session, only under the half caps. About 230 bytes an event.
+
+## 3. Creature health and power (`npcs[]` summary, new keys)
+
+```text
+hp?: [ 1-6 of { lv, v, diff? } ]       lv 1-255, v integer >= 1: UnitHealthMax(unit)
+pw?: [ 1-6 of { lv, t, v, diff? } ]    t integer 0-30: UnitPowerType(unit); v integer >= 1: UnitPowerMax(unit, t)
+                                       diff: the instance difficulty id, present exactly when read inside an instance
+```
+
+When: at the existing NPC sighting (target, mouseover, interaction window; at most once per NPC per 30 seconds), only
+while the creature is alive, its level is a plain number of 1 or more, and each value is plain (not secret) and above
+0. Per `lv` (and `diff`) the value seen most often over up to 4 distinct readings is kept, as `spd` does; at most 6
+levels per NPC, the most recently seen. Like the rest of the summary it is cumulative per install and replaced by a
+later export. A buff or debuff on the creature can change the number: a reader should want two installs to agree.
+About 20 bytes per entry, inside the summary's own 500 KB cap.
+
+## 4. Disenchanting (`loot` event, new `src.kind`)
+
+```text
+src: { kind: "disenchant", item: integer >= 1 }     the destroyed item; items[] is what it gave
+```
+
+When: a loot window within 5 seconds of the player's own Disenchant cast (`UNIT_SPELLCAST_SUCCEEDED`, spell 13262 or
+a spell of the same name). `src.item` comes from the window's `Item-` source GUID (`C_Item.GetItemIDByGUID`), else
+from the bag item the cast was aimed at. **No item id, no event**: such a window is not recorded as `container` or
+`other` either. Prospecting and milling do not exist in this game version.
+
+## Versions and compatibility
+
+- KutzInventory **1.23.0**; inventory export **3.16.0** (new optional fields, one new event type, one new enum value:
+  a minor). `observations.v` stays `1`. Format 2 is unchanged.
+- **Old site, new addon:** unknown keys inside `rewards`, `rewards` on an accept, `hp`/`pw` in `npcs[]` and the
+  `killrep` type are ignored by a reader that keeps known fields only. A `disenchant` loot event is dropped whole by a
+  reader with a closed list of source kinds, which is right: it must not be read as a container.
+- **New site, old addon:** every new field is absent, which means "not recorded", never "none". An older addon's
+  disenchant windows are `container` events, often without `item`; the site should not treat those as container drops
+  of nothing.
+- An exporter older than 3.16.0 reading a 1.23.0 saved file leaves the new fields out.
+
+## What the receiving site must change
+
+1. Allow `rewards.money` through the money-key filter for quest events only, and amend the "gold is never shared"
+   rule to say a quest's listed reward is a game fact, not a person's gold.
+2. Read `rewards` on accept events; read `choose`, `money`, `xp`, `spells`, `title`, `cap` on both acts.
+3. Accept the `killrep` event type and the `disenchant` source kind (with `src.item`).
+4. Read `hp` and `pw` from `npcs[]`; show a value only when two installs agree.
+5. Validate against export schema 3.16.0.
+
+## Not in this version, room kept
+
+- Coin dropped by creatures, anything about another player, computed drop rates: out of scope.
+- Reputation as the quest window lists it: see above.
+- Reserved for follow-ups the owner may confirm (nothing built): a signal that a character left its guild, and
+  per-character Legacy challenge completion. Both would be character fields (`characters[]`), not observations, and
+  would take the next minor (3.17.0).
+
+## In-game checklist (nothing here has been run in the game yet)
+
+- Open a quest offer with money and a choice of items: `/dump GetRewardMoney(), GetRewardXP(), GetNumQuestRewards(),
+  GetNumQuestChoices(), GetRewardTitle()` and `/dump C_QuestInfoSystem.GetQuestRewardSpells(GetQuestID())`. Do the
+  numbers match the window in the offer window as well as in the reward window? Accept, `/reload`, and find
+  `rewards` on the accept event; turn in and find it on the turn-in. "Friend of the Library" should show both
+  amulets under `choose`, `money = 125` and `xp = 160` at a level that gets the full reward.
+- Repeat on a character at the level cap and on one far above the quest's level; note money, XP and `cap`.
+- Kill a creature that gives reputation, alone: one `killrep` with its `npc`, `f` and `d`. Kill two different
+  creatures at once: none. Turn in a quest beside a fresh corpse: none. Print the chat line and `/dump
+  FACTION_STANDING_INCREASED`.
+- Target a creature at full health, in and out of a dungeon: `/dump UnitHealthMax("target"), UnitPowerType("target"),
+  UnitPowerMax("target")`, then `/dump KutzInventoryObsDB.npcs[<id>]`. Are the values plain in combat?
+- Disenchant an item: `/dump GetLootSourceInfo(1)` with the window open. Is the source an `Item-` GUID, and does
+  `C_Item.GetItemIDByGUID` still answer? Find the event with `kind = "disenchant"` and the right `item`.
+- Listed reputation, for a later version: with a quest selected in the log, `/dump GetNumQuestLogRewardFactions(),
+  GetQuestLogRewardFactionInfo(1)` and compare with what the turn-in gave.
