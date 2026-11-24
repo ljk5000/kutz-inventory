@@ -293,8 +293,11 @@ local function ScanStats()
     put("power", Try(UnitPowerMax, "player"))
     put("critMelee", Try(GetCritChance)); put("critRanged", Try(GetRangedCritChance)); put("critSpell", Try(GetSpellCritChance, 2))
     put("haste", Try(GetHaste)); put("mastery", Try(GetMasteryEffect))
-    local vers = (Try(GetCombatRatingBonus, _G.CR_VERSATILITY_DAMAGE_DONE) or 0) + (Try(GetVersatilityBonus, _G.CR_VERSATILITY_DAMAGE_DONE) or 0)
-    if _G.CR_VERSATILITY_DAMAGE_DONE then put("versatility", vers) end
+    -- either part may be a secret number: adding one raised an error that ended the whole read (seen in game, 1.60.1.71037)
+    local rating, bonus = Plain((Try(GetCombatRatingBonus, _G.CR_VERSATILITY_DAMAGE_DONE))), Plain((Try(GetVersatilityBonus, _G.CR_VERSATILITY_DAMAGE_DONE)))
+    if _G.CR_VERSATILITY_DAMAGE_DONE then
+        put("versatility", (type(rating) == "number" and rating or 0) + (type(bonus) == "number" and bonus or 0))
+    end
     put("leech", Try(GetLifesteal)); put("avoidance", Try(GetAvoidance)); put("speed", Try(GetSpeed))
     put("dodge", Try(GetDodgeChance)); put("parry", Try(GetParryChance)); put("block", Try(GetBlockChance))
     local base, pos, neg = Try(UnitAttackPower, "player")
