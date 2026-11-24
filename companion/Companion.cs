@@ -74,7 +74,7 @@ internal sealed partial class CompanionForm : Form {
     private readonly string directory, config;
     private readonly JavaScriptSerializer json = new JavaScriptSerializer();
     private readonly TextBox game = new TextBox(), site = new TextBox(), key = new TextBox();
-    private readonly CheckBox remember = new CheckBox(), startup = new CheckBox(), sendInventory = new CheckBox(), sendAuctions = new CheckBox();
+    private readonly CheckBox remember = new CheckBox(), startup = new CheckBox(), sendInventory = new CheckBox(), sendAuctions = new CheckBox(), sendQuestCache = new CheckBox();
     private readonly Label account = new Label(), status = new Label();
     private readonly Button browse = new Button(), connect = new Button(), start = new Button();
     private Process worker;
@@ -94,7 +94,7 @@ internal sealed partial class CompanionForm : Form {
 
     public CompanionForm(string dataDirectory) {
         directory = dataDirectory; config = Path.Combine(directory, "settings.json");
-        Text = "KutzUI Companion " + typeof(CompanionProgram).Assembly.GetName().Version.ToString(3); ClientSize = new Size(590, 533); StartPosition = FormStartPosition.CenterScreen;
+        Text = "KutzUI Companion " + typeof(CompanionProgram).Assembly.GetName().Version.ToString(3); ClientSize = new Size(590, 562); StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; AutoScaleMode = AutoScaleMode.Font;
         AddLabel("Inventory sync for cr0m", 20, 15, 550, 24);
         AddLabel("Game client folder (contains WTF and Interface)", 20, 49, 550, 22);
@@ -123,10 +123,13 @@ internal sealed partial class CompanionForm : Form {
         sendInventory.SetBounds(20, 289, 550, 26); Controls.Add(sendInventory);
         sendAuctions.Text = "Upload auction house prices (shared per realm, no character names)"; sendAuctions.Checked = true;
         sendAuctions.SetBounds(20, 318, 550, 26); Controls.Add(sendAuctions);
-        ConfigureButton(connect, "Connect / save", 20, 359, 130, delegate { Send("connect"); });
-        ConfigureButton(start, "Start", 160, 359, 110, delegate { Send("start"); });
-        ConfigureButton(new Button(), "Pause", 280, 359, 110, delegate { Pause(); });
-        ConfigureButton(new Button(), "Forget key", 400, 359, 170, delegate {
+        // Quest facts from the game's own cache file; goes with either upload above.
+        sendQuestCache.Text = "Upload quest facts from the game's cache (no quest text, no names)"; sendQuestCache.Checked = true;
+        sendQuestCache.SetBounds(20, 347, 550, 26); Controls.Add(sendQuestCache);
+        ConfigureButton(connect, "Connect / save", 20, 388, 130, delegate { Send("connect"); });
+        ConfigureButton(start, "Start", 160, 388, 110, delegate { Send("start"); });
+        ConfigureButton(new Button(), "Pause", 280, 388, 110, delegate { Pause(); });
+        ConfigureButton(new Button(), "Forget key", 400, 388, 170, delegate {
             Pause(true);
             try {
                 KutzCredentialStore.Remove(Target(Origin())); key.Clear(); sessionKey = ""; sessionSite = "";
@@ -134,10 +137,10 @@ internal sealed partial class CompanionForm : Form {
                 SetStatus("Key removed from this PC. Revoke it on cr0m to invalidate other copies.");
             } catch { SetStatus("Could not remove the saved key. Check Windows Credential Manager."); }
         });
-        account.Text = "Account: not connected"; account.SetBounds(20, 402, 550, 24); Controls.Add(account);
+        account.Text = "Account: not connected"; account.SetBounds(20, 431, 550, 24); Controls.Add(account);
         SetStatus("Paused. Start uploads in the tray; closing this window keeps Companion running.");
-        status.SetBounds(20, 433, 550, 48); Controls.Add(status);
-        AddLabel("Private exports stay in LocalAppData\\KutzUI\\Companion.", 20, 498, 550, 22);
+        status.SetBounds(20, 462, 550, 48); Controls.Add(status);
+        AddLabel("Private exports stay in LocalAppData\\KutzUI\\Companion.", 20, 527, 550, 22);
         try {
             using (var run = Registry.CurrentUser.OpenSubKey(RunPath)) startup.Checked = startupRegistered = (run != null && run.GetValue(StartupName) != null) || File.Exists(LegacyShortcut);
             if (File.Exists(config)) {
@@ -155,6 +158,7 @@ internal sealed partial class CompanionForm : Form {
                 if (settings.ContainsKey("remember")) remember.Checked = Convert.ToBoolean(settings["remember"]);
                 if (settings.ContainsKey("sendInventory")) sendInventory.Checked = Convert.ToBoolean(settings["sendInventory"]);
                 if (settings.ContainsKey("sendAuctions")) sendAuctions.Checked = Convert.ToBoolean(settings["sendAuctions"]);
+                if (settings.ContainsKey("sendQuestCache")) sendQuestCache.Checked = Convert.ToBoolean(settings["sendQuestCache"]);
                 hasPausePreference = settings.ContainsKey("paused");
                 if (hasPausePreference) pausedPreference = Convert.ToBoolean(settings["paused"]);
                 configurationLoaded = settings.ContainsKey("game") && settings.ContainsKey("base");
@@ -194,7 +198,7 @@ internal sealed partial class CompanionForm : Form {
         var data = ReadSettings();
         data["version"] = 1; data["game"] = game.Text; data["base"] = site.Text;
         data["remember"] = remember.Checked; data["paused"] = pausedPreference;
-        data["sendInventory"] = sendInventory.Checked; data["sendAuctions"] = sendAuctions.Checked;
+        data["sendInventory"] = sendInventory.Checked; data["sendAuctions"] = sendAuctions.Checked; data["sendQuestCache"] = sendQuestCache.Checked;
         WriteSettings(data); configurationLoaded = hasPausePreference = true;
         if (!remember.Checked) startup.Checked = false;
         Startup(startup.Checked);
@@ -206,7 +210,7 @@ internal sealed partial class CompanionForm : Form {
     private void EnableSettings() {
         bool enabled = !busy && !running;
         game.Enabled = site.Enabled = key.Enabled = browse.Enabled = connect.Enabled = start.Enabled = enabled;
-        remember.Enabled = startup.Enabled = sendInventory.Enabled = sendAuctions.Enabled = enabled;
+        remember.Enabled = startup.Enabled = sendInventory.Enabled = sendAuctions.Enabled = sendQuestCache.Enabled = enabled;
         UpdateTray();
     }
     private void EnsureWorker() {
@@ -245,7 +249,7 @@ internal sealed partial class CompanionForm : Form {
             busy = true; EnableSettings(); SetStatus("Connecting...");
             worker.StandardInput.WriteLine(json.Serialize(new Dictionary<string, object> {
                 { "requestId", ++requestId }, { "action", action }, { "game", game.Text }, { "base", origin }, { "key", secret }, { "dataDirectory", directory },
-                { "sendInventory", sendInventory.Checked }, { "sendAuctions", sendAuctions.Checked }
+                { "sendInventory", sendInventory.Checked }, { "sendAuctions", sendAuctions.Checked }, { "sendQuestCache", sendQuestCache.Checked }
             }));
         } catch (ArgumentException error) { busy = false; EnableSettings(); SetStatus(error.Message, true); }
         catch (FileNotFoundException error) { busy = false; EnableSettings(); SetStatus(error.Message, true); }
