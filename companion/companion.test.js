@@ -574,6 +574,15 @@ test("a refused (401/403/426) or slow quest-cache endpoint never blocks or delay
   await session.stop();
 });
 
+test("the Settings window has a quest cache switch: default on, saved, loaded and sent to the worker as sendQuestCache", () => {
+  const cs = source("Companion.cs");
+  assert.match(cs, /sendQuestCache\.Text = "Upload quest facts from the game's cache[^"]*"; sendQuestCache\.Checked = true;/);
+  assert.match(cs, /sendQuestCache\.Checked = Convert\.ToBoolean\(settings\["sendQuestCache"\]\)/);
+  assert.match(cs, /data\["sendQuestCache"\] = sendQuestCache\.Checked;/);
+  assert.match(cs, /\{ "sendQuestCache", sendQuestCache\.Checked \}/);
+  assert.match(source("worker.js"), /sendQuestCache: cmd\.sendQuestCache !== false/);
+});
+
 test("sendQuestCache false never reads or sends the quest cache", async t => {
   const f = await fixture(t); questCacheIn(f.game);
   const quests = [], inventory = [];

@@ -14,7 +14,7 @@ Companion 0.12.7 trims already-acknowledged `observations` before upload using t
 2. With the game closed, copy `AddOns/KutzInventory` into your WoW Forever client's `Interface/AddOns` folder. Check `Interface/AddOns/KutzInventory/KutzInventory.toc`, then enable **cr0m Inventory** in game. It needs no other addon.
 3. Run **KutzUICompanion.exe**, keeping **KutzInventoryUploader.exe** beside it. Select the client folder containing `WTF` and `Interface`.
 4. Leave the site as `https://wow.cr0m.com`, the optional receiving website, or select your own compatible HTTPS origin. **Get key** opens `/private/settings#wow-upload-key` in your browser. Generate an upload key there and paste it into Companion. The receiving site controls permissions and expiry.
-5. Choose **Upload my characters** and/or **Upload auction house prices** (both default on). **Connect / save** verifies the key and displays the server-returned username. Remember securely defaults on; without it the key lasts only for the app session.
+5. Choose **Upload my characters** and/or **Upload auction house prices** (both default on), and whether to **Upload quest facts from the game's cache** (default on). **Connect / save** verifies the key and displays the server-returned username. Remember securely defaults on; without it the key lasts only for the app session.
 6. Click **Start**. It sends existing saved data immediately; `/reload` or logout in game produces later saves/uploads. The app reads **all accounts under that client's `WTF/Account`**, with no account/character picker.
 
 ## What runs, reads and sends

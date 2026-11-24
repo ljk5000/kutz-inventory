@@ -265,7 +265,8 @@ its id (61 only for 63969-64033). Format 2 keeps passing `updated` through whole
    acts. `rewards.choices` is absent on an accept (schema: `rewards` requires only `items` now; a turn-in still has
    `choices`).
 3. Accept the `killrep` event type and the `disenchant` source kind (with `src.item`).
-4. Read `hp` and `pw` from `npcs[]`; show a value only when two installs agree.
+4. Read `hp` and `pw` from `npcs[]`; show a value only when two installs agree. Owner's decision, 2026-11-23: the
+   site ignores `hp` until the `UnitHealthMax` line of the in-game checklist below has shown real numbers.
 5. Read `characters[].legacyChallenges` (per character: `completed`, `date`, criteria progress) and keep `earnedBy`
    private to the owner, like the quest log. Absent means not recorded, not "none done".
 6. Validate against export schema 3.16.0.
