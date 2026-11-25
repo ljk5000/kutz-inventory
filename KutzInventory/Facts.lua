@@ -33,6 +33,8 @@
 -- is held in memory only, to count it once; nothing about any player is stored. 30 days, at most 800 numbers.
 --
 -- /kinv perf prints how much time this file used per frame (debugprofilestop), worst and average, and the queue's state.
+-- /kinv dumpitem [link | id] saves the client's raw tooltip and stats answers for one item to KutzInventoryObsDB.debugItemDumps
+-- (debugging; the newest 20; never exported), see "/kinv dumpitem" below.
 
 local ADDON, ns = ...
 
@@ -603,12 +605,114 @@ function Facts.Status()
            or "this client has no debugprofilestop: the time used cannot be measured."
 end
 
-function Facts.Command(msg)
-    if type(msg) ~= "string" or msg:lower():gsub("^%s+", ""):gsub("%s+$", "") ~= "perf" then return false end
-    local a, b = Facts.Status()
-    print(PREFIX .. a)
-    print("  " .. b)
+---------------------------------------------------------------------------
+-- /kinv dumpitem [item link | item id]: a debugging aid. What the client answers for one item, written to the saved file
+-- (print goes to chat, which /chatlog does not keep). KutzInventoryObsDB.debugItemDumps = { oldest first, at most 20 of
+-- { at, date, build, source = "mouse"|"argument", given, hyperlink, id, tooltip, tooltipFull, stats, errors } }.
+-- Never exported: convert.js reads the observations only by name (events, npcs, items, kills); tools/convert.test.js checks.
+-- Values the client answers are copied as they are (a secret one as the text "<secret>"); no arithmetic, no comparison.
+---------------------------------------------------------------------------
+local DUMP = { KEEP = 20, NODES = 4000, DEPTH = 10, TEXT = 2000 }
+Facts.DUMP = DUMP
+
+local function Copy(v, depth, budget)                -- a plain copy of what the client answered, or "<secret>"
+    if Secret(v) then return "<secret>" end
+    local t = type(v)
+    if t == "string" then return Cut(v, DUMP.TEXT) end
+    if t == "boolean" then return v end
+    if t == "number" then
+        if v ~= v or v == math.huge or v == -math.huge then return tostring(v) end   -- the saved file cannot hold these
+        return v
+    end
+    if t ~= "table" then return nil end              -- functions and userdata are not data
+    if depth >= DUMP.DEPTH or budget.n >= DUMP.NODES then budget.cut = true; return "<cut>" end
+    local out = {}
+    for k, x in pairs(v) do
+        if not Secret(k) and (type(k) == "string" or type(k) == "number") then
+            budget.n = budget.n + 1
+            if budget.n > DUMP.NODES then budget.cut = true; break end
+            out[type(k) == "string" and Cut(k, 200) or k] = Copy(x, depth + 1, budget)
+        end
+    end
+    return out
+end
+
+local function Dumped(fn, ...)                       -- -> the copy of the call's answer (nil when it answered nothing), or nil and the error
+    if type(fn) ~= "function" then return nil, "no such function" end
+    local ok, v = pcall(fn, ...)
+    if not ok then return nil, "error: " .. Cut(tostring(Plain(v) or "?"), 200) end
+    if not Secret(v) and v == nil then return nil, "answered nothing" end
+    local budget = { n = 0 }
+    local ok2, copy = pcall(Copy, v, 0, budget)
+    if not ok2 then return nil, "copy failed: " .. Cut(tostring(Plain(copy) or "?"), 200) end
+    if budget.cut and type(copy) == "table" then copy.cut = true end
+    return copy
+end
+
+-- The item under the mouse: its link, or nil.
+local function MouseLink()
+    local tip = GameTooltip
+    if type(tip) ~= "table" or type(tip.GetItem) ~= "function" then return nil end
+    local ok, _, link = pcall(tip.GetItem, tip)
+    link = ok and Plain(link) or nil
+    return type(link) == "string" and link ~= "" and link or nil
+end
+
+function Facts.DumpItem(arg)
+    local given, source = "", "argument"
+    if type(arg) == "string" then given = arg:gsub("^%s+", ""):gsub("%s+$", "") end
+    if given == "" then given, source = MouseLink(), "mouse" end
+    if not given then
+        print(PREFIX .. "no item under the mouse. Hover an item and type /kinv dumpitem, or /kinv dumpitem <item link or item id>.")
+        return true
+    end
+    local id = given:match("^%d+$")
+    local hyperlink = id and ("item:" .. id) or given:match("|H(item:[^|]*)|h") or given:match("^(item:[%w:%-]*)$")
+    if not hyperlink then
+        print(PREFIX .. "that is not an item link or item id.")
+        return true
+    end
+    local TI = type(C_TooltipInfo) == "table" and C_TooltipInfo or {}
+    local errors = {}
+    local dump = { at = time(), date = Plain(Try(date, "%Y-%m-%d %H:%M:%S")), source = source, given = Cut(given, 600),
+                   hyperlink = Cut(hyperlink, 300) }
+    local version, build = Try(GetBuildInfo)
+    version, build = Plain(version), Plain(build)
+    if type(version) == "string" and (type(build) == "string" or type(build) == "number") then dump.build = version .. "." .. tostring(build) end
+    local get = C_Item and C_Item.GetItemStats or GetItemStats
+    if id then
+        dump.id = tonumber(id)
+        dump.tooltip, errors.tooltip = Dumped(TI.GetItemByID, tonumber(id))
+    else
+        -- as the item facts read it (the last argument hides the vendor price line), and as the client gives it by default
+        dump.tooltip, errors.tooltip = Dumped(TI.GetHyperlink, hyperlink, nil, nil, true)
+        dump.tooltipFull, errors.tooltipFull = Dumped(TI.GetHyperlink, hyperlink)
+    end
+    dump.stats, errors.stats = Dumped(get, hyperlink)
+    if next(errors) then dump.errors = errors end
+
+    local d = KutzInventoryObsDB
+    if type(d) ~= "table" then d = { v = 1 }; KutzInventoryObsDB = d end
+    if type(d.debugItemDumps) ~= "table" then d.debugItemDumps = {} end
+    local list = d.debugItemDumps
+    list[#list + 1] = dump
+    while #list > DUMP.KEEP do table.remove(list, 1) end
+    print(PREFIX .. "item dump " .. #list .. " of at most " .. DUMP.KEEP .. " saved (" .. Cut(hyperlink, 60) .. "); /reload to write it to disk")
     return true
+end
+
+function Facts.Command(msg)
+    if type(msg) ~= "string" then return false end
+    local text = msg:gsub("^%s+", ""):gsub("%s+$", "")
+    if text:lower() == "perf" then
+        local a, b = Facts.Status()
+        print(PREFIX .. a)
+        print("  " .. b)
+        return true
+    end
+    local word, rest = text:match("^(%S+)%s*(.*)$")
+    if word and word:lower() == "dumpitem" then return Facts.DumpItem(rest) end
+    return false
 end
 
 ---------------------------------------------------------------------------

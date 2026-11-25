@@ -115,6 +115,7 @@ Always on: parses your own system “You create” loot lines, including conjure
 | `/kinv track` | Observation status (events kept, NPCs held); aliases: `track status`, `track drops`, `track drops status` |
 | `/kinv track drops on` | Enable observations (`drops yes` is also accepted) |
 | `/kinv track drops off` | Stop new observations, the NPC summary, item facts and kill counts, retaining what is kept |
+| `/kinv dumpitem [link or id]` | Debugging aid: saves what `C_TooltipInfo` and `GetItemStats` answer for the item under the mouse, an item link or an item id into `KutzInventoryObsDB.debugItemDumps` (the newest 20, with the link as given, the game build and the time; one chat line, written to the file on `/reload`). Never exported or uploaded |
 | `/kinv perf` | Item facts held and waiting, kills counted today, and the worst and average time per frame the item and kill recording used this session |
 
 There is no addon options window. Ordinary inventory and craft recording stay on while the addon is enabled. Upload controls belong to the separate desktop tools.
@@ -124,7 +125,7 @@ There is no addon options window. Ordinary inventory and craft recording stay on
 The game saves **both** `KutzInventoryDB` and `KutzInventoryObsDB` in `WTF/Account/<account>/SavedVariables/KutzInventory.lua` on `/reload` or logout. They are two tables in the **same file**; `Observations.lua` is source code, not a separate saved-data file.
 
 - `KutzInventoryDB`: character records, the account's unlearned recipes (`recipeBook`, 1.21.0), shared warband/guild banks, vendor/AH prices, tracked raids, optional monitor snapshot, database version and last error.
-- `KutzInventoryObsDB`: observation events, the NPC summary, item facts and per-day kill counts (1.21.0), recording preference/compatibility flags, addon version, random event-ID prefix/counter (the prefix also names the install in exports) and last observation error. The `agreed` flag is initialized automatically on new installs; it is not an upload consent prompt.
+- `KutzInventoryObsDB`: `debugItemDumps` (the newest 20 `/kinv dumpitem` dumps; local only, the export reads the observations table by name and never carries it), observation events, the NPC summary, item facts and per-day kill counts (1.21.0), recording preference/compatibility flags, addon version, random event-ID prefix/counter (the prefix also names the install in exports) and last observation error. The `agreed` flag is initialized automatically on new installs; it is not an upload consent prompt.
 
 The addon sends no HTTP requests. Its auction/item API queries go through the game. Outside the game:
 

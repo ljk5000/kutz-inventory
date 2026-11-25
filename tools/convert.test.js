@@ -969,6 +969,25 @@ test("observations 3.15.0: an item's facts are exported once, a random suffix as
   assert.equal(doc.observations.addon, "1.21.0");
 });
 
+test("/kinv dumpitem's debugItemDumps (raw client answers) never reach the export, in any format", () => {
+  const MARK = "DUMP-MARKER-7f3a";
+  const dump = `debugItemDumps = { { at = 1, date = "2026-11-25 10:00:00", build = "1.60.1.71037", source = "mouse", given = "|Hitem:6560|h[${MARK}]|h",
+    hyperlink = "item:6560", tooltip = { lines = { { leftText = "${MARK}", rightText = "Shield" } } }, stats = { ITEM_MOD_STAMINA_SHORT = 3 } } }`;
+  const body = `items = { ${SHIELD_ITEM} }`;
+  for (const format of [2, 3, undefined]) {
+    const plainFile = convert.convertSavedVariables([factsFile(body)], { format });
+    const withDumps = convert.convertSavedVariables([factsFile(body + ", " + dump)], { format });
+    delete plainFile.inventory.exportedAt; delete withDumps.inventory.exportedAt;
+    assert.deepEqual(withDumps, plainFile, "the same export with or without the dumps (format " + format + ")");
+    const json = JSON.stringify(withDumps);
+    assert.ok(!json.includes(MARK) && !json.includes("debugItemDumps") && !json.includes("dumpitem"), "no trace of a dump in the export");
+  }
+  // a file with nothing but dumps in its observations table exports no observations at all
+  const only = convert.convertSavedVariables([factsFile(dump)]).inventory;
+  assert.equal(only.observations, undefined);
+  assert.ok(!JSON.stringify(only).includes(MARK));
+});
+
 test("observations 3.15.0: item variants keep only a sound key, name and numbers; 24 at most", () => {
   const many = Array.from({ length: 30 }, (_, i) => `["0;${13000 + i}"] = "Shield ${i}\\n"`).join(", ");
   const items = convert.exportItems([{ items: { 6560: { d: 20404, n: "Soldier's Shield", v: {

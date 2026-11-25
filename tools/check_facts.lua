@@ -546,6 +546,88 @@ do
 end
 
 ---------------------------------------------------------------------------
+-- 8b) /kinv dumpitem: what the client answers for one item, saved (never printed), the newest 20
+---------------------------------------------------------------------------
+do
+  local H = "item:6560::::::::19:1489:::1:12729::::::"
+  local function setup(opts)
+    local h = fresh(opts)
+    h.s.tips[H] = { { leftText = "Soldier's Shield of Intellect" }, { leftText = "Off Hand", rightText = "Shield", rightColor = { r = 1, g = 1, b = 1 } } }
+    h.s.stats[H] = { ITEM_MOD_INTELLECT_SHORT = 5, RESISTANCE0_NAME = 478 }
+    return h
+  end
+  -- a link given as the argument (the way a pasted link arrives: the whole coloured link)
+  local h = setup()
+  assert(h.F.Command("dumpitem " .. SHIELD) == true and #h.s.printed == 1 and h.s.printed[1]:find("/reload", 1, true), dump(h.s.printed))
+  local list = h.db().debugItemDumps
+  assert(#list == 1 and list[1].given == SHIELD and list[1].hyperlink == H and list[1].source == "argument" and list[1].at == h.s.now, dump(list))
+  assert(list[1].build == "1.60.1.71037", "the game build: " .. tostring(list[1].build))
+  assert(list[1].tooltip.lines[2].rightText == "Shield" and list[1].tooltip.lines[2].rightColor.r == 1 and list[1].tooltipFull.lines[1].leftText == "Soldier's Shield of Intellect",
+         "the client's answer as it is: " .. dump(list[1].tooltip))
+  assert(list[1].stats.RESISTANCE0_NAME == 478 and list[1].stats.ITEM_MOD_INTELLECT_SHORT == 5 and list[1].errors == nil, dump(list[1]))
+  assert(h.db().items == nil and h.db().on == true, "nothing else in the table is touched")
+  -- a copy, not the client's own table
+  assert(list[1].stats ~= h.s.stats[H] and list[1].tooltip ~= nil, "copied")
+
+  -- no argument: the item under the mouse; nothing under it: a line and no dump
+  local m = setup({ globals = { GameTooltip = { GetItem = function() return "Soldier's Shield of Intellect", SHIELD end } } })
+  assert(m.F.Command("DumpItem") == true and m.db().debugItemDumps[1].source == "mouse" and m.db().debugItemDumps[1].given == SHIELD)
+  local none = setup({ globals = { GameTooltip = { GetItem = function() return nil end } } })
+  assert(none.F.Command("dumpitem  ") == true and none.db().debugItemDumps == nil and #none.s.printed == 1 and none.s.printed[1]:find("no item under the mouse"), dump(none.s.printed))
+  local noTip = setup(); assert(noTip.F.Command("dumpitem") == true and noTip.db().debugItemDumps == nil, "no GameTooltip at all")
+  assert(noTip.F.Command("dumpitem hello") == true and noTip.db().debugItemDumps == nil and noTip.s.printed[2]:find("not an item link"))
+
+  -- a bare id: C_TooltipInfo.GetItemByID, and the stats of "item:<id>"
+  local b = setup({ globals = { C_TooltipInfo = { GetItemByID = function(id) return { lines = { { leftText = "by id " .. id } } } end } } })
+  b.s.stats["item:6948"] = { ITEM_MOD_STAMINA_SHORT = 1 }
+  assert(b.F.Command("dumpitem 6948") == true)
+  local e = b.db().debugItemDumps[1]
+  assert(e.id == 6948 and e.hyperlink == "item:6948" and e.tooltip.lines[1].leftText == "by id 6948" and e.tooltipFull == nil and e.stats.ITEM_MOD_STAMINA_SHORT == 1, dump(e))
+  assert(b.F.Command("dumpitem item:6948") == true and b.db().debugItemDumps[2].hyperlink == "item:6948" and b.db().debugItemDumps[2].id == nil, "an item: string is a link")
+
+  -- an answer that errors, nothing at all, and a client without the APIs: noted, never an error
+  local f = setup(); f.s.tips[H] = "error"; f.s.stats[H] = nil
+  assert(f.F.Command("dumpitem " .. SHIELD) == true)
+  e = f.db().debugItemDumps[1]
+  assert(e.tooltip == nil and e.errors.tooltip:find("^error: ") and e.errors.stats == "answered nothing", dump(e))
+  local bare = setup({ without = { "C_TooltipInfo", "C_Item" } })
+  assert(bare.F.Command("dumpitem " .. SHIELD) == true and bare.db().debugItemDumps[1].errors.tooltip == "no such function", "no tooltip API")
+
+  -- a secret value is stored as text; nothing is compared or calculated with it
+  local SECRET = {}
+  local sec = setup({ globals = { issecretvalue = function(v) return v == SECRET end } })
+  sec.s.tips[H] = { { leftText = SECRET, rightText = "x" } }; sec.s.stats[H] = { A = SECRET, B = 2 }
+  assert(sec.F.Command("dumpitem " .. SHIELD) == true)
+  e = sec.db().debugItemDumps[1]
+  assert(e.tooltip.lines[1].leftText == "<secret>" and e.tooltip.lines[1].rightText == "x" and e.stats.A == "<secret>" and e.stats.B == 2, dump(e))
+
+  -- no table yet: made (as Observations.lua makes it), and tracking off or on makes no difference
+  local blank = setup({ without = { "KutzInventoryObsDB" } })
+  assert(blank.F.Command("dumpitem " .. SHIELD) == true and blank.db().debugItemDumps ~= nil and blank.db().v == 1, "a table of its own")
+  local off = setup({ db = { on = false } })
+  assert(off.F.Command("dumpitem " .. SHIELD) == true and #off.db().debugItemDumps == 1 and off.db().on == false, "works with drop tracking off")
+
+  -- big answers are cut (nodes), cycles do not loop, a function or a userdata is not data
+  local big = setup()
+  local huge, cyc = {}, {}
+  for i = 1, 6000 do huge[i] = { n = i } end
+  cyc.self = cyc; cyc.f = function() end
+  big.s.stats[H] = huge; big.s.tips[H] = { cyc }
+  assert(big.F.Command("dumpitem " .. SHIELD) == true)
+  e = big.db().debugItemDumps[1]
+  assert(e.stats.cut == true and e.tooltip.cut == true and e.tooltip.lines[1].f == nil and type(e.tooltip.lines[1].self) == "table", "cut, no endless copy, no function: " .. tostring(e.tooltip.cut))
+
+  -- the newest 20 are kept
+  local cap = setup()
+  for i = 1, 25 do cap.F.Command("dumpitem item:" .. i) end
+  local kept = cap.db().debugItemDumps
+  assert(#kept == 20 and kept[1].hyperlink == "item:6" and kept[20].hyperlink == "item:25", "newest 20, oldest first: " .. #kept .. " " .. kept[1].hyperlink)
+  -- it is not part of anything else the module saves or prunes
+  assert(cap.db().items == nil and cap.db().kills == nil)
+  print("OK   /kinv dumpitem: the client's raw tooltip and stats answers saved (mouse, link or id), newest 20, secrets as text, never printed to chat")
+end
+
+---------------------------------------------------------------------------
 -- 9) measured here (fengari, far slower than the game's Lua): what the work costs outside the client's own API calls
 ---------------------------------------------------------------------------
 do
