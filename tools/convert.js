@@ -1006,15 +1006,26 @@ function exportNpcs(obsDbs) {
 // items (the most recently changed) and about 1.5 MB of JSON.
 // ---------------------------------------------------------------------------
 // >>> tooltip cleaner: begin (copied word for word into tools/convert.js)
+// "1 |4Sec:Secs;" -> "1 Sec", "2 |4Sec:Secs;" -> "2 Secs": the game's singular/plural escape |4one:other; (or |4a:b:c;)
+// picks its form from the nearest number before it in the same text (1: the first form, any other number: the last).
+// With no number before it the first form is taken. Run after the colour codes are gone: their hex digits are no number.
+function tooltipPlurals(text) {
+  let n = null;
+  return text.replace(/\|4([^:;|]*(?::[^:;|]*){0,2});|\d[\d,]*(?:\.\d+)?/g, (m, forms) => {
+    if (forms === undefined) { n = Number(m.replace(/,/g, "")); return m; }
+    const f = forms.split(":");
+    return n === 1 || n === null ? f[0] : f[f.length - 1];
+  });
+}
 function cleanTooltipText(text) {
   if (typeof text !== "string") return "";
-  return text
-    .replace(/\|\|/g, "\u0000")                                  // an escaped pipe, put back at the end
+  return tooltipPlurals(text
+    .replace(/\|\|/g, "\u0000")                                 // an escaped pipe, put back at the end
     .replace(/\|c[0-9a-fA-F]{8}/g, "").replace(/\|cn[A-Za-z0-9_]+:/g, "").replace(/\|r/g, "")
     .replace(/\|T[^|]*\|t/g, "").replace(/\|A[^|]*\|a/g, "")
     .replace(/\|H[^|]*\|h/g, "").replace(/\|h/g, "")
-    .replace(/\|n/g, " ")
-    .replace(/\|[A-Za-z]/g, "")                                  // any other code: the letter goes with its pipe
+    .replace(/\|n/g, " "))
+    .replace(/\|[A-Za-z]/g, "")                                 // any other code: the letter goes with its pipe
     .replace(/\u0000/g, "|")
     .replace(/[\u0001-\u001f\u007f\s]+/g, " ").trim();
 }
