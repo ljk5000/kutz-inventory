@@ -5,7 +5,8 @@
   "locale": "enUS",
   "supportedBuilds": [
     70938,
-    71037
+    71037,
+    71091
   ],
   "companion": "0.12.8",
   "total": 8,

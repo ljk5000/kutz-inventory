@@ -14,7 +14,8 @@
 // offsets; quest text, objectives and the rest follow it with variable lengths and are never read. Only the offsets below
 // are read, each checked against Blizzard's quest API, EG Link's quest files, QuestieDB and the client's own tables
 // (QuestXP, QuestMoneyReward, QuestFactionReward, ItemSparse, SpellName, SpellEffect) for builds 70938 and 71037
-// (schema/README.md, "Quest cache"). Fields that could not be confirmed are not read at all.
+// (schema/README.md, "Quest cache"); build 71091 was checked on the seven quests its cache held, which left the reward spell,
+// items, choices and currencies slots empty (schema/README.md, "Supported builds"). Fields that could not be confirmed are not read at all.
 //
 // Refusals: a file whose magic, build, header fields or record sizes are not what a supported build must have, a record
 // whose id disagrees with its body or that is smaller than the fixed block, a truncated or over-long file, an absurd count,
@@ -24,7 +25,7 @@ const QUEST_CACHE_SCHEMA_VERSION = "1.0.0";
 
 const MAGIC = [0x54, 0x53, 0x51, 0x57]; // "TSQW"
 const HEADER_BYTES = 24;
-const FIXED_BYTES = 488;            // the fixed block of build 70938 / 71037 records (smallest record seen: 518 bytes)
+const FIXED_BYTES = 488;            // the fixed block of build 70938 / 71037 / 71091 records (smallest record seen: 518 bytes)
 const MAX_RECORD_BYTES = 65536;     // largest seen: 1,521 bytes
 const MAX_RECORDS = 200000;         // the whole game has about 100,000 quest ids
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -52,6 +53,7 @@ const LAYOUT = Object.freeze({
 const BUILDS = Object.freeze({
   70938: Object.freeze({ header: Object.freeze([0x3008, 12, 0]), fixedBytes: FIXED_BYTES }),
   71037: Object.freeze({ header: Object.freeze([0x3008, 12, 0]), fixedBytes: FIXED_BYTES }),
+  71091: Object.freeze({ header: Object.freeze([0x3008, 12, 0]), fixedBytes: FIXED_BYTES }),
 });
 const SUPPORTED_BUILDS = Object.freeze(Object.keys(BUILDS).map(Number).sort((a, b) => a - b));
 
