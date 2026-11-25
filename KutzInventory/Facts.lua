@@ -34,7 +34,7 @@
 --
 -- /kinv perf prints how much time this file used per frame (debugprofilestop), worst and average, and the queue's state.
 -- /kinv dumpitem [link | id] saves the client's raw tooltip and stats answers for one item to KutzInventoryObsDB.debugItemDumps
--- (debugging; the newest 20; never exported), see "/kinv dumpitem" below.
+-- (debugging; the newest 10; never exported), see "/kinv dumpitem" below.
 
 local ADDON, ns = ...
 
@@ -607,12 +607,12 @@ end
 
 ---------------------------------------------------------------------------
 -- /kinv dumpitem [item link | item id]: a debugging aid. What the client answers for one item, written to the saved file
--- (print goes to chat, which /chatlog does not keep). KutzInventoryObsDB.debugItemDumps = { oldest first, at most 20 of
+-- (print goes to chat, which /chatlog does not keep). KutzInventoryObsDB.debugItemDumps = { oldest first, at most 10 of
 -- { at, date, build, source = "mouse"|"argument", given, hyperlink, id, tooltip, tooltipFull, stats, errors } }.
 -- Never exported: convert.js reads the observations only by name (events, npcs, items, kills); tools/convert.test.js checks.
 -- Values the client answers are copied as they are (a secret one as the text "<secret>"); no arithmetic, no comparison.
 ---------------------------------------------------------------------------
-local DUMP = { KEEP = 20, NODES = 4000, DEPTH = 10, TEXT = 2000 }
+local DUMP = { KEEP = 10, NODES = 4000, DEPTH = 10, TEXT = 2000 }
 Facts.DUMP = DUMP
 
 local function Copy(v, depth, budget)                -- a plain copy of what the client answered, or "<secret>"
@@ -628,10 +628,11 @@ local function Copy(v, depth, budget)                -- a plain copy of what the
     if depth >= DUMP.DEPTH or budget.n >= DUMP.NODES then budget.cut = true; return "<cut>" end
     local out = {}
     for k, x in pairs(v) do
-        if not Secret(k) and (type(k) == "string" or type(k) == "number") then
+        local kt = not Secret(k) and type(k) or nil
+        if kt == "string" or (kt == "number" and k == k and k ~= math.huge and k ~= -math.huge) then
             budget.n = budget.n + 1
             if budget.n > DUMP.NODES then budget.cut = true; break end
-            out[type(k) == "string" and Cut(k, 200) or k] = Copy(x, depth + 1, budget)
+            out[kt == "string" and Cut(k, 200) or k] = Copy(x, depth + 1, budget)
         end
     end
     return out
@@ -680,12 +681,12 @@ function Facts.DumpItem(arg)
     version, build = Plain(version), Plain(build)
     if type(version) == "string" and (type(build) == "string" or type(build) == "number") then dump.build = version .. "." .. tostring(build) end
     local get = C_Item and C_Item.GetItemStats or GetItemStats
+    -- as the item facts read it (the last argument hides the vendor price line), and as the client gives it by default
+    dump.tooltip, errors.tooltip = Dumped(TI.GetHyperlink, hyperlink, nil, nil, true)
     if id then
         dump.id = tonumber(id)
-        dump.tooltip, errors.tooltip = Dumped(TI.GetItemByID, tonumber(id))
+        dump.tooltipFull, errors.tooltipFull = Dumped(TI.GetItemByID, tonumber(id))
     else
-        -- as the item facts read it (the last argument hides the vendor price line), and as the client gives it by default
-        dump.tooltip, errors.tooltip = Dumped(TI.GetHyperlink, hyperlink, nil, nil, true)
         dump.tooltipFull, errors.tooltipFull = Dumped(TI.GetHyperlink, hyperlink)
     end
     dump.stats, errors.stats = Dumped(get, hyperlink)

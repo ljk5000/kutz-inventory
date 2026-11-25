@@ -546,7 +546,7 @@ do
 end
 
 ---------------------------------------------------------------------------
--- 8b) /kinv dumpitem: what the client answers for one item, saved (never printed), the newest 20
+-- 8b) /kinv dumpitem: what the client answers for one item, saved (never printed), the newest 10
 ---------------------------------------------------------------------------
 do
   local H = "item:6560::::::::19:1489:::1:12729::::::"
@@ -577,13 +577,17 @@ do
   local noTip = setup(); assert(noTip.F.Command("dumpitem") == true and noTip.db().debugItemDumps == nil, "no GameTooltip at all")
   assert(noTip.F.Command("dumpitem hello") == true and noTip.db().debugItemDumps == nil and noTip.s.printed[2]:find("not an item link"))
 
-  -- a bare id: C_TooltipInfo.GetItemByID, and the stats of "item:<id>"
-  local b = setup({ globals = { C_TooltipInfo = { GetItemByID = function(id) return { lines = { { leftText = "by id " .. id } } } end } } })
+  -- a bare id: C_TooltipInfo.GetHyperlink("item:<id>", nil, nil, true) as facts read it, GetItemByID as tooltipFull, and the stats of "item:<id>"
+  local b = setup()
+  b.G.C_TooltipInfo.GetItemByID = function(id) return { lines = { { leftText = "by id " .. id } } } end
+  b.s.tips["item:6948"] = { { leftText = "by link 6948" } }
   b.s.stats["item:6948"] = { ITEM_MOD_STAMINA_SHORT = 1 }
   assert(b.F.Command("dumpitem 6948") == true)
   local e = b.db().debugItemDumps[1]
-  assert(e.id == 6948 and e.hyperlink == "item:6948" and e.tooltip.lines[1].leftText == "by id 6948" and e.tooltipFull == nil and e.stats.ITEM_MOD_STAMINA_SHORT == 1, dump(e))
-  assert(b.F.Command("dumpitem item:6948") == true and b.db().debugItemDumps[2].hyperlink == "item:6948" and b.db().debugItemDumps[2].id == nil, "an item: string is a link")
+  assert(e.id == 6948 and e.hyperlink == "item:6948" and b.s.hide == true and e.tooltip.lines[1].leftText == "by link 6948"
+         and e.tooltipFull.lines[1].leftText == "by id 6948" and e.stats.ITEM_MOD_STAMINA_SHORT == 1, dump(e))
+  assert(b.F.Command("dumpitem item:6948") == true and b.db().debugItemDumps[2].hyperlink == "item:6948" and b.db().debugItemDumps[2].id == nil
+         and b.db().debugItemDumps[2].tooltipFull.lines[1].leftText == "by link 6948", "an item: string is a link")
 
   -- an answer that errors, nothing at all, and a client without the APIs: noted, never an error
   local f = setup(); f.s.tips[H] = "error"; f.s.stats[H] = nil
@@ -617,14 +621,26 @@ do
   e = big.db().debugItemDumps[1]
   assert(e.stats.cut == true and e.tooltip.cut == true and e.tooltip.lines[1].f == nil and type(e.tooltip.lines[1].self) == "table", "cut, no endless copy, no function: " .. tostring(e.tooltip.cut))
 
-  -- the newest 20 are kept
+  -- non-finite number keys (NaN, +inf, -inf) are skipped because the saved file cannot hold them
+  local nf = setup()
+  nf.s.stats[H] = { [math.huge] = 1, [-math.huge] = 2, [3] = 4, ok = 5 }
+  nf.s.tips[H] = { setmetatable({}, { __pairs = function()
+    local rows, i = { { 0/0, "nan" }, { math.huge, "pos" }, { -math.huge, "neg" }, { 1, "kept" } }, 0
+    return function() i = i + 1; if rows[i] then return rows[i][1], rows[i][2] end end
+  end }) }
+  assert(nf.F.Command("dumpitem " .. SHIELD) == true)
+  e = nf.db().debugItemDumps[1]
+  assert(e.stats[math.huge] == nil and e.stats[-math.huge] == nil and e.stats[3] == 4 and e.stats.ok == 5 and count(e.stats) == 2, dump(e.stats))
+  assert(e.tooltip.lines[1][1] == "kept" and count(e.tooltip.lines[1]) == 1, dump(e.tooltip.lines[1]))
+
+  -- the newest 10 are kept
   local cap = setup()
-  for i = 1, 25 do cap.F.Command("dumpitem item:" .. i) end
+  for i = 1, 15 do cap.F.Command("dumpitem item:" .. i) end
   local kept = cap.db().debugItemDumps
-  assert(#kept == 20 and kept[1].hyperlink == "item:6" and kept[20].hyperlink == "item:25", "newest 20, oldest first: " .. #kept .. " " .. kept[1].hyperlink)
+  assert(#kept == 10 and kept[1].hyperlink == "item:6" and kept[10].hyperlink == "item:15", "newest 10, oldest first: " .. #kept .. " " .. kept[1].hyperlink)
   -- it is not part of anything else the module saves or prunes
   assert(cap.db().items == nil and cap.db().kills == nil)
-  print("OK   /kinv dumpitem: the client's raw tooltip and stats answers saved (mouse, link or id), newest 20, secrets as text, never printed to chat")
+  print("OK   /kinv dumpitem: the client's raw tooltip and stats answers saved (mouse, link or id), newest 10, secrets as text, never printed to chat")
 end
 
 ---------------------------------------------------------------------------
