@@ -53,8 +53,41 @@ test("the fixture reads as build 71037 enUS with every quest's facts", () => {
   assert.deepEqual(byId(p, 98372).items, [{ id: 280612, n: 1 }]);
 });
 
+// Build 71091 has no committed fixture (its cache is the owner's own); its rows are built here from made-up numbers at the offsets
+// checked on the live file: reputation slots with overrides, money, a start item, the first objective id at byte 488.
+test("build 71091: a synthetic file in the checked layout reads, and its header must match", () => {
+  const FIXED = 488, SIZE = FIXED + 40;
+  const record = (id, set) => {
+    const rec = Buffer.alloc(8 + SIZE); rec.writeUInt32LE(id, 0); rec.writeUInt32LE(SIZE, 4); rec.writeUInt32LE(id, 8);
+    const body = (at, v) => rec.writeInt32LE(v, 8 + at);
+    body(8, 29); body(16, 16); body(24, 717); body(28, 81); body(36, id + 1); body(40, 5); rec.writeFloatLE(2.1, 8 + 44); body(48, 2500); body(52, 5);
+    body(96, 2806); body(300, 72); body(304, 5); body(316, 47); body(324, 20000); body(332, 68); body(340, 20000);
+    for (const o of [312, 328, 344, 360, 376]) body(o, 7);
+    body(FIXED, 380119); // the first objective id, just after the fixed block
+    if (set) set(body);
+    return rec;
+  };
+  const file = (...recs) => {
+    const head = Buffer.alloc(24); head.write("TSQW", 0, "latin1"); head.writeUInt32LE(71091, 4); head.write("SUne", 8, "latin1");
+    head.writeUInt32LE(0x3008, 12); head.writeUInt32LE(12, 16);
+    return Buffer.concat([head, ...recs, Buffer.alloc(8)]);
+  };
+  const p = parseQuestCache(file(record(1000), record(1500, (body) => { body(116, 6948); body(120, 1); body(180, 2589); body(184, 2); })), { locale: "enUS" });
+  assert.equal(p.ok, true, p.reason);
+  assert.equal(p.build, 71091); assert.equal(p.total, 2);
+  const common = { level: 29, minLevel: 16, sort: 717, info: 81, xpDifficulty: 5, xpMultiplier: 2.1, money: 2500, startItem: 2806,
+    rep: [{ faction: 72, tier: 5 }, { faction: 47, tier: 0, override: 20000 }, { faction: 68, tier: 0, override: 20000 }] };
+  assert.deepEqual(byId(p, 1000), { id: 1000, next: 1001, ...common });
+  assert.deepEqual(byId(p, 1500), { id: 1500, next: 1501, ...common, items: [{ id: 6948, n: 1 }], choose: [{ id: 2589, n: 2 }] });
+  assert.deepEqual(validateQuestCache(questCacheDocuments(p, p.quests, { companion: "0.12.8" })[0]), []);
+  const wrongHeader = file(record(1000)); wrongHeader.writeUInt32LE(13, 16);
+  assert.equal(parseQuestCache(wrongHeader).ok, false);
+  const small = file(record(1000)); small.writeUInt32LE(100, 28);
+  assert.match(parseQuestCache(small).reason, /smaller than the 488-byte fixed block/);
+});
+
 test("supported builds are the verified ones; the schema version is 1.0.0", () => {
-  assert.deepEqual(SUPPORTED_BUILDS, [70938, 71037]);
+  assert.deepEqual(SUPPORTED_BUILDS, [70938, 71037, 71091]);
   assert.ok(Object.isFrozen(SUPPORTED_BUILDS));
   assert.equal(QUEST_CACHE_SCHEMA_VERSION, "1.0.0");
 });
@@ -70,7 +103,7 @@ test("refusals: wrong magic, unknown build, bad header fields, locale, truncatio
   let b = bytes(); b[0] = 0x57;
   assert.match(refused(b, "magic"), /magic/);
   b = bytes(); b.writeUInt32LE(71038, 4);
-  assert.match(refused(b, "build"), /71038 is not a supported build \(70938, 71037\)/);
+  assert.match(refused(b, "build"), /71038 is not a supported build \(70938, 71037, 71091\)/);
   for (const [at, value] of [[12, 0x3009], [16, 13], [20, 1]]) {
     b = bytes(); b.writeUInt32LE(value, at);
     assert.match(refused(b, "header field at " + at), /header field/);

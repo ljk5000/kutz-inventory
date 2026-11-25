@@ -46,7 +46,7 @@ From Companion 0.12.8 the uploader also sends what the game client itself cached
 
 - **Freshness:** the cache holds the client's answers about quests it has been shown, kept across sessions; a quest never shown is absent. When exactly the client writes the file to disk was not checked, so a quest seen just now may arrive with a later run. A file that changes while it is read is skipped until the next run.
 - **What is never read:** the variable-length end of each record (objectives, quest title, description and completion text). Only the fixed 488-byte block is decoded.
-- **Unknown files:** only builds 70938 and 71037 are read; any other build or layout is refused whole, with nothing sent.
+- **Unknown files:** only builds 70938, 71037 and 71091 are read; any other build or layout is refused whole, with nothing sent.
 - **Only changed quests:** the hashes of accepted quests are kept in `<output>.quest-cache-sent.json`; see the [Companion guide](../companion/README.md#network-endpoints-and-data).
 
 ## Activity modules
