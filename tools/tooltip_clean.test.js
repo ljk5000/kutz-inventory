@@ -94,6 +94,22 @@ test("markup: textures, atlases, links, colour names, line breaks and escaped pi
   assert.equal(cleanTooltipText(undefined), ""); assert.equal(cleanTooltipText(12), "");
 });
 
+test("the singular/plural escape |4one:other; becomes text, its form picked by the number before it", () => {
+  assert.equal(cleanTooltipText("Use: Restores health. (1 |4Sec:Sec; Cooldown)"), "Use: Restores health. (1 Sec Cooldown)");
+  assert.equal(cleanTooltipText("(|cffffffff1|r |4Sec:Sec; Cooldown)"), "(1 Sec Cooldown)", "colour codes first: their hex digits are no number");
+  assert.equal(cleanTooltipText("2 |4Sec:Secs;"), "2 Secs");
+  assert.equal(cleanTooltipText("1 |4Sec:Secs;"), "1 Sec");
+  assert.equal(cleanTooltipText("1 |4hour:hours;"), "1 hour");
+  assert.equal(cleanTooltipText("0 |4hour:hours;"), "0 hours");
+  assert.equal(cleanTooltipText("Lasts 1 |4hour:hours; 30 |4min:mins;"), "Lasts 1 hour 30 mins", "each escape takes the number before it");
+  assert.equal(cleanTooltipText("1,000 |4coin:coins;"), "1,000 coins");
+  assert.equal(cleanTooltipText("1 |4a:b:c;"), "1 a"); assert.equal(cleanTooltipText("5 |4a:b:c;"), "5 c");
+  assert.equal(cleanTooltipText("Requires 5 Strength and 1 |4Sec:Secs;|n2 |4Sec:Secs;"), "Requires 5 Strength and 1 Sec 2 Secs");
+  assert.equal(cleanTooltipText("Cooldown: |4Sec:Secs;"), "Cooldown: Sec", "no number before it: the first form");
+  assert.equal(cleanTooltipText("No escapes here, 3 of them."), "No escapes here, 3 of them.");
+  assert.deepEqual(cleanTooltip(["Use: x (1 |4Sec:Sec; Cooldown)", ["2 |4Sec:Secs;", "a || b"]]).lines, ["Use: x (1 Sec Cooldown)", ["2 Secs", "a | b"]]);
+});
+
 test("shapes: right texts, empty lines, the durability line only when it is alone on its line, bad input", () => {
   assert.deepEqual(cleanTooltip([["Main Hand", "Sword"], ["12 - 23 Damage", "Speed 2.60"], "", "   ", ["", "|cffffffffOnly right|r"], ["|r", ""]]),
     { lines: [["Main Hand", "Sword"], ["12 - 23 Damage", "Speed 2.60"], ["", "Only right"]] });
