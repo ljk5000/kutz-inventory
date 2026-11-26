@@ -57,6 +57,14 @@ between client versions. Nothing here could confirm either. The reputation a tur
 (`rep`), and `who.level` and `rewards.cap` now sit beside it. Listed reputation stays out until the checklist's
 print-out shows what the calls answer.
 
+*Seen in the game (probe round 2, build 1.60.1.71139):* the scale is **x100**. Quest 2138 listed factions 69 = 10000 and
+469, 72, 47 and 54 = 2500 each; its turn-in really moved 69 by 100 and 72, 47 and 54 by 25 each (`rep`). So a listed
+value is the real gain in hundredths, the same unit as the quest cache's `override` (a tier in `QuestFactionReward`
+is whole reputation: tier 5 = 100 = 10000 listed). The listing also names the **header** faction 469 ("Alliance"),
+which gained nothing at turn-in: a header in a listing is not a gain. The addon still records no listed reputation
+(only the real `rep`, which has no header and no scale to convert), so nothing in 1.23.0 changes; a later version that
+reads the listing must divide by 100 and drop headers.
+
 ## 1. Quest rewards as the window shows them (`quest` events, both acts)
 
 `rewards` is now written on `act: "accept"` too, and gains keys on both acts. It describes the quest's reward as the
@@ -245,6 +253,18 @@ dropping the criterion; `id` and `completed` are required. The exporter also dro
 its id (61 only for 63969-64033). Format 2 keeps passing `updated` through whole, so it shows the
 `updated.legacyChallenges` stamp (as it does `updated.questLog`) but never the field.
 
+## Probe round 2 (build 1.60.1.71139, 2026-11-26): what the game answered
+
+| Item | Answer | Effect |
+| --- | --- | --- |
+| Listed quest reputation (`GetQuestLogRewardFactionInfo`) | **x100**; a header faction (469) listed, gained nothing | not recorded; see "Dropped" above. The Companion's quest cache `rep` is unchanged: `tier` is whole reputation by table, `override` is hundredths, and a listed faction can be a header the site must not count |
+| Creature health and power | `UnitHealthMax`, `UnitHealth` and `UnitPowerMax` answered `<secret>` for three living creatures out of combat (npc 6 twice, npc 299); `UnitPowerType` answered plainly (1, rage) | the addon keeps a secret value out (`hp`/`pw` stay absent, no error): on this client **no `hp` or `pw` is expected at all**. Checked in `tools/check_observations.js` with exactly this answer |
+| Legacy challenge date and owner | `GetAchievementInfo(62024)` ("Journeyman Leatherworker", earned by the recording character) returned month 11, day 12, year 26 and, for `wasEarnedByMe` and `earnedBy`, `true` and `""`. The data was there about 4 s after login | read as month, day, year: `2026-11-12`; an empty `earnedBy` is "earned by this character": `wasEarnedByMe = true`, no `earnedBy`. Checked with these exact values in `tools/check_legacy_challenges.js` |
+| Loot sources | a loot window with slots tied to Creature 299 was recorded as `src { kind = "mob", npc = 299, via = "slot" }` | **confirmed**, no change |
+| Quest money and XP | quest 2205: money 85 copper and 210 XP, as the window listed them (round 1); quest 33's turn-in kept XP 170, the chosen item 6070 and Stormwind +100 | **confirmed** |
+| Random-suffix item (`/kinv dumpitem`) | "Sturdy Quarterstaff of the Bandit", `item:4566::::::::17:1491:::1:12751::::::`: the suffix is one bonus id (12751), the suffix field is empty, and `GetItemStats` includes the suffix's stats. Item 2313: tooltip price 200 | already handled: the variant key is `0;12751`, named by the full name, with the link-built stats (`tools/check_facts.lua`). The platform needs no id mapping to name a variant; it would need one only to know which suffix 12751 is |
+| Kill reputation, disenchant order | not run | **unverified**, left as built |
+
 ## Versions and compatibility
 
 - KutzInventory **1.23.0**; inventory export **3.16.0** (new optional fields, one new event type, one new enum value:
@@ -278,7 +298,7 @@ its id (61 only for 63969-64033). Format 2 keeps passing `updated` through whole
 - Legacy challenge names, descriptions or rewards: the site has them from its dataset; the export carries ids and
   progress only.
 
-## In-game checklist (nothing here has been run in the game yet)
+## In-game checklist (partly run: see "Probe round 2")
 
 - Open a quest offer with money and a choice of items: `/dump GetRewardMoney(), GetRewardXP(), GetNumQuestRewards(),
   GetNumQuestChoices(), GetRewardTitle()` and `/dump C_QuestInfoSystem.GetQuestRewardSpells(GetQuestID())`. In an
@@ -311,5 +331,7 @@ its id (61 only for 63969-64033). Format 2 keeps passing `updated` through whole
   return 10 is the criteria id, 4 and 5 the progress? `/reload` 20 s after login and find `legacyChallenges` on the
   character; earn a criterion and check that `at` moves (30 s later at most) and that it does not move when nothing
   changed. Is `GetAchievementInfo` answering at login, or only after `RECEIVED_ACHIEVEMENT_LIST`?
-- Listed reputation, for a later version: with a quest selected in the log, `/dump GetNumQuestLogRewardFactions(),
-  GetQuestLogRewardFactionInfo(1)` and compare with what the turn-in gave.
+- Listed reputation: answered in round 2 (x100, headers listed; see "Dropped" above).
+
+Round 2 (2026-11-26) answered the quest money and rewards, loot-source, Legacy date, suffix and secret health/power lines
+above (table "Probe round 2"). Still unrun: kill reputation (no kill-rep watch was made) and the disenchant event order.
