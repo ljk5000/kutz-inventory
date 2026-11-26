@@ -63,7 +63,7 @@ test("first run sends every quest, the second none, a changed quest alone; nothi
   assert.equal(r.posted.length, 1);
   const doc = r.posted[0];
   assert.equal(doc.schemaVersion, "1.0.0"); assert.equal(doc.kind, "quest-cache"); assert.equal(doc.build, 71037); assert.equal(doc.locale, "enUS");
-  assert.deepEqual(doc.supportedBuilds, [70938, 71037, 71091]); assert.equal(doc.companion, "0.12.8"); assert.equal(doc.total, 8);
+  assert.deepEqual(doc.supportedBuilds, [70938, 71037, 71091, 71139]); assert.equal(doc.companion, "0.12.8"); assert.equal(doc.total, 8);
   assert.deepEqual(doc.quests.map((q) => q.id), [257, 1003, 1097, 2359, 8372, 78150, 94238, 98372]);
   assert.deepEqual(validateQuestCache(doc), []);
   for (const q of doc.quests) for (const k of Object.keys(q)) assert.ok(QUEST_KEYS.has(k), "a key outside the schema: " + k);
