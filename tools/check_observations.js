@@ -2768,6 +2768,8 @@ do
     nothing({ hp = 0, pt = 0, pmax = 0 }, "zero")
     nothing({ hp = 300, pt = 0, pmax = 50, level = SECRET }, "secret level", { globals = { issecretvalue = function(x) return x == SECRET end } })
     nothing({ hp = SECRET, pt = SECRET, pmax = 50 }, "secret values", { globals = { issecretvalue = function(x) return x == SECRET end } })
+    -- build 71139, a creature out of combat (npc 6 and 299): UnitHealthMax and UnitPowerMax secret, UnitPowerType plain (1, rage)
+    nothing({ hp = SECRET, pt = 1, pmax = SECRET }, "secret health and power maximum, plain power type", { globals = { issecretvalue = function(x) return x == SECRET end } })
     local sd = vit({ globals = { issecretvalue = function(x) return x == SECRET end } })
     sd.G.UnitIsDead = function() return SECRET end
     look(sd, { hp = 300 })

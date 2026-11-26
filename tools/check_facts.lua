@@ -148,6 +148,11 @@ do
   assert(parse(SHIELD) == "6560/0;12729", parse(SHIELD))
   assert(clean(6560, "0;12729") == SHIELD_VAR, clean(6560, "0;12729"))
   assert(parse("|cff1eff00|H" .. SHIELD_VAR .. "|h[x]|h|r") == "6560/0;12729", "a clean link reads back as the same variant")
+  -- /kinv dumpitem on the client (build 71139): a random-suffix weapon carries its suffix as one bonus id, 12751, and the suffix field is empty
+  local STAFF = "|cff1eff00|Hitem:4566::::::::17:1491:::1:12751::::::|h[Sturdy Quarterstaff of the Bandit]|h|r"
+  assert(parse(STAFF) == "4566/0;12751", parse(STAFF))
+  assert(clean(4566, "0;12751") == "item:4566::::::::::::1:12751" and parse("|H" .. clean(4566, "0;12751") .. "|h[x]|h") == "4566/0;12751",
+         "the bonus-id suffix round-trips: " .. clean(4566, "0;12751"))
   assert(parse("item:6560::::::1203:1846231:60") == "6560/1203;" and clean(6560, "1203;") == "item:6560::::::1203::::::", "the older suffix field")
   assert(parse(clean(6560, "1203;")) == "6560/1203;")
   assert(parse("item:6560::::::-12:5:60") == "6560/-12;" and clean(6560, "-12;") == "item:6560::::::-12::::::", "a negative suffix id")

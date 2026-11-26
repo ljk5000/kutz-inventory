@@ -177,6 +177,17 @@ ach[61502][6] = 'Altchar'; emit('CRITERIA_UPDATE'); advance(2)
 check(reads == 9, 'waiting after /kinv scan')
 hooks.Logout()
 check(reads == 10 and c.legacyChallenges.list[2].earnedBy == 'Altchar', 'the logout checkpoint runs the waiting read')
+
+-- as the client answered in game (build 71139): GetAchievementInfo(62024) returns completed, 11, 12, 26, then wasEarnedByMe
+-- true and an empty earnedBy. The date is month, day, year: 2026-11-12. An empty earnedBy is this character's own
+-- completion (wasEarnedByMe = true, no earnedBy), never an unknown.
+ach[62024] = { true, 11, 12, 26, true, '', { { 111544, true, 150, 150 } } }
+advance(40); emit('ACHIEVEMENT_EARNED', 62024, false); advance(2)
+check(reads == 11, 'the earned event reads once')
+local mineOnly
+for _, x in ipairs(c.legacyChallenges.list) do if x.id == 62024 then mineOnly = x end end
+check(mineOnly and dump(mineOnly) == '{completed=true,criteria={{completed=true,id=111544,quantity=150,reqQuantity=150}},date=2026-11-12,id=62024,set=60,wasEarnedByMe=true}',
+  'month 11, day 12, year 26 is 2026-11-12; empty earnedBy is mine: ' .. dump(mineOnly))
 print('OK legacy challenges: login read, change-only saves, 30 s limit, combat deferral, set 61 once started, guarded answers, /kinv scan and checkpoint')
 `;
 

@@ -167,7 +167,7 @@ The rule was written from nine roll bursts logged in a five-player dungeon run o
 
 ### WoW Forever 1.23.0 checklist
 
-Nothing in 1.23.0 has been run in the game yet. The full list, with what each answer decides, is in [the spec](quest-rewards-and-creature-facts.md#in-game-checklist-nothing-here-has-been-run-in-the-game-yet); the essentials:
+Probe round 2 (build 71139, 2026-11-26) confirmed: quest money, XP, chosen item and reputation on a turn-in; loot sources (`via = slot`); the Legacy date order (month, day, year) and an empty `earnedBy` as the character's own; the random-suffix bonus id; and that the client hides creature health and power (`<secret>`, so no `hp`/`pw`). **Still unverified:** kill reputation (`killrep`) and the disenchant order. The full list, with what each answer decides, is in [the spec](quest-rewards-and-creature-facts.md#in-game-checklist-partly-run-see-probe-round-2); the essentials:
 
 - Quest rewards: in an offer window with money and a choice of items, `/dump GetRewardMoney(), GetRewardXP(), GetNumQuestRewards(), GetNumQuestChoices(), GetRewardTitle()`, `/dump GetRewardSkillLineID()`, `/dump GetRewardSkillPoints()` and `/dump C_QuestInfoSystem.GetQuestRewardCurrencies(GetQuestID())`. Accept, `/reload`, and find `rewards` (with `choose` and `money`) on the accept event; turn in and find it on the turn-in. Repeat at the level cap (`cap = true`, no `xp`).
 - Kill reputation: kill one reputation-giving creature alone: one `killrep` event with its `npc`, `f` and `d`. Two different creatures at once, or a turn-in beside a fresh corpse: none. Does the reputation line come before or after the corpse's health reaches 0?

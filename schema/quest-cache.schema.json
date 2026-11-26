@@ -87,10 +87,10 @@
             "properties": {
               "faction": { "$ref": "#/$defs/id", "description": "Faction id." },
               "tier": { "type": "integer", "minimum": -9, "maximum": 9, "description": "The value as stored: an index into the client's QuestFactionReward table (row 1, its Difficulty column; tier 5 is 100 reputation). Only tiers 0 to 7 were seen in the verified files; how a negative tier reads was not checked." },
-              "override": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647, "not": { "const": 0 }, "description": "When present it replaces the tier: reputation in hundredths (7500 is 75 reputation)." }
+              "override": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647, "not": { "const": 0 }, "description": "When present it replaces the tier: reputation in hundredths (7500 is 75 reputation), the same unit as the game's own reward listing (checked on build 71139: a listed 10000 was a gain of 100)." }
             }
           },
-          "description": "Reputation rewards in slot order (bytes 300 + 16k: faction id, tier, override). Before any racial or other bonus. Left out when there are none."
+          "description": "Reputation rewards in slot order (bytes 300 + 16k: faction id, tier, override). Before any racial or other bonus. A faction here may be a header of the client's faction list (such as 469, Alliance) which gains nothing: the receiver must not count a header as a gain. Left out when there are none."
         },
         "currencies": {
           "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/$defs/stack" },
