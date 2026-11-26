@@ -508,7 +508,8 @@ test("the quest cache goes to /api/wow/quest-cache after the inventory, gzipped,
   const doc = quest()[0].body;
   assert.equal(doc.kind, "quest-cache"); assert.equal(doc.companion, COMPANION_VERSION); assert.equal(doc.quests.length, 8);
   assert.ok(!JSON.stringify(doc).includes("Original") && !JSON.stringify(doc).includes(f.root), "the document names the character or a path");
-  assert.ok(fs.existsSync(f.output + ".quest-cache-sent.json"));
+  // The sent list is written once the site has answered, a moment after the request arrives here.
+  await until(() => fs.existsSync(f.output + ".quest-cache-sent.json"));
   assert.ok(!fs.readFileSync(f.output + ".quest-cache-sent.json", "utf8").includes("kutz_quest_key"));
   // A new save with the same cache: the inventory goes, the quests do not.
   f.write("Second"); await until(() => seen.filter(s => s.url === "/api/wow/import").length === 2); await delay(200);
